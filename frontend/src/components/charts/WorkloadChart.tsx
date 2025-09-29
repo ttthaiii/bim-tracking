@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
-import { getWorkloadByAssignee } from '@/services/firebase';
+import { getWorkloadByWeek } from '@/services/firebase';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -22,11 +22,27 @@ ChartJS.register(
   Legend
 );
 
-export default function WorkloadChart() {
-  const [chartData, setChartData] = useState({
+interface WorkloadChartProps {
+  projectId?: string;
+}
+
+export default function WorkloadChart({ projectId }: WorkloadChartProps) {
+  interface WorkloadChartData {
+    labels: string[];
+    datasets: {
+      label: string;
+      data: number[];
+      borderColor: string;
+      backgroundColor?: string;
+      borderWidth?: number;
+      fill?: boolean;
+      tension: number;
+    }[];
+  }
+  const [chartData, setChartData] = useState<WorkloadChartData>({
     labels: [],
     datasets: [{
-      label: 'Estimated Workload (Days)',
+  label: 'Estimated Workload (Hours)',
       data: [],
       borderColor: 'rgb(75, 192, 192)',
       tension: 0.1
@@ -36,14 +52,18 @@ export default function WorkloadChart() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const workloadData = await getWorkloadByAssignee();
-        
+        console.log("Fetching workload data for projectId:", projectId);
+        const workloadData = await getWorkloadByWeek(projectId);
+        console.log("Received workload data:", workloadData);
         setChartData({
-          labels: workloadData.map(w => w.assignee),
+          labels: workloadData.map(w => `สัปดาห์ที่ ${w.week}`),
           datasets: [{
-            label: 'Estimated Workload (Days)',
+            label: 'Estimated Workload (Hours)',
             data: workloadData.map(w => w.workload),
             borderColor: 'rgb(75, 192, 192)',
+            backgroundColor: 'rgba(75, 192, 192, 0.1)',
+            borderWidth: 2,
+            fill: true,
             tension: 0.1
           }]
         });
@@ -53,23 +73,43 @@ export default function WorkloadChart() {
     };
 
     fetchData();
-  }, []);
+  }, [projectId]);
 
   const options = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: {
+        display: true,
         position: 'top' as const,
       },
       title: {
         display: true,
-        text: 'Workload Distribution by Assignee'
+        text: 'Workload Distribution by Week',
+        font: {
+          size: 16
+        }
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'จำนวนชั่วโมงการทำงาน'
+        }
+      },
+      x: {
+        title: {
+          display: true,
+          text: 'Week'
+        }
       }
     }
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-lg">
+    <div style={{ height: '400px' }}>
       <Line data={chartData} options={options} />
     </div>
   );

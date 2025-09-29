@@ -9,7 +9,7 @@ import {
   Tooltip,
   Legend
 } from 'chart.js';
-import { getTasksByStatus, ProjectTaskSummary } from '@/services/dashboardService';
+import { getTasksByStatus, ProjectTaskSummary } from '@/services/taskStatus';
 
 ChartJS.register(
   CategoryScale,

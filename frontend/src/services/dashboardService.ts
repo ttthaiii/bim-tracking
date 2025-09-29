@@ -1,31 +1,7 @@
-import { collection, getDocs, query, where, limit, Timestamp } from 'firebase/firestore';
-
-// Helper function to get timestamp in milliseconds
-function getTimestamp(date: any): number {
-  if (!date) return 0;
-  
-  // If it's a Firestore Timestamp
-  if (date instanceof Timestamp) {
-    return date.toDate().getTime();
-  }
-  
-  // If it's a JavaScript Date
-  if (date instanceof Date) {
-    return date.getTime();
-  }
-  
-  // If it's a number (timestamp in milliseconds)
-  if (typeof date === 'number') {
-    return date;
-  }
-  
-  console.warn('Unknown date format:', date);
-  return 0;
-}
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/config/firebase';
-import { Project, Task, SubTask } from '@/types/database';
+import { Task } from '@/types/database';
 
-// Basic stats for home page
 export async function getProjectCount() {
   const projectsRef = collection(db, 'projects');
   const snapshot = await getDocs(projectsRef);
@@ -33,10 +9,24 @@ export async function getProjectCount() {
 }
 
 export async function getActiveTaskCount() {
-  const tasksRef = collection(db, 'tasks');
-  const q = query(tasksRef, where('endDate', '==', null));
-  const snapshot = await getDocs(q);
-  return snapshot.size;
+  try {
+    const tasksRef = collection(db, 'tasks');
+    // First, query for tasks that haven't ended
+    const q = query(tasksRef, where('endDate', '==', null));
+    const snapshot = await getDocs(q);
+    
+    // Then filter in memory for the remaining conditions
+    const activeTasks = snapshot.docs.filter(doc => {
+      const task = doc.data();
+      return task.progress < 1 && task.startDate != null;
+    });
+    
+    console.log(`Found ${activeTasks.length} active tasks`);
+    return activeTasks.length;
+  } catch (error) {
+    console.error('Error getting active task count:', error);
+    return 0;
+  }
 }
 
 export async function getTeamMemberCount() {
@@ -65,7 +55,7 @@ export async function getDashboardStats(projectId?: string) {
     snapshot.forEach(doc => {
       const task = doc.data() as Task;
       totalTasks++;
-      if (task.progress === 1) {
+      if (task.currentStep === 'APPROVED' || task.currentStep === 'APPROVED_WITH_COMMENTS') {
         completedTasks++;
       }
     });
@@ -89,7 +79,6 @@ export async function getDashboardStats(projectId?: string) {
   }
 }
 
-// Interface สำหรับ Recent Activity
 export interface RecentActivity {
   id: string;
   date: Date;
@@ -100,52 +89,14 @@ export interface RecentActivity {
   description: string;
 }
 
-export async function getRecentActivities(limit: number = 5): Promise<RecentActivity[]> {
+export async function getRecentActivities(maxResults: number = 5): Promise<RecentActivity[]> {
   try {
     console.log("Starting to fetch recent activities...");
 
     // 1. ดึงข้อมูล tasks
     const tasksRef = collection(db, 'tasks');
-    console.log("Tasks collection reference created");
-
     const snapshot = await getDocs(tasksRef);
     console.log(`Fetched ${snapshot.size} tasks`);
-
-    // แปลงเป็น array และเรียงตามวันที่ล่าสุด
-    const allDocs = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-    console.log("All tasks data:", allDocs);
-
-    const sortedDocs = snapshot.docs
-      .map(doc => {
-        const data = doc.data();
-        console.log("Processing task:", doc.id, data);
-        return {
-          doc,
-          lastUpdate: data.lastUpdate
-        };
-      })
-      .sort((a, b) => {
-        console.log("Comparing dates:", {
-          a: a.lastUpdate,
-          b: b.lastUpdate
-        });
-        
-        const aTime = getTimestamp(a.lastUpdate);
-        const bTime = getTimestamp(b.lastUpdate);
-        
-        console.log("Converted timestamps:", { aTime, bTime });
-        return bTime - aTime;
-      })
-      .map(item => item.doc)
-      .slice(0, limit);
-
-    console.log("Sorted and limited docs:", sortedDocs.map(doc => ({
-      id: doc.id,
-      lastUpdate: doc.data().lastUpdate
-    }))); // จำกัดจำนวนรายการตาม limit
 
     // 2. ดึงข้อมูลโครงการทั้งหมดเพื่อใช้อ้างอิงชื่อโครงการ
     const projectsRef = collection(db, 'projects');
@@ -156,118 +107,123 @@ export async function getRecentActivities(limit: number = 5): Promise<RecentActi
       projectsMap.set(doc.id, project.name);
     });
 
-    // 3. แปลงข้อมูล tasks เป็น activities
-    const activities: RecentActivity[] = [];
-    sortedDocs.forEach(doc => {
-      const task = doc.data() as Task;
-      activities.push({
-        id: doc.id,
-        date: task.lastUpdate?.toDate?.() 
-          ? task.lastUpdate.toDate() 
-          : task.lastUpdate instanceof Date 
-          ? task.lastUpdate 
-          : new Date(),
-        projectId: task.projectId,
-        projectName: projectsMap.get(task.projectId) || task.projectId,
-        activityType: 'Document Updated',
-        status: task.progress === 1 
-          ? 'completed' 
-          : task.progress > 0 
-          ? 'in_progress'
-          : 'pending',
-        description: getActivityDescription(task)
-      });
-    });
+    // แปลงและเรียงตามวันที่ล่าสุด
+    const activities = snapshot.docs
+      .map(doc => {
+        const task = doc.data() as Task;
+        const lastUpdate = task.lastUpdate?.toDate?.() || new Date();
+        
+        return {
+          id: doc.id,
+          date: lastUpdate,
+          projectId: task.projectId,
+          projectName: projectsMap.get(task.projectId) || task.projectId,
+          activityType: 'Document Updated',
+          status: getActivityStatus(task),
+          description: getActivityDescription(task)
+        };
+      })
+      .sort((a, b) => b.date.getTime() - a.date.getTime())
+      .slice(0, maxResults);
 
-    // เรียงลำดับตามวันที่ล่าสุด
-    return activities.sort((a, b) => b.date.getTime() - a.date.getTime());
+    console.log("Processed activities:", activities);
+    return activities;
   } catch (error) {
     console.error('Error fetching recent activities:', error);
     return [];
   }
 }
 
-function getActivityDescription(task: Task): string {
-  if (task.progress === 1) {
-    return `Completed task: ${task.taskName}`;
-  } else if (task.progress > 0) {
-    return `Updated progress (${Math.round(task.progress * 100)}%) - ${task.taskName}`;
-  } else if (task.startDate) {
-    return `Started task: ${task.taskName}`;
-  } else {
-    return `Created task: ${task.taskName}`;
-  }
+export type TaskStatusCategory = 
+  | 'เสร็จสิ้น'
+  | 'รออนุมัติจาก CM' 
+  | 'รอตรวจสอบหน้างาน' 
+  | 'รอแก้ไขแบบ BIM'
+  | 'กำลังดำเนินการ-BIM'
+  | 'วางแผนแล้ว-BIM'
+  | 'ยังไม่วางแผน-BIM';
+
+interface TaskWithStatus {
+  currentStep?: string;
+  subtaskCount?: number;
+  totalMH?: number;
 }
 
-// Document tracking dashboard
-export interface TaskStatusCount {
-  CM: number;
-  BIM: number;
-  SITE: number;
-  อนุมัติ: number;
-  total: number;
-}
-
-export interface ProjectTaskSummary {
-  projectName: string;
-  taskCounts: TaskStatusCount;
-}
-
-export async function getTasksByStatus(): Promise<ProjectTaskSummary[]> {
-  try {
-    const tasksRef = collection(db, 'tasks');
-    const snapshot = await getDocs(tasksRef);
-    const projectTasks = new Map<string, TaskStatusCount>();
-
-    snapshot.forEach((doc) => {
-      const task = doc.data() as Task;
-      const projectId = task.projectId;
-
-      if (!projectTasks.has(projectId)) {
-        projectTasks.set(projectId, {
-          CM: 0,
-          BIM: 0,
-          SITE: 0,
-          อนุมัติ: 0,
-          total: 0
-        });
+export function getTaskStatusCategory(task: TaskWithStatus): TaskStatusCategory {
+  if (!task.currentStep) {
+    if (task.subtaskCount && task.subtaskCount > 1) {
+      if (task.totalMH && task.totalMH > 0) {
+        return 'กำลังดำเนินการ-BIM';
+      } else {
+        return 'วางแผนแล้ว-BIM';
       }
-
-      const counts = projectTasks.get(projectId)!;
-      counts.total++;
-
-      // Increment counter based on task category
-      if (task.taskCategory?.includes('CM')) {
-        counts.CM++;
-      } else if (task.taskCategory?.includes('BIM')) {
-        counts.BIM++;
-      } else if (task.taskCategory?.includes('SITE')) {
-        counts.SITE++;
-      }
-
-      // Check if task is approved
-      if (task.progress === 1) {
-        counts.อนุมัติ++;
-      }
-    });
-
-    // Convert Map to array of ProjectTaskSummary
-    const summaries: ProjectTaskSummary[] = [];
-    for (const [projectId, counts] of projectTasks.entries()) {
-      summaries.push({
-        projectName: projectId,
-        taskCounts: counts
-      });
+    } else if (task.subtaskCount === 0) {
+      return 'ยังไม่วางแผน-BIM';
     }
-
-    return summaries;
-  } catch (error) {
-    console.error('Error fetching task status:', error);
-    return [];
+    return 'ยังไม่วางแผน-BIM';
+  }
+  
+  switch (task.currentStep) {
+    case 'APPROVED':
+    case 'APPROVED_WITH_COMMENTS':
+      return 'เสร็จสิ้น';
+    case 'PENDING_CM_APPROVAL':
+      return 'รออนุมัติจาก CM';
+    case 'PENDING_REVIEW':
+      return 'รอตรวจสอบหน้างาน';
+    case 'REJECTED':
+    case 'APPROVED_REVISION_REQUIRED':
+    case 'REVISION_REQUIRED':
+      return 'รอแก้ไขแบบ BIM';
+    default: {
+      if (task.subtaskCount && task.subtaskCount > 1) {
+        if (task.totalMH && task.totalMH > 0) {
+          return 'กำลังดำเนินการ-BIM';
+        } else {
+          return 'วางแผนแล้ว-BIM';
+        }
+      } else if (task.subtaskCount === 0) {
+        return 'ยังไม่วางแผน-BIM';
+      }
+      return 'ยังไม่วางแผน-BIM';
+    }
   }
 }
 
-export async function getTaskDetails(projectId?: string) {
+function getActivityStatus(task: Task): RecentActivity['status'] {
+  // ตรวจสอบสถานะแบบตรงๆ จาก currentStep
+  if (!task.currentStep) {
+    return 'pending';
+  }
+  
+  switch (task.currentStep) {
+    case 'APPROVED':
+    case 'APPROVED_WITH_COMMENTS':
+      return 'completed';
+    case 'REJECTED':
+    case 'APPROVED_REVISION_REQUIRED':
+    case 'REVISION_REQUIRED':
+      return 'cancelled';
+    case 'PENDING_CM_APPROVAL':
+    case 'PENDING_REVIEW':
+      return 'in_progress';
+    default:
+      return 'pending';
+  }
+}
+
+function getActivityDescription(task: Task): string {
+  if (!task.taskName) {
+    return 'ไม่ระบุชื่องาน';
+  }
+  return task.taskName;
+}
+
+export interface TaskDetails extends Task {
+  id: string;
+}
+
+export async function getTaskDetails(projectId?: string): Promise<TaskDetails[]> {
   try {
     const tasksRef = collection(db, 'tasks');
     const q = projectId 
@@ -278,23 +234,9 @@ export async function getTaskDetails(projectId?: string) {
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
-    })) as (Task & { id: string })[];
+    })) as TaskDetails[];
   } catch (error) {
     console.error('Error fetching task details:', error);
-    return [];
-  }
-}
-
-export async function getSubtasksByTaskId(taskId: string) {
-  try {
-    const subtasksRef = collection(db, 'tasks', taskId, 'subtasks');
-    const snapshot = await getDocs(subtasksRef);
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as (SubTask & { id: string })[];
-  } catch (error) {
-    console.error('Error fetching subtasks:', error);
     return [];
   }
 }

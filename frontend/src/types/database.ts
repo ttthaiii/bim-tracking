@@ -18,6 +18,9 @@ export interface User {
 export interface Task {
   taskName: string;
   taskAssignee: string;
+  currentStep?: 'APPROVED' | 'REJECTED' | 'APPROVED_REVISION_REQUIRED' |
+    'REVISION_REQUIRED' | 'Unknown' | 'APPROVED_WITH_COMMENTS' |
+    'PENDING_CM_APPROVAL' | 'PENDING_REVIEW';
   taskNumber: string;
   taskCategory: string;
   projectId: string;

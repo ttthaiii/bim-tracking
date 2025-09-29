@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { getRecentActivities, RecentActivity } from '@/services/dashboardService';
 
-export default function RecentActivitiesTable() {
+interface RecentActivitiesTableProps {
+  projectId?: string;
+}
+
+export default function RecentActivitiesTable({ projectId }: RecentActivitiesTableProps) {
   const [activities, setActivities] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
