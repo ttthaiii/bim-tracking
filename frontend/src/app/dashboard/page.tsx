@@ -18,8 +18,18 @@ interface Project {
   name: string;
 }
 
+import { DashboardProvider, useDashboard } from '@/context/DashboardContext';
+
 export default function DashboardPage() {
-  // สำหรับกรองข้อมูลตามโครงการ
+  return (
+    <DashboardProvider>
+      <DashboardContent />
+    </DashboardProvider>
+  );
+}
+
+function DashboardContent() {
+  const { setFilteredActivities } = useDashboard();
   const [selectedProject, setSelectedProject] = useState<string>('all');
   const [projects, setProjects] = useState<Project[]>([]);
   const [stats, setStats] = useState({
@@ -30,7 +40,6 @@ export default function DashboardPage() {
   });
   const [loading, setLoading] = useState(true);
   const [activities, setActivities] = useState<RecentActivity[]>([]);
-  const [selectedActivity, setSelectedActivity] = useState<RecentActivity | null>(null);
 
   // Fetch projects on component mount
   useEffect(() => {

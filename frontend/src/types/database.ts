@@ -28,6 +28,9 @@ export interface Task {
   dueDate: Timestamp;
   estWorkload: number;
   subtaskCount: number;
+  subtasks?: Array<{ id: string }>;
+  subtasks?: Array<{ id: string }>;
+  totalMH?: number;
   lastUpdate: Timestamp;
   startDate: Timestamp;
   endDate: Timestamp;

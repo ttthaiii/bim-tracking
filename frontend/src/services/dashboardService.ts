@@ -2,6 +2,19 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { Task } from '@/types/database';
 
+export interface RecentActivity {
+  id: string;
+  date: Date;
+  projectId: string;
+  projectName: string;
+  description: string;
+  status: string;
+  currentStep?: string;
+  subtaskCount?: number;
+  totalMH?: number;
+  activityType: string;
+}
+
 export async function getProjectCount() {
   const projectsRef = collection(db, 'projects');
   const snapshot = await getDocs(projectsRef);
@@ -79,15 +92,7 @@ export async function getDashboardStats(projectId?: string) {
   }
 }
 
-export interface RecentActivity {
-  id: string;
-  date: Date;
-  projectId: string;
-  projectName: string;
-  activityType: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-  description: string;
-}
+// ลบ interface ที่ซ้ำซ้อนออก
 
 export async function getRecentActivities(maxResults: number = 5): Promise<RecentActivity[]> {
   try {
@@ -119,7 +124,10 @@ export async function getRecentActivities(maxResults: number = 5): Promise<Recen
           projectId: task.projectId,
           projectName: projectsMap.get(task.projectId) || task.projectId,
           activityType: 'Document Updated',
-          status: getActivityStatus(task),
+          status: task.currentStep || '',
+          currentStep: task.currentStep,
+          subtaskCount: task.subtaskCount,
+          totalMH: task.totalMH,
           description: getActivityDescription(task)
         };
       })
@@ -150,44 +158,38 @@ interface TaskWithStatus {
 }
 
 export function getTaskStatusCategory(task: TaskWithStatus): TaskStatusCategory {
-  if (!task.currentStep) {
-    if (task.subtaskCount && task.subtaskCount > 1) {
-      if (task.totalMH && task.totalMH > 0) {
-        return 'กำลังดำเนินการ-BIM';
-      } else {
-        return 'วางแผนแล้ว-BIM';
-      }
-    } else if (task.subtaskCount === 0) {
-      return 'ยังไม่วางแผน-BIM';
+  // ถ้ามี currentStep ให้ตรวจสอบก่อน
+  if (task.currentStep) {
+    switch (task.currentStep) {
+      case 'APPROVED':
+      case 'APPROVED_WITH_COMMENTS':
+        return 'เสร็จสิ้น';
+      case 'PENDING_CM_APPROVAL':
+        return 'รออนุมัติจาก CM';
+      case 'PENDING_REVIEW':
+        return 'รอตรวจสอบหน้างาน';
+      case 'REJECTED':
+      case 'APPROVED_REVISION_REQUIRED':
+      case 'REVISION_REQUIRED':
+        return 'รอแก้ไขแบบ BIM';
     }
-    return 'ยังไม่วางแผน-BIM';
   }
   
-  switch (task.currentStep) {
-    case 'APPROVED':
-    case 'APPROVED_WITH_COMMENTS':
-      return 'เสร็จสิ้น';
-    case 'PENDING_CM_APPROVAL':
-      return 'รออนุมัติจาก CM';
-    case 'PENDING_REVIEW':
-      return 'รอตรวจสอบหน้างาน';
-    case 'REJECTED':
-    case 'APPROVED_REVISION_REQUIRED':
-    case 'REVISION_REQUIRED':
-      return 'รอแก้ไขแบบ BIM';
-    default: {
-      if (task.subtaskCount && task.subtaskCount > 1) {
-        if (task.totalMH && task.totalMH > 0) {
-          return 'กำลังดำเนินการ-BIM';
-        } else {
-          return 'วางแผนแล้ว-BIM';
-        }
-      } else if (task.subtaskCount === 0) {
-        return 'ยังไม่วางแผน-BIM';
-      }
-      return 'ยังไม่วางแผน-BIM';
+  // ถ้าไม่มี currentStep หรือเป็น default ให้ดูที่ subtasks
+  if (task.subtaskCount && task.subtaskCount > 1) {
+    if (task.totalMH && task.totalMH > 0) {
+      return 'กำลังดำเนินการ-BIM';
     }
+    return 'วางแผนแล้ว-BIM';
   }
+  
+  // ถ้ามี subtask แต่น้อยกว่าหรือเท่ากับ 1 ถือว่าวางแผนแล้ว
+  if (task.subtaskCount && task.subtaskCount > 0) {
+    return 'วางแผนแล้ว-BIM';
+  }
+  
+  // กรณีอื่นๆ ถือว่ายังไม่วางแผน
+  return 'ยังไม่วางแผน-BIM';
 }
 
 function getActivityStatus(task: Task): RecentActivity['status'] {
