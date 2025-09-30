@@ -136,7 +136,7 @@ const ProjectsPage = () => {
       
       <div style={{ padding: "40px 40px", maxWidth: "1400px", margin: "0 auto" }}>
         <div style={{ marginBottom: "24px", display: "flex", gap: "16px", alignItems: "center" }}>
-                    <button 
+          <button 
             onClick={() => setIsCreateModalOpen(true)}
             style={{
               padding: "8px 16px",
@@ -244,7 +244,7 @@ const ProjectsPage = () => {
                   docNo: "",
                   correct: false
                 }].map((row, idx) => (
-                  <tr key={row.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <tr key={row.id || `row-${idx}`} style={{ borderBottom: "1px solid #e5e7eb" }}>
                     <td style={{ padding: "12px 16px", fontSize: 14, color: "#2563eb" }}>{row.id}</td>
                     <td style={{ padding: "12px 16px", fontSize: 14 }}>
                       <input
@@ -309,7 +309,7 @@ const ProjectsPage = () => {
                     <td style={{ padding: "12px 16px", fontSize: 14 }}>{row.lastRev}</td>
                     <td style={{ padding: "12px 16px", fontSize: 14 }}>{row.docNo}</td>
                     <td style={{ padding: "12px 16px", fontSize: 14, textAlign: "center" }}>
-                                            <button style={{
+                      <button style={{
                         padding: "4px 12px",
                         background: "#f97316",
                         border: "none",
@@ -341,7 +341,7 @@ const ProjectsPage = () => {
             </table>
           </div>
 
-                    <div style={{ marginTop: 24, textAlign: "right", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+          <div style={{ marginTop: 24, textAlign: "right", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
             <button
               style={{
                 padding: "8px 24px",
