@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
-import { getWorkloadByWeek } from '@/services/firebase';
+import { getWorkloadByWeek, fetchProjects } from '@/services/firebase'; // Import fetchProjects
+import { useDashboard } from '@/context/DashboardContext';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -22,11 +23,10 @@ ChartJS.register(
   Legend
 );
 
-interface WorkloadChartProps {
-  projectId?: string;
-}
-
-export default function WorkloadChart({ projectId }: WorkloadChartProps) {
+// No longer needs props
+export default function WorkloadChart() {
+  const { selectedProject, excludedStatuses } = useDashboard(); // Get selectedProject from context
+  
   interface WorkloadChartData {
     labels: string[];
     datasets: {
@@ -39,10 +39,11 @@ export default function WorkloadChart({ projectId }: WorkloadChartProps) {
       tension: number;
     }[];
   }
+
   const [chartData, setChartData] = useState<WorkloadChartData>({
     labels: [],
     datasets: [{
-  label: 'Estimated Workload (Hours)',
+      label: 'Estimated Workload (Hours)',
       data: [],
       borderColor: 'rgb(75, 192, 192)',
       tension: 0.1
@@ -52,9 +53,24 @@ export default function WorkloadChart({ projectId }: WorkloadChartProps) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // console.log("Fetching workload data for projectId:", projectId);
-        const workloadData = await getWorkloadByWeek(projectId);
-        // console.log("Received workload data:", workloadData);
+        let projectIdForFilter: string | undefined = undefined;
+
+        // If a project is selected in the dashboard, find its ID
+        if (selectedProject && selectedProject !== 'all') {
+            const allProjects = await fetchProjects();
+            const project = allProjects.find(p => p.name === selectedProject);
+            if (project) {
+                projectIdForFilter = project.id;
+            } else {
+                 // If project name not found, show no data to be safe
+                 setChartData({ labels: [], datasets: [{ label: 'Estimated Workload (Hours)', data: [], borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] });
+                 return;
+            }
+        }
+
+        // Fetch workload data with the correct project ID and excluded statuses
+        const workloadData = await getWorkloadByWeek(projectIdForFilter, excludedStatuses);
+        
         setChartData({
           labels: workloadData.map(w => `สัปดาห์ที่ ${w.week}`),
           datasets: [{
@@ -64,7 +80,7 @@ export default function WorkloadChart({ projectId }: WorkloadChartProps) {
             backgroundColor: 'rgba(75, 192, 192, 0.1)',
             borderWidth: 2,
             fill: true,
-            tension: 0.1
+            tension: 0.4
           }]
         });
       } catch (error) {
@@ -73,7 +89,7 @@ export default function WorkloadChart({ projectId }: WorkloadChartProps) {
     };
 
     fetchData();
-  }, [projectId]);
+  }, [selectedProject, excludedStatuses]); // Add selectedProject to the dependency array
 
   const options = {
     responsive: true,

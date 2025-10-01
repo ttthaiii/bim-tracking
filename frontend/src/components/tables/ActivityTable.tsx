@@ -11,7 +11,7 @@ import {
   TableSortLabel,
   Chip
 } from '@mui/material';
-import { RecentActivity } from '@/services/dashboardService';
+import { RecentActivity, getRecentActivities } from '@/services/dashboardService'; // Import getRecentActivities
 import { useDashboard } from '@/context/DashboardContext';
 
 type Order = 'asc' | 'desc';
@@ -24,6 +24,7 @@ interface Column {
   format?: (value: any) => string;
 }
 
+// ... (columns and getStatusColor remain the same)
 const columns: Column[] = [
   { id: 'runningNumber', label: 'ลำดับ', minWidth: 50, align: 'center' },
   { 
@@ -65,33 +66,44 @@ function getStatusColor(status: string): { color: string, backgroundColor: strin
   }
 }
 
-interface ActivityTableProps {
-  activities: RecentActivity[];
-}
-
-export default function ActivityTable({ activities }: ActivityTableProps) {
-  const { selectedStatus, selectedProject, setSelectedActivity } = useDashboard();
+export default function ActivityTable() { // Removed activities from props
+  const { selectedStatus, selectedProject, excludedStatuses, setSelectedActivity } = useDashboard(); // Added excludedStatuses
+  const [allActivities, setAllActivities] = useState<RecentActivity[]>([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [order, setOrder] = useState<Order>('desc');
   const [orderBy, setOrderBy] = useState<keyof RecentActivity>('date');
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
-  const [displayedActivities, setDisplayedActivities] = useState<RecentActivity[]>(activities);
+  const [displayedActivities, setDisplayedActivities] = useState<RecentActivity[]>([]);
 
   useEffect(() => {
-    let filteredActivities = activities;
+    // Fetch activities inside the component
+    getRecentActivities().then(data => {
+      setAllActivities(data);
+    });
+  }, []);
 
+  useEffect(() => {
+    let filteredActivities = allActivities;
+
+    // Filter by legend (excludedStatuses)
+    if (excludedStatuses.length > 0) {
+        filteredActivities = filteredActivities.filter(activity => !excludedStatuses.includes(activity.status));
+    }
+
+    // Filter by direct click on chart (selectedStatus)
     if (selectedStatus) {
       filteredActivities = filteredActivities.filter(activity => activity.status === selectedStatus);
     }
 
-    if (selectedProject) {
+    // Filter by project dropdown (selectedProject)
+    if (selectedProject && selectedProject !== 'all') {
       filteredActivities = filteredActivities.filter(activity => activity.projectName === selectedProject);
     }
 
     setDisplayedActivities(filteredActivities);
     setPage(0);
-  }, [selectedStatus, selectedProject, activities]);
+  }, [selectedStatus, selectedProject, excludedStatuses, allActivities]); // Added excludedStatuses and allActivities
 
 
   const handleRequestSort = (property: keyof RecentActivity) => {
@@ -111,7 +123,7 @@ export default function ActivityTable({ activities }: ActivityTableProps) {
 
   const handleRowClick = (activity: RecentActivity) => {
     setSelectedRowId(activity.id);
-    setSelectedActivity(activity);
+    // setSelectedActivity(activity); // This might be used for a detail view
   };
 
   const sortedActivities = [...displayedActivities].sort((a, b) => {

@@ -5,11 +5,9 @@ import Link from 'next/link';
 import { getDashboardStats } from '@/services/dashboardService';
 import PageLayout from '@/components/shared/PageLayout';
 import ProjectStatusChart from '@/components/charts/ProjectStatusChart';
-import DocumentStatusChart from '@/components/charts/DocumentStatusChart'; // Corrected Import
+import DocumentStatusChart from '@/components/charts/DocumentStatusChart';
 import WorkloadChart from '@/components/charts/WorkloadChart';
 import ActivityTable from '@/components/tables/ActivityTable';
-import { getRecentActivities } from '@/services/dashboardService';
-import type { RecentActivity } from '@/services/dashboardService';
 
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
@@ -19,7 +17,7 @@ interface Project {
   name: string;
 }
 
-import { DashboardProvider } from '@/context/DashboardContext';
+import { DashboardProvider, useDashboard } from '@/context/DashboardContext';
 
 export default function DashboardPage() {
   return (
@@ -30,7 +28,7 @@ export default function DashboardPage() {
 }
 
 function DashboardContent() {
-  const [selectedProject, setSelectedProject] = useState<string>('all');
+  const { selectedProject, setSelectedProject } = useDashboard(); // Using context for project selection
   const [projects, setProjects] = useState<Project[]>([]);
   const [stats, setStats] = useState({
     projectCount: 0,
@@ -39,7 +37,6 @@ function DashboardContent() {
     completionRate: 0
   });
   const [loading, setLoading] = useState(true);
-  const [activities, setActivities] = useState<RecentActivity[]>([]);
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -57,28 +54,38 @@ function DashboardContent() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      getDashboardStats(selectedProject !== 'all' ? selectedProject : undefined),
-      getRecentActivities()
-    ]).then(([statsData, activitiesData]) => {
-      setStats(statsData);
-      setActivities(activitiesData);
-    }).finally(() => setLoading(false));
+    getDashboardStats(selectedProject !== 'all' ? selectedProject : undefined)
+      .then(statsData => {
+        setStats(statsData);
+      })
+      .finally(() => setLoading(false));
   }, [selectedProject]);
+
+  const handleProjectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedProject(event.target.value === 'all' ? null : event.target.value);
+  };
 
   return (
     <PageLayout>
       <div>
         <div className="flex justify-between items-center mb-8">
-            <div className="flex items-center gap-4">
-                <h1 className="text-3xl font-bold">Project Dashboard</h1>
-            </div>
+          <div className="flex items-center gap-4">
+            <h1 className="text-3xl font-bold">Project Dashboard</h1>
+            <select 
+              onChange={handleProjectChange}
+              value={selectedProject || 'all'}
+              className="p-2 border rounded-md bg-white shadow-sm"
+            >
+              <option value="all">All Projects</option>
+              {projects.map(p => (
+                <option key={p.id} value={p.name}>{p.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          {/* ... Stats Cards ... */}
-        </div>
+        {/* ... Stats Cards can be added here ... */}
         
         {/* Charts Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -86,7 +93,6 @@ function DashboardContent() {
             <ProjectStatusChart />
           </div>
           
-          {/* CORRECTED: Replaced the old chart with the new DocumentStatusChart */}
           <div className="bg-white rounded-lg shadow p-6">
             <DocumentStatusChart />
           </div>
@@ -100,7 +106,7 @@ function DashboardContent() {
         {/* Recent Activities Table */}
         <div className="mt-6 bg-white rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">Activities</h2>
-          <ActivityTable activities={activities} />
+          <ActivityTable />
         </div>
       </div>
     </PageLayout>

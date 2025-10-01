@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Pie } from 'react-chartjs-2';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
@@ -14,30 +14,28 @@ const STATUS_COLORS: Record<TaskStatusCategory, { background: string; border: st
   'รออนุมัติจาก CM': { background: 'rgba(239, 68, 68, 0.8)', border: 'rgba(239, 68, 68, 1)' },
   'รอตรวจสอบหน้างาน': { background: 'rgba(245, 158, 11, 0.8)', border: 'rgba(245, 158, 11, 1)' },
   'รอแก้ไขแบบ BIM': { background: 'rgba(249, 115, 22, 0.8)', border: 'rgba(249, 115, 22, 1)' },
-  'กำลังดำเนินการ-BIM': { background: 'rgba(20, 184, 166, 0.8)', border: 'rgba(20, 184, 166, 1)' },
-  'วางแผนแล้ว-BIM': { background: 'rgba(59, 130, 246, 0.8)', border: 'rgba(59, 130, 246, 1)' },
-  'ยังไม่วางแผน-BIM': { background: 'rgba(139, 92, 246, 0.8)', border: 'rgba(139, 92, 246, 1)' },
+  'กำลังดำเนินการ-BIM': { background: 'rgba(211, 211, 211, 0.8)', border: 'rgba(211, 211, 211, 1)' },
+  'วางแผนแล้ว-BIM': { background: 'rgba(169, 169, 169, 0.8)', border: 'rgba(169, 169, 169, 1)' },
+  'ยังไม่วางแผน-BIM': { background: 'rgba(105, 105, 105, 0.8)', border: 'rgba(105, 105, 105, 1)' },
 };
 
-const STATUS_LABELS = Object.keys(STATUS_COLORS) as TaskStatusCategory[];
+const ALL_STATUS_LABELS = Object.keys(STATUS_COLORS) as TaskStatusCategory[];
 
 export default function ProjectStatusChart() {
-  const { selectedProject, selectedStatus, setSelectedStatus } = useDashboard();
+  const { selectedProject, selectedStatus, setSelectedStatus, excludedStatuses, toggleStatus, selectOnlyStatus } = useDashboard();
   const [chartData, setChartData] = useState<any>({
-    labels: STATUS_LABELS,
-    datasets: [{
-      label: 'จำนวนเอกสาร',
-      data: [],
-      backgroundColor: STATUS_LABELS.map(label => STATUS_COLORS[label].background),
-      borderColor: STATUS_LABELS.map(label => STATUS_COLORS[label].border),
-      borderWidth: 1,
-    }]
+    labels: [],
+    datasets: [{ data: [] }]
   });
-  const [totalDocuments, setTotalDocuments] = useState(0);
+  // This state now correctly represents the number shown in the middle of the donut
+  const [displayedTotal, setDisplayedTotal] = useState(0);
   const [title, setTitle] = useState('สถานะเอกสาร (ทั้งหมด)');
+  const legendClickTimeout = useRef<number | null>(null);
+  // Use a ref to store the grand total for accurate percentage calculations in tooltips
+  const grandTotalRef = useRef(0);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchDataAndBuildChart = async () => {
       try {
         const [tasksSnapshot, projectsSnapshot] = await Promise.all([
           getDocs(collection(db, 'tasks')),
@@ -47,13 +45,13 @@ export default function ProjectStatusChart() {
         const projectsMap = new Map<string, string>();
         projectsSnapshot.forEach(doc => projectsMap.set(doc.id, doc.data().name));
 
-        const statusMap = Object.fromEntries(STATUS_LABELS.map(label => [label, 0])) as Record<TaskStatusCategory, number>;
+        const statusMap = Object.fromEntries(ALL_STATUS_LABELS.map(label => [label, 0])) as Record<TaskStatusCategory, number>;
 
         tasksSnapshot.forEach((doc) => {
           const task = doc.data() as Task;
           const projectName = projectsMap.get(task.projectId) || task.projectId;
 
-          if (selectedProject && projectName !== selectedProject) {
+          if (selectedProject && selectedProject !== 'all' && projectName !== selectedProject) {
             return;
           }
 
@@ -63,77 +61,142 @@ export default function ProjectStatusChart() {
           }
         });
 
-        const data = STATUS_LABELS.map(label => statusMap[label]);
-        const total = data.reduce((a, b) => a + b, 0);
+        // Store the true grand total for percentage calculations
+        grandTotalRef.current = Object.values(statusMap).reduce((a, b) => a + b, 0);
+        
+        const visibleLabels = ALL_STATUS_LABELS.filter(label => !excludedStatuses.includes(label));
+        const visibleData: number[] = [];
+        const visibleBackgroundColors: string[] = [];
+        const visibleBorderColors: string[] = [];
+        
+        // This total is now only for the currently visible (filtered) documents
+        let visibleTotal = 0;
 
-        setChartData((prev: any) => ({ ...prev, datasets: [{ ...prev.datasets[0], data }] }));
-        setTotalDocuments(total);
-        setTitle(`สถานะเอกสาร (${selectedProject || 'ทั้งหมด'})`);
+        visibleLabels.forEach(label => {
+          const count = statusMap[label];
+          visibleData.push(count);
+          visibleTotal += count; // Sum up the counts of visible items
+          
+          visibleBorderColors.push(STATUS_COLORS[label].border);
+          const originalColor = STATUS_COLORS[label].background;
+
+          const isSingleSelected = excludedStatuses.length === ALL_STATUS_LABELS.length - 1 && !excludedStatuses.includes(label);
+
+          if (!selectedStatus && !isSingleSelected) {
+             visibleBackgroundColors.push(originalColor);
+          } else if (isSingleSelected) {
+             visibleBackgroundColors.push(originalColor.replace('0.8', '1'));
+          } else {
+             visibleBackgroundColors.push(
+              label === selectedStatus 
+                ? originalColor.replace('0.8', '1')
+                : originalColor.replace('0.8', '0.3')
+            );
+          }
+        });
+
+        setChartData({
+          labels: visibleLabels,
+          datasets: [{
+            label: 'จำนวนเอกสาร',
+            data: visibleData,
+            backgroundColor: visibleBackgroundColors,
+            borderColor: visibleBorderColors,
+            borderWidth: 1,
+          }]
+        });
+
+        // Update the displayed number in the center to reflect the filtered total
+        setDisplayedTotal(visibleTotal);
+        setTitle(`สถานะเอกสาร (${(projectsMap.get(selectedProject || '') || 'ทั้งหมด')})`);
 
       } catch (error) {
-        console.error('Error fetching project status data:', error);
+        console.error('Error during chart data processing:', error);
       }
     };
 
-    fetchData();
-  }, [selectedProject]);
+    fetchDataAndBuildChart();
+  }, [selectedProject, excludedStatuses, selectedStatus]);
 
   const handleChartClick = (event: any, elements: any[]) => {
     if (elements.length > 0) {
       const index = elements[0].index;
       const status = chartData.labels[index];
-      setSelectedStatus((prev: string | null) => (status === prev ? null : status));
+      selectOnlyStatus(status);
+      setSelectedStatus(prev => (status === prev ? null : status));
     }
   };
 
-  useEffect(() => {
-    const getBackgroundColors = () => {
-        return STATUS_LABELS.map(label => {
-            const color = STATUS_COLORS[label].background;
-            if (!selectedStatus) return color;
-            return label === selectedStatus ? color.replace('0.8', '1') : color.replace('0.8', '0.3');
-        });
-    };
+  const handleLegendClick = (e: any, legendItem: any) => {
+    const status = legendItem.text;
+    if (selectedStatus) setSelectedStatus(null);
 
-    setChartData((prev: any) => ({ ...prev, datasets: [{ ...prev.datasets[0], backgroundColor: getBackgroundColors() }] }));
-  }, [selectedStatus]);
+    if (legendClickTimeout.current) {
+      clearTimeout(legendClickTimeout.current);
+      legendClickTimeout.current = null;
+      selectOnlyStatus(status);
+    } else {
+      legendClickTimeout.current = window.setTimeout(() => {
+        toggleStatus(status);
+        legendClickTimeout.current = null;
+      }, 250);
+    }
+  };
 
-
-  const options = {
+  const options: any = {
     onClick: handleChartClick,
     responsive: true,
     maintainAspectRatio: false,
     cutout: '65%',
     plugins: {
-      legend: { 
+      legend: {
         position: 'bottom' as const,
         align: 'start',
-        labels: { 
+        labels: {
           padding: 20,
-          usePointStyle: true, 
-          pointStyle: 'circle' 
-        } 
+          usePointStyle: true,
+          pointStyle: 'circle',
+          generateLabels: (chart: ChartJS) => ALL_STATUS_LABELS.map(label => ({
+            text: label,
+            fillStyle: STATUS_COLORS[label as TaskStatusCategory]?.background || '#000',
+            strokeStyle: STATUS_COLORS[label as TaskStatusCategory]?.border || '#000',
+            hidden: excludedStatuses.includes(label),
+            lineWidth: 1,
+            pointStyle: 'circle',
+            textAlign: 'left'
+          })),
+        },
+        onClick: handleLegendClick,
       },
-      title: { display: true, text: title, font: { size: 16, weight: '700' }, padding: { top: 10, bottom: 10 } }, // Reset padding to center chart
-      tooltip: { /* ... tooltip config ... */ },
+      title: { display: true, text: title, font: { size: 16, weight: '700' }, padding: { top: 10, bottom: 10 } },
+      tooltip: {
+        callbacks: {
+          label: function(context: any) {
+            let label = context.label || '';
+            if (label) { label += ': '; }
+            if (context.parsed !== null) {
+              // CORE FIX: Percentage is now calculated against the stable grand total from the ref
+              const percentage = grandTotalRef.current > 0 ? (context.parsed / grandTotalRef.current * 100).toFixed(2) + '%' : '0.00%';
+              label += `${context.formattedValue} (${percentage})`;
+            }
+            return label;
+          }
+        }
+      },
     },
     layout: {
-      padding: {
-        bottom: 5
-      }
+      padding: { bottom: 5 }
     }
   };
 
   return (
     <div className="relative h-[450px]">
       <Pie data={chartData} options={options} />
-      {totalDocuments > 0 && (
-        // Removed translate-y to center the total count
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="text-center">
-            <div className="text-4xl font-bold text-gray-800">{totalDocuments.toLocaleString()}</div>
-            <div className="text-sm font-medium text-gray-600">เอกสาร</div>
-          </div>
+      {displayedTotal > 0 && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[calc(50%+20px)] text-center pointer-events-none">
+          {/* CORE FIX: The displayed number now comes from the state that reflects filtering */}
+          <div className="text-4xl font-bold text-gray-800">{displayedTotal.toLocaleString()}</div>
+          <div className="text-sm font-medium text-gray-600">เอกสาร</div>
         </div>
       )}
     </div>
