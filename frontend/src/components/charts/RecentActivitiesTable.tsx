@@ -13,10 +13,10 @@ export default function RecentActivitiesTable({ projectId }: RecentActivitiesTab
   useEffect(() => {
     const fetchActivities = async () => {
       try {
-        console.log("Fetching recent activities...");
+        // console.log("Fetching recent activities...");
         setError(null);
         const data = await getRecentActivities(10);
-        console.log("Fetched activities:", data);
+        // console.log("Fetched activities:", data);
         setActivities(data);
       } catch (error) {
         console.error('Error fetching recent activities:', error);

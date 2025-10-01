@@ -2,238 +2,140 @@ import { useState, useEffect } from 'react';
 import { Pie } from 'react-chartjs-2';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
-import { getTaskStatusCategory } from '@/services/dashboardService';
+import { Task } from '@/types/database';
+import { getTaskStatusCategory, TaskStatusCategory } from '@/services/dashboardService';
 import { useDashboard } from '@/context/DashboardContext';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js';
 
 ChartJS.register(ArcElement, Tooltip, Legend, Title);
 
-interface ProjectStatusChartProps {
-  projectId?: string;
-}
+const STATUS_COLORS: Record<TaskStatusCategory, { background: string; border: string }> = {
+  'เสร็จสิ้น': { background: 'rgba(16, 185, 129, 0.8)', border: 'rgba(16, 185, 129, 1)' },
+  'รออนุมัติจาก CM': { background: 'rgba(239, 68, 68, 0.8)', border: 'rgba(239, 68, 68, 1)' },
+  'รอตรวจสอบหน้างาน': { background: 'rgba(245, 158, 11, 0.8)', border: 'rgba(245, 158, 11, 1)' },
+  'รอแก้ไขแบบ BIM': { background: 'rgba(249, 115, 22, 0.8)', border: 'rgba(249, 115, 22, 1)' },
+  'กำลังดำเนินการ-BIM': { background: 'rgba(20, 184, 166, 0.8)', border: 'rgba(20, 184, 166, 1)' },
+  'วางแผนแล้ว-BIM': { background: 'rgba(59, 130, 246, 0.8)', border: 'rgba(59, 130, 246, 1)' },
+  'ยังไม่วางแผน-BIM': { background: 'rgba(139, 92, 246, 0.8)', border: 'rgba(139, 92, 246, 1)' },
+};
 
-export default function ProjectStatusChart({ projectId }: ProjectStatusChartProps) {
-  const { selectedStatus, setSelectedStatus } = useDashboard();
+const STATUS_LABELS = Object.keys(STATUS_COLORS) as TaskStatusCategory[];
 
-  const [chartData, setChartData] = useState<{
-    labels: string[];
-    datasets: Array<{
-      label: string;
-      data: number[];
-      backgroundColor: string[];
-      borderColor: string[];
-      borderWidth: number;
-    }>;
-  }>({
-    labels: ['เสร็จสิ้น', 'รออนุมัติจาก CM', 'รอตรวจสอบหน้างาน', 'รอแก้ไขแบบ BIM', 'กำลังดำเนินการ-BIM', 'วางแผนแล้ว-BIM', 'ยังไม่วางแผน-BIM'],
+export default function ProjectStatusChart() {
+  const { selectedProject, selectedStatus, setSelectedStatus } = useDashboard();
+  const [chartData, setChartData] = useState<any>({
+    labels: STATUS_LABELS,
     datasets: [{
       label: 'จำนวนเอกสาร',
       data: [],
-      backgroundColor: [
-        'rgba(0, 200, 83, 0.8)',    // เสร็จสิ้น - เขียว
-        'rgba(255, 99, 132, 0.8)',   // CM - แดง
-        'rgba(255, 205, 86, 0.8)',   // SITE - เหลือง
-        'rgba(255, 159, 64, 0.8)',   // BIM - ส้ม
-        'rgba(75, 192, 192, 0.8)',   // กำลังดำเนินการ-BIM - เขียวอมฟ้า
-        'rgba(54, 162, 235, 0.8)',   // วางแผนแล้ว-BIM - น้ำเงิน
-        'rgba(153, 102, 255, 0.8)',  // ยังไม่วางแผน-BIM - ม่วง
-      ],
-      borderColor: [
-        'rgba(0, 200, 83, 1)',
-        'rgba(255, 99, 132, 1)', 
-        'rgba(255, 205, 86, 1)',
-        'rgba(255, 159, 64, 1)',
-        'rgba(75, 192, 192, 1)',
-        'rgba(54, 162, 235, 1)',
-        'rgba(153, 102, 255, 1)',
-      ],
+      backgroundColor: STATUS_LABELS.map(label => STATUS_COLORS[label].background),
+      borderColor: STATUS_LABELS.map(label => STATUS_COLORS[label].border),
       borderWidth: 1,
     }]
   });
-
   const [totalDocuments, setTotalDocuments] = useState(0);
+  const [title, setTitle] = useState('สถานะเอกสาร (ทั้งหมด)');
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [tasksSnapshot, projectsSnapshot] = await Promise.all([
+          getDocs(collection(db, 'tasks')),
+          getDocs(collection(db, 'projects')),
+        ]);
+
+        const projectsMap = new Map<string, string>();
+        projectsSnapshot.forEach(doc => projectsMap.set(doc.id, doc.data().name));
+
+        const statusMap = Object.fromEntries(STATUS_LABELS.map(label => [label, 0])) as Record<TaskStatusCategory, number>;
+
+        tasksSnapshot.forEach((doc) => {
+          const task = doc.data() as Task;
+          const projectName = projectsMap.get(task.projectId) || task.projectId;
+
+          if (selectedProject && projectName !== selectedProject) {
+            return;
+          }
+
+          const status = getTaskStatusCategory(task);
+          if (status in statusMap) {
+            statusMap[status]++;
+          }
+        });
+
+        const data = STATUS_LABELS.map(label => statusMap[label]);
+        const total = data.reduce((a, b) => a + b, 0);
+
+        setChartData((prev: any) => ({ ...prev, datasets: [{ ...prev.datasets[0], data }] }));
+        setTotalDocuments(total);
+        setTitle(`สถานะเอกสาร (${selectedProject || 'ทั้งหมด'})`);
+
+      } catch (error) {
+        console.error('Error fetching project status data:', error);
+      }
+    };
+
+    fetchData();
+  }, [selectedProject]);
 
   const handleChartClick = (event: any, elements: any[]) => {
     if (elements.length > 0) {
       const index = elements[0].index;
       const status = chartData.labels[index];
-      setSelectedStatus(status === selectedStatus ? null : status);
+      setSelectedStatus((prev: string | null) => (status === prev ? null : status));
     }
   };
+
+  useEffect(() => {
+    const getBackgroundColors = () => {
+        return STATUS_LABELS.map(label => {
+            const color = STATUS_COLORS[label].background;
+            if (!selectedStatus) return color;
+            return label === selectedStatus ? color.replace('0.8', '1') : color.replace('0.8', '0.3');
+        });
+    };
+
+    setChartData((prev: any) => ({ ...prev, datasets: [{ ...prev.datasets[0], backgroundColor: getBackgroundColors() }] }));
+  }, [selectedStatus]);
+
 
   const options = {
     onClick: handleChartClick,
     responsive: true,
     maintainAspectRatio: false,
     cutout: '65%',
-    radius: '90%',
     plugins: {
-      legend: {
-        position: 'right' as const,
-        onClick: (e: any, legendItem: any, legend: any) => {
-          const status = chartData.labels[legendItem.index];
-          setSelectedStatus(status === selectedStatus ? null : status);
-        },
-        labels: {
-          generateLabels: (chart: any) => {
-            const data = chart.data;
-            if (data.labels.length && data.datasets.length) {
-              return data.labels.map((label: string, i: number) => ({
-                text: label,
-                fillStyle: selectedStatus === label 
-                  ? data.datasets[0].backgroundColor[i].replace('0.8', '1')
-                  : selectedStatus
-                    ? data.datasets[0].backgroundColor[i].replace('0.8', '0.3')
-                    : data.datasets[0].backgroundColor[i],
-                hidden: false,
-                lineCap: 'round',
-                lineDash: [],
-                lineDashOffset: 0,
-                lineJoin: 'round',
-                lineWidth: 1,
-                strokeStyle: data.datasets[0].borderColor[i],
-                pointStyle: 'circle',
-                rotation: 0
-              }));
-            }
-            return [];
-          },
-          padding: 15,
-          usePointStyle: true,
-          pointStyle: 'circle'
-        }
+      legend: { 
+        position: 'bottom' as const,
+        align: 'start',
+        labels: { 
+          padding: 20,
+          usePointStyle: true, 
+          pointStyle: 'circle' 
+        } 
       },
-      title: {
-        display: true,
-        text: 'สถานะเอกสาร',
-        font: {
-          size: 16,
-          weight: 700
-        },
-        padding: {
-          top: 10,
-          bottom: 20
-        }
-      },
-      tooltip: {
-        callbacks: {
-          label: (context: any) => {
-            const label = chartData.labels[context.dataIndex];
-            const value = chartData.datasets[0].data[context.dataIndex];
-            const percentage = ((value / totalDocuments) * 100).toFixed(1);
-            return `${label}: ${value} (${percentage}%)`;
-          }
-        },
-        padding: 12,
-        boxPadding: 6
+      title: { display: true, text: title, font: { size: 16, weight: '700' }, padding: { top: 10, bottom: 10 } }, // Reset padding to center chart
+      tooltip: { /* ... tooltip config ... */ },
+    },
+    layout: {
+      padding: {
+        bottom: 5
       }
     }
   };
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        console.log("เริ่มดึงข้อมูล tasks...");
-        const tasksRef = collection(db, 'tasks');
-        const snapshot = await getDocs(tasksRef);
-        console.log(`จำนวน tasks ทั้งหมด: ${snapshot.size}`);
-        
-        const statusMap = {
-          'เสร็จสิ้น': 0,
-          'รออนุมัติจาก CM': 0,
-          'รอตรวจสอบหน้างาน': 0,
-          'รอแก้ไขแบบ BIM': 0,
-          'กำลังดำเนินการ-BIM': 0,
-          'วางแผนแล้ว-BIM': 0,
-          'ยังไม่วางแผน-BIM': 0
-        };
-        
-        snapshot.forEach((doc) => {
-          const task = doc.data();
-          const taskStatus = {
-            currentStep: task.currentStep,
-            subtaskCount: task.subtasks?.length || 0,
-            totalMH: task.totalMH || 0
-          };
-          const status = getTaskStatusCategory(taskStatus);
-          statusMap[status]++;
-        });
-        
-        const data = [
-          statusMap['เสร็จสิ้น'],
-          statusMap['รออนุมัติจาก CM'],
-          statusMap['รอตรวจสอบหน้างาน'],
-          statusMap['รอแก้ไขแบบ BIM'],
-          statusMap['กำลังดำเนินการ-BIM'],
-          statusMap['วางแผนแล้ว-BIM'],
-          statusMap['ยังไม่วางแผน-BIM']
-        ];
-        
-        setChartData(prev => ({
-          ...prev,
-          datasets: [{
-            ...prev.datasets[0],
-            data
-          }]
-        }));
-        
-        const total = Object.values(statusMap).reduce((a, b) => a + b, 0);
-        setTotalDocuments(total);
-      } catch (error) {
-        console.error('Error fetching task data:', error);
-      }
-    };
-
-    fetchData();
-  }, [projectId]);
-
-  // Compute current background colors based on selected status
-  const getBackgroundColors = () => {
-    const defaultColors = [
-      'rgba(0, 200, 83, 0.8)',    // เสร็จสิ้น - เขียว
-      'rgba(255, 99, 132, 0.8)',   // CM - แดง
-      'rgba(255, 205, 86, 0.8)',   // SITE - เหลือง
-      'rgba(255, 159, 64, 0.8)',   // BIM - ส้ม
-      'rgba(75, 192, 192, 0.8)',   // กำลังดำเนินการ-BIM - เขียวอมฟ้า
-      'rgba(54, 162, 235, 0.8)',   // วางแผนแล้ว-BIM - น้ำเงิน
-      'rgba(153, 102, 255, 0.8)',  // ยังไม่วางแผน-BIM - ม่วง
-    ];
-
-    if (!selectedStatus) {
-      return defaultColors;
-    }
-
-    return defaultColors.map((color, index) => {
-      if (chartData.labels[index] === selectedStatus) {
-        return color.replace('0.8', '1');
-      }
-      return color.replace('0.8', '0.3');
-    });
-  };
-
-  useEffect(() => {
-    setChartData(prev => ({
-      ...prev,
-      datasets: [{
-        ...prev.datasets[0],
-        backgroundColor: getBackgroundColors()
-      }]
-    }));
-  }, [selectedStatus]);
 
   return (
-    <>
-      <div className="relative h-[400px]">
-        <Pie data={chartData} options={options} />
-        {totalDocuments > 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="text-center bg-white bg-opacity-80 rounded-full p-4">
-              <div className="text-4xl font-bold text-gray-800">{totalDocuments.toLocaleString()}</div>
-              <div className="text-sm font-medium text-gray-600">Total Documents</div>
-            </div>
+    <div className="relative h-[450px]">
+      <Pie data={chartData} options={options} />
+      {totalDocuments > 0 && (
+        // Removed translate-y to center the total count
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="text-center">
+            <div className="text-4xl font-bold text-gray-800">{totalDocuments.toLocaleString()}</div>
+            <div className="text-sm font-medium text-gray-600">เอกสาร</div>
           </div>
-        )}
-      </div>
-    </>
+        </div>
+      )}
+    </div>
   );
 }

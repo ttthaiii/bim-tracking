@@ -1,3 +1,4 @@
+// frontend/src/types/database.ts
 import { Timestamp } from 'firebase/firestore';
 
 export interface Project {

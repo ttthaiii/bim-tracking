@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Bar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -7,9 +7,12 @@ import {
   BarElement,
   Title,
   Tooltip,
-  Legend
+  Legend,
+  ChartElement
 } from 'chart.js';
-import { getTasksByStatus, ProjectTaskSummary } from '@/services/taskStatus';
+import { getTasksByStatus, ProjectTaskSummary, TaskStatusCount } from '@/services/taskStatus';
+import { useDashboard } from '@/context/DashboardContext';
+import { getElementAtEvent } from 'react-chartjs-2';
 
 ChartJS.register(
   CategoryScale,
@@ -20,17 +23,41 @@ ChartJS.register(
   Legend
 );
 
+const STATUS_COLORS: Record<keyof Omit<TaskStatusCount, 'total' | 'totalEstWorkload' | 'totalCurrentWorkload'>, string> = {
+  'เสร็จสิ้น': '#10B981',
+  'รออนุมัติจาก CM': '#EF4444',
+  'รอตรวจสอบหน้างาน': '#F59E0B',
+  'รอแก้ไขแบบ BIM': '#F97316',
+  'กำลังดำเนินการ-BIM': '#14B8A6',
+  'วางแผนแล้ว-BIM': '#3B82F6',
+  'ยังไม่วางแผน-BIM': '#8B5CF6',
+};
+
 export default function DocumentStatusChart() {
-  const [data, setData] = useState<ProjectTaskSummary[]>([]);
+  const [chartData, setChartData] = useState<any>({ labels: [], datasets: [] });
   const [loading, setLoading] = useState(true);
+  const { setSelectedProject } = useDashboard();
+  const chartRef = useRef<ChartJS>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const summaries = await getTasksByStatus();
-        setData(summaries);
+
+        if (summaries.length > 0) {
+          const labels = summaries.map(s => s.projectName);
+          const statuses = Object.keys(STATUS_COLORS) as (keyof typeof STATUS_COLORS)[];
+
+          const datasets = statuses.map(status => ({
+            label: status,
+            data: summaries.map(s => s.taskCounts[status] || 0),
+            backgroundColor: STATUS_COLORS[status],
+          }));
+
+          setChartData({ labels, datasets });
+        }
       } catch (error) {
-        console.error('Error fetching document status:', error);
+        console.error('Error processing chart data:', error);
       } finally {
         setLoading(false);
       }
@@ -39,61 +66,81 @@ export default function DocumentStatusChart() {
     fetchData();
   }, []);
 
-  const chartData = {
-    labels: data.map(summary => summary.projectName),
-    datasets: [
-      {
-        label: 'CM',
-        data: data.map(summary => summary.taskCounts.CM),
-        backgroundColor: 'rgba(255, 99, 132, 0.5)',
-      },
-      {
-        label: 'BIM',
-        data: data.map(summary => summary.taskCounts.BIM),
-        backgroundColor: 'rgba(255, 159, 64, 0.5)',
-      },
-      {
-        label: 'SITE',
-        data: data.map(summary => summary.taskCounts.SITE),
-        backgroundColor: 'rgba(255, 205, 86, 0.5)',
-      },
-      {
-        label: 'อนุมัติ',
-        data: data.map(summary => summary.taskCounts.อนุมัติ),
-        backgroundColor: 'rgba(75, 192, 192, 0.5)',
-      }
-    ]
+  const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!chartRef.current) return;
+    const elements = getElementAtEvent(chartRef.current, event);
+
+    if (elements.length > 0) {
+      const { index } = elements[0];
+      const projectName = chartData.labels[index];
+      setSelectedProject(prev => (prev === projectName ? null : projectName));
+    }
   };
 
-  const options = {
+  const options: any = {
     plugins: {
       title: {
         display: true,
-        text: 'สัดส่วนแบบก่อสร้างแยกตามโครงการ'
+        text: 'จำนวนเอกสารแยกตามโครงการ',
+        font: { size: 16, weight: '700' },
+        padding: { top: 10, bottom: 10 } // Consistent title padding
+      },
+      legend: {
+        display: true,
+        position: 'bottom' as const,
+        align: 'start',
+        labels: { 
+          padding: 20, // Consistent legend item padding
+          usePointStyle: true,
+          pointStyle: 'circle',
+        }
+      },
+      tooltip: {
+        mode: 'index' as const,
+        intersect: false,
       },
     },
+    layout: {
+      padding: {
+        bottom: 5
+      }
+    },
     responsive: true,
+    maintainAspectRatio: false,
     scales: {
       x: {
         stacked: true,
+        ticks: {
+          autoSkip: false,
+          maxRotation: 45,
+          minRotation: 45,
+          callback: function(value: any) {
+            const label = this.getLabelForValue(value);
+            if (typeof label === 'string' && label.length > 15) {
+              return label.substring(0, 15) + '...';
+            }
+            return label;
+          }
+        }
       },
       y: {
-        stacked: true
+        stacked: true,
+        beginAtZero: true,
       }
     }
   };
 
   if (loading) {
     return (
-      <div className="bg-white p-6 rounded-lg shadow-lg flex items-center justify-center h-96">
+      <div className="flex items-center justify-center h-[450px]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-lg">
-      <Bar options={options} data={chartData} />
+    <div className="h-[450px]">
+      <Bar ref={chartRef} options={options} data={chartData} onClick={handleClick} />
     </div>
   );
 }

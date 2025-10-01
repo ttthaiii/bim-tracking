@@ -2,13 +2,15 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { Task } from '@/types/database';
 
+// 1. Add documentNumber to the interface
 export interface RecentActivity {
   id: string;
   date: Date;
   projectId: string;
   projectName: string;
   description: string;
-  status: string;
+  documentNumber: string; // Added field
+  status: string; 
   currentStep?: string;
   subtaskCount?: number;
   totalMH?: number;
@@ -24,17 +26,14 @@ export async function getProjectCount() {
 export async function getActiveTaskCount() {
   try {
     const tasksRef = collection(db, 'tasks');
-    // First, query for tasks that haven't ended
     const q = query(tasksRef, where('endDate', '==', null));
     const snapshot = await getDocs(q);
     
-    // Then filter in memory for the remaining conditions
     const activeTasks = snapshot.docs.filter(doc => {
       const task = doc.data();
       return task.progress < 1 && task.startDate != null;
     });
     
-    console.log(`Found ${activeTasks.length} active tasks`);
     return activeTasks.length;
   } catch (error) {
     console.error('Error getting active task count:', error);
@@ -56,7 +55,6 @@ export async function getDashboardStats(projectId?: string) {
       getTeamMemberCount()
     ]);
 
-    // คำนวณ Completion Rate
     const tasksRef = collection(db, 'tasks');
     const q = projectId 
       ? query(tasksRef, where('projectId', '==', projectId))
@@ -92,27 +90,18 @@ export async function getDashboardStats(projectId?: string) {
   }
 }
 
-// ลบ interface ที่ซ้ำซ้อนออก
-
-export async function getRecentActivities(maxResults: number = 5): Promise<RecentActivity[]> {
+export async function getRecentActivities(): Promise<RecentActivity[]> {
   try {
-    console.log("Starting to fetch recent activities...");
-
-    // 1. ดึงข้อมูล tasks
     const tasksRef = collection(db, 'tasks');
     const snapshot = await getDocs(tasksRef);
-    console.log(`Fetched ${snapshot.size} tasks`);
 
-    // 2. ดึงข้อมูลโครงการทั้งหมดเพื่อใช้อ้างอิงชื่อโครงการ
     const projectsRef = collection(db, 'projects');
     const projectsSnapshot = await getDocs(projectsRef);
     const projectsMap = new Map();
     projectsSnapshot.forEach(doc => {
-      const project = doc.data();
-      projectsMap.set(doc.id, project.name);
+      projectsMap.set(doc.id, doc.data().name);
     });
 
-    // แปลงและเรียงตามวันที่ล่าสุด
     const activities = snapshot.docs
       .map(doc => {
         const task = doc.data() as Task;
@@ -122,19 +111,19 @@ export async function getRecentActivities(maxResults: number = 5): Promise<Recen
           id: doc.id,
           date: lastUpdate,
           projectId: task.projectId,
-          projectName: projectsMap.get(task.projectId) || task.projectId,
+          projectName: projectsMap.get(task.projectId) || 'Unknown Project',
           activityType: 'Document Updated',
-          status: task.currentStep || '',
+          // 2. Add documentNumber to the returned object
+          documentNumber: task.documentNumber || '', // Added this line
+          status: getTaskStatusCategory(task),
           currentStep: task.currentStep,
           subtaskCount: task.subtaskCount,
           totalMH: task.totalMH,
           description: getActivityDescription(task)
         };
       })
-      .sort((a, b) => b.date.getTime() - a.date.getTime())
-      .slice(0, maxResults);
+      .sort((a, b) => b.date.getTime() - a.date.getTime());
 
-    console.log("Processed activities:", activities);
     return activities;
   } catch (error) {
     console.error('Error fetching recent activities:', error);
@@ -151,14 +140,13 @@ export type TaskStatusCategory =
   | 'วางแผนแล้ว-BIM'
   | 'ยังไม่วางแผน-BIM';
 
-interface TaskWithStatus {
+export interface TaskWithStatus {
   currentStep?: string;
   subtaskCount?: number;
   totalMH?: number;
 }
 
 export function getTaskStatusCategory(task: TaskWithStatus): TaskStatusCategory {
-  // ถ้ามี currentStep ให้ตรวจสอบก่อน
   if (task.currentStep) {
     switch (task.currentStep) {
       case 'APPROVED':
@@ -175,7 +163,6 @@ export function getTaskStatusCategory(task: TaskWithStatus): TaskStatusCategory 
     }
   }
   
-  // ถ้าไม่มี currentStep หรือเป็น default ให้ดูที่ subtasks
   if (task.subtaskCount && task.subtaskCount > 1) {
     if (task.totalMH && task.totalMH > 0) {
       return 'กำลังดำเนินการ-BIM';
@@ -183,42 +170,15 @@ export function getTaskStatusCategory(task: TaskWithStatus): TaskStatusCategory 
     return 'วางแผนแล้ว-BIM';
   }
   
-  // ถ้ามี subtask แต่น้อยกว่าหรือเท่ากับ 1 ถือว่าวางแผนแล้ว
   if (task.subtaskCount && task.subtaskCount > 0) {
     return 'วางแผนแล้ว-BIM';
   }
   
-  // กรณีอื่นๆ ถือว่ายังไม่วางแผน
   return 'ยังไม่วางแผน-BIM';
 }
 
-function getActivityStatus(task: Task): RecentActivity['status'] {
-  // ตรวจสอบสถานะแบบตรงๆ จาก currentStep
-  if (!task.currentStep) {
-    return 'pending';
-  }
-  
-  switch (task.currentStep) {
-    case 'APPROVED':
-    case 'APPROVED_WITH_COMMENTS':
-      return 'completed';
-    case 'REJECTED':
-    case 'APPROVED_REVISION_REQUIRED':
-    case 'REVISION_REQUIRED':
-      return 'cancelled';
-    case 'PENDING_CM_APPROVAL':
-    case 'PENDING_REVIEW':
-      return 'in_progress';
-    default:
-      return 'pending';
-  }
-}
-
 function getActivityDescription(task: Task): string {
-  if (!task.taskName) {
-    return 'ไม่ระบุชื่องาน';
-  }
-  return task.taskName;
+  return task.taskName || 'ไม่ระบุชื่องาน';
 }
 
 export interface TaskDetails extends Task {

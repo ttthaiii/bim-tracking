@@ -1,42 +1,31 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
-import { RecentActivity } from '@/services/dashboardService';
+'use client';
+
+import { createContext, useContext, useState, ReactNode, Dispatch, SetStateAction } from 'react';
 
 interface DashboardContextType {
+  selectedProject: string | null;
+  setSelectedProject: Dispatch<SetStateAction<string | null>>;
   selectedStatus: string | null;
-  setSelectedStatus: (status: string | null) => void;
-  selectedActivity: RecentActivity | null;
-  setSelectedActivity: (activity: RecentActivity | null) => void;
-  filteredActivities: RecentActivity[];
-  setFilteredActivities: (activities: RecentActivity[]) => void;
+  setSelectedStatus: Dispatch<SetStateAction<string | null>>;
 }
 
-const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
+const DashboardContext = createContext<DashboardContextType>({
+  selectedProject: null,
+  setSelectedProject: () => {}, // Fix: Provide a dummy function for initialization
+  selectedStatus: null,
+  setSelectedStatus: () => {},
+});
 
-export function DashboardProvider({ children }: { children: ReactNode }) {
+export const DashboardProvider = ({ children }: { children: ReactNode }) => {
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
-  const [selectedActivity, setSelectedActivity] = useState<RecentActivity | null>(null);
-  const [filteredActivities, setFilteredActivities] = useState<RecentActivity[]>([]);
 
   return (
-    <DashboardContext.Provider
-      value={{
-        selectedStatus,
-        setSelectedStatus,
-        selectedActivity,
-        setSelectedActivity,
-        filteredActivities,
-        setFilteredActivities,
-      }}
-    >
+    // Fix: Pass setSelectedProject to the context provider
+    <DashboardContext.Provider value={{ selectedProject, setSelectedProject, selectedStatus, setSelectedStatus }}>
       {children}
     </DashboardContext.Provider>
   );
-}
+};
 
-export function useDashboard() {
-  const context = useContext(DashboardContext);
-  if (context === undefined) {
-    throw new Error('useDashboard must be used within a DashboardProvider');
-  }
-  return context;
-}
+export const useDashboard = () => useContext(DashboardContext);

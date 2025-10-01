@@ -9,16 +9,15 @@ import {
   Paper,
   TablePagination,
   TableSortLabel,
-  Box,
   Chip
 } from '@mui/material';
-import { RecentActivity, TaskWithStatus, getTaskStatusCategory } from '@/services/dashboardService';
+import { RecentActivity } from '@/services/dashboardService';
 import { useDashboard } from '@/context/DashboardContext';
 
 type Order = 'asc' | 'desc';
 
 interface Column {
-  id: keyof RecentActivity;
+  id: keyof RecentActivity | 'runningNumber';
   label: string;
   minWidth?: number;
   align?: 'right' | 'left' | 'center';
@@ -26,6 +25,7 @@ interface Column {
 }
 
 const columns: Column[] = [
+  { id: 'runningNumber', label: 'ลำดับ', minWidth: 50, align: 'center' },
   { 
     id: 'date', 
     label: 'วันที่', 
@@ -33,7 +33,9 @@ const columns: Column[] = [
     format: (value: Date) => value.toLocaleDateString('th-TH')
   },
   { id: 'projectName', label: 'โครงการ', minWidth: 130 },
-  { id: 'description', label: 'กิจกรรม', minWidth: 300 },
+  { id: 'documentNumber', label: 'เลขที่เอกสาร', minWidth: 150 },
+  { id: 'description', label: 'กิจกรรม', minWidth: 250 },
+  { id: 'currentStep', label: 'ขั้นตอนปัจจุบัน', minWidth: 180 },
   { 
     id: 'status',
     label: 'สถานะ',
@@ -43,51 +45,23 @@ const columns: Column[] = [
 ];
 
 function getStatusColor(status: string): { color: string, backgroundColor: string } {
-  const statusCategory = getTaskStatusCategory({
-    currentStep: status,
-    subtaskCount: 0,
-    totalMH: 0
-  });
-
-  switch (statusCategory) {
-    case 'เสร็จสิ้น':
-      return { color: '#065F46', backgroundColor: '#D1FAE5' }; // สีเขียว
-    case 'รออนุมัติจาก CM':
-      return { color: '#B45309', backgroundColor: '#FEF3C7' }; // สีเหลือง
-    case 'รอตรวจสอบหน้างาน':
-      return { color: '#1D4ED8', backgroundColor: '#DBEAFE' }; // สีน้ำเงิน
-    case 'รอแก้ไขแบบ BIM':
-      return { color: '#991B1B', backgroundColor: '#FEE2E2' }; // สีแดง
-    case 'กำลังดำเนินการ-BIM':
-      return { color: '#0E9F6E', backgroundColor: '#DEF7EC' }; // เขียวอ่อน
-    case 'วางแผนแล้ว-BIM':
-      return { color: '#3F83F8', backgroundColor: '#E1EFFE' }; // น้ำเงินอ่อน
-    case 'ยังไม่วางแผน-BIM':
-      return { color: '#6B7280', backgroundColor: '#F3F4F6' }; // สีเทา
-    default:
-      return { color: '#1F2937', backgroundColor: '#F3F4F6' }; // สีเทา
-  }
-}
-
-function getStatusText(status: string): string {
   switch (status) {
-    case 'APPROVED':
-    case 'APPROVED_WITH_COMMENTS':
-      return 'เสร็จสิ้น';
-    case 'PENDING_CM_APPROVAL':
-      return 'รออนุมัติจาก CM';
-    case 'PENDING_REVIEW':
-      return 'รอตรวจสอบหน้างาน';
-    case 'REJECTED':
-      return 'รอแก้ไขแบบ BIM';
-    case 'BIM_IN_PROGRESS':
-      return 'กำลังดำเนินการ-BIM';
-    case 'BIM_PLANNED':
-      return 'วางแผนแล้ว-BIM';
-    case 'BIM_NOT_PLANNED':
-      return 'ยังไม่วางแผน-BIM';
+    case 'เสร็จสิ้น':
+      return { color: '#065F46', backgroundColor: '#D1FAE5' }; // Green
+    case 'รออนุมัติจาก CM':
+      return { color: '#991B1B', backgroundColor: '#FEE2E2' }; // Red
+    case 'รอตรวจสอบหน้างาน':
+      return { color: '#B45309', backgroundColor: '#FEF3C7' }; // Yellow
+    case 'รอแก้ไขแบบ BIM':
+      return { color: '#C2410C', backgroundColor: '#FFEDD5' }; // Orange
+    case 'กำลังดำเนินการ-BIM':
+      return { color: '#047857', backgroundColor: '#A7F3D0' }; // Teal
+    case 'วางแผนแล้ว-BIM':
+      return { color: '#1D4ED8', backgroundColor: '#DBEAFE' }; // Blue
+    case 'ยังไม่วางแผน-BIM':
+      return { color: '#5B21B6', backgroundColor: '#EDE9FE' }; // Purple
     default:
-      return status;
+      return { color: '#1F2937', backgroundColor: '#F3F4F6' }; // Gray
   }
 }
 
@@ -95,51 +69,30 @@ interface ActivityTableProps {
   activities: RecentActivity[];
 }
 
-interface EnhancedTableProps {
-  onRequestSort: (event: React.MouseEvent<unknown>, property: keyof RecentActivity) => void;
-  order: Order;
-  orderBy: string;
-}
-
 export default function ActivityTable({ activities }: ActivityTableProps) {
-  console.log('All activities:', activities);
-  const { selectedStatus, setFilteredActivities, setSelectedActivity } = useDashboard();
+  const { selectedStatus, selectedProject, setSelectedActivity } = useDashboard();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [order, setOrder] = useState<Order>('desc');
   const [orderBy, setOrderBy] = useState<keyof RecentActivity>('date');
-
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [displayedActivities, setDisplayedActivities] = useState<RecentActivity[]>(activities);
 
   useEffect(() => {
-    console.log('Selected Status:', selectedStatus);
+    let filteredActivities = activities;
+
     if (selectedStatus) {
-      const filtered = activities.filter(activity => {
-        // ใช้เกณฑ์เดียวกับ Chart
-        const taskStatus = {
-          currentStep: activity.status, // ใช้ status แทน currentStep
-          subtaskCount: activity.subtaskCount || 0,
-          totalMH: activity.totalMH || 0
-        };
-        const activityStatusCategory = getTaskStatusCategory(taskStatus);
-        console.log(`Activity: ${activity.id}`, {
-          status: activity.status,
-          subtaskCount: activity.subtaskCount,
-          totalMH: activity.totalMH,
-          computedStatus: activityStatusCategory
-        });
-        return activityStatusCategory === selectedStatus;
-      });
-      console.log('Filtered Activities:', filtered);
-      setFilteredActivities(filtered);
-      setDisplayedActivities(filtered);
-    } else {
-      setFilteredActivities(activities);
-      setDisplayedActivities(activities);
+      filteredActivities = filteredActivities.filter(activity => activity.status === selectedStatus);
     }
+
+    if (selectedProject) {
+      filteredActivities = filteredActivities.filter(activity => activity.projectName === selectedProject);
+    }
+
+    setDisplayedActivities(filteredActivities);
     setPage(0);
-  }, [selectedStatus, activities, setFilteredActivities]);
+  }, [selectedStatus, selectedProject, activities]);
+
 
   const handleRequestSort = (property: keyof RecentActivity) => {
     const isAsc = orderBy === property && order === 'asc';
@@ -161,10 +114,10 @@ export default function ActivityTable({ activities }: ActivityTableProps) {
     setSelectedActivity(activity);
   };
 
-  // เรียงลำดับข้อมูล
   const sortedActivities = [...displayedActivities].sort((a, b) => {
-    const valueA = a[orderBy];
-    const valueB = b[orderBy];
+    if (orderBy === 'runningNumber') return 0;
+    const valueA = a[orderBy as keyof RecentActivity];
+    const valueB = b[orderBy as keyof RecentActivity];
     
     if (valueA instanceof Date && valueB instanceof Date) {
       return order === 'asc' 
@@ -193,13 +146,17 @@ export default function ActivityTable({ activities }: ActivityTableProps) {
                   align={column.align}
                   style={{ minWidth: column.minWidth }}
                 >
-                  <TableSortLabel
-                    active={orderBy === column.id}
-                    direction={orderBy === column.id ? order : 'asc'}
-                    onClick={() => handleRequestSort(column.id)}
-                  >
-                    {column.label}
-                  </TableSortLabel>
+                  {column.id === 'runningNumber' ? (
+                    column.label
+                  ) : (
+                    <TableSortLabel
+                      active={orderBy === column.id}
+                      direction={orderBy === column.id ? order : 'asc'}
+                      onClick={() => handleRequestSort(column.id as keyof RecentActivity)}
+                    >
+                      {column.label}
+                    </TableSortLabel>
+                  )}
                 </TableCell>
               ))}
             </TableRow>
@@ -207,8 +164,7 @@ export default function ActivityTable({ activities }: ActivityTableProps) {
           <TableBody>
             {sortedActivities
               .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-              .map((activity) => {
-                const statusStyle = getStatusColor(activity.status);
+              .map((activity, index) => {
                 return (
                   <TableRow
                     hover
@@ -220,23 +176,37 @@ export default function ActivityTable({ activities }: ActivityTableProps) {
                     sx={{ cursor: 'pointer' }}
                   >
                     {columns.map((column) => {
-                      const value = activity[column.id];
-                      return (
-                        <TableCell key={column.id} align={column.align}>
-                          {column.id === 'status' ? (
+                      if (column.id === 'runningNumber') {
+                        return (
+                          <TableCell key={column.id} align={column.align}>
+                            {page * rowsPerPage + index + 1}
+                          </TableCell>
+                        );
+                      }
+
+                      const value = activity[column.id as keyof RecentActivity];
+                      
+                      if (column.id === 'status') {
+                        const statusStyle = getStatusColor(activity.status);
+                        return (
+                          <TableCell key={column.id} align={column.align}>
                             <Chip
-                              label={getStatusText(value as string)}
+                              label={value as string}
                               sx={{
                                 color: statusStyle.color,
                                 backgroundColor: statusStyle.backgroundColor,
                                 fontWeight: 'medium'
                               }}
                             />
-                          ) : column.format && value instanceof Date ? (
-                            column.format(value)
-                          ) : (
-                            String(value)
-                          )}
+                          </TableCell>
+                        );
+                      }
+                      
+                      return (
+                        <TableCell key={column.id} align={column.align}>
+                          {column.format && value instanceof Date
+                            ? column.format(value)
+                            : String(value ?? '')}
                         </TableCell>
                       );
                     })}

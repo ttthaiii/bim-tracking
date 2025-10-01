@@ -52,9 +52,9 @@ export default function WorkloadChart({ projectId }: WorkloadChartProps) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        console.log("Fetching workload data for projectId:", projectId);
+        // console.log("Fetching workload data for projectId:", projectId);
         const workloadData = await getWorkloadByWeek(projectId);
-        console.log("Received workload data:", workloadData);
+        // console.log("Received workload data:", workloadData);
         setChartData({
           labels: workloadData.map(w => `สัปดาห์ที่ ${w.week}`),
           datasets: [{
