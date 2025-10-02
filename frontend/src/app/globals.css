@@ -24,3 +24,47 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Custom Calendar Styles */
+.custom-calendar .react-calendar__tile {
+  padding: 1em 0.5em;
+  position: relative;
+  height: 44px;
+}
+
+.custom-calendar .react-calendar__tile abbr {
+  z-index: 1;
+  position: relative;
+}
+
+.custom-calendar .react-calendar__tile.bg-blue-200,
+.custom-calendar .react-calendar__tile.bg-yellow-200,
+.custom-calendar .react-calendar__tile.bg-green-200 {
+  border-radius: 50%;
+  position: relative;
+}
+
+.custom-calendar .react-calendar__tile.bg-blue-200::after,
+.custom-calendar .react-calendar__tile.bg-yellow-200::after,
+.custom-calendar .react-calendar__tile.bg-green-200::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.custom-calendar .react-calendar__tile.bg-blue-200::after {
+  background-color: #B7D9FC; /* สีฟ้าตามที่แสดงในปฏิทิน - วันปัจจุบัน */
+}
+
+.custom-calendar .react-calendar__tile.bg-yellow-200::after {
+  background-color: #FFE999; /* สีเหลืองตามที่แสดงในปฏิทิน - มีการแก้ไขข้อมูล */
+}
+
+.custom-calendar .react-calendar__tile.bg-green-200::after {
+  background-color: #BBEAA1; /* สีเขียวตามที่แสดงในปฏิทิน - วันที่สามารถลงข้อมูลย้อนหลังได้ */
+}

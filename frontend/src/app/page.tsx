@@ -1,102 +1,53 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import PageLayout from '@/components/shared/PageLayout';
 import Link from 'next/link';
-import { getDashboardStats } from '@/services/dashboardService';
+import PageLayout from '@/components/shared/PageLayout';
 
-export default function Home() {
-  const [stats, setStats] = useState({
-    projectCount: 0,
-    activeTaskCount: 0,
-    teamMemberCount: 0
-  });
-  const [loading, setLoading] = useState(true);
+const features = [
+  {
+    name: 'Project Dashboard',
+    description: 'Visualize project statistics and track progress in real-time.',
+    path: '/dashboard',
+    icon: '📊',
+  },
+  {
+    name: 'Manage Projects',
+    description: 'Create, update, and manage all your projects from one place.',
+    path: '/projects',
+    icon: '📂',
+  },
+  {
+    name: 'Document Tracking',
+    description: 'Track the status and revisions of all project documents.',
+    path: '/document-tracking',
+    icon: '📄',
+  },
+  {
+    name: 'Task Assignment',
+    description: 'Assign and monitor tasks for different team members.',
+    path: '/task-assignment',
+    icon: '📝',
+  },
+];
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const dashboardStats = await getDashboardStats();
-        setStats(dashboardStats);
-      } catch (error) {
-        console.error('Error fetching stats:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStats();
-  }, []);
-
+export default function LandingPage() {
   return (
     <PageLayout>
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-gray-900 sm:text-5xl md:text-6xl">
-          <span className="block text-blue-600">BIM Tracking</span>
-          <span className="block text-gray-600 text-3xl mt-3">Project Management System</span>
-        </h1>
-        <p className="mt-3 max-w-md mx-auto text-base text-gray-500 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
-          Track and manage your BIM projects efficiently. Monitor progress, assign tasks, and collaborate with your team in real-time.
-        </p>
-        <div className="mt-5 max-w-md mx-auto sm:flex sm:justify-center md:mt-8">
-          <div className="rounded-md shadow">
-            <Link
-              href="/dashboard"
-              className="w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 md:py-4 md:text-lg md:px-10"
-            >
-              View Dashboard
-            </Link>
-          </div>
-          <div className="mt-3 rounded-md shadow sm:mt-0 sm:ml-3">
-            <Link
-              href="/projects"
-              className="w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-blue-600 bg-white hover:bg-gray-50 md:py-4 md:text-lg md:px-10"
-            >
-              Browse Projects
-            </Link>
-          </div>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-3 max-w-6xl mx-auto">
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <dt className="text-sm font-medium text-gray-500 truncate">Total Projects</dt>
-              <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                {loading ? (
-                  <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
-                ) : (
-                  stats.projectCount
-                )}
-              </dd>
+      <div className="text-center mb-12">
+        <h1 className="text-4xl font-bold text-gray-800">Welcome to BIM Tracking</h1>
+        <p className="text-lg text-gray-800 mt-4">Your central hub for managing and monitoring construction projects.</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8">
+        {features.map((feature) => (
+          <Link href={feature.path} key={feature.name}>
+            <div className="block bg-white rounded-lg shadow-lg p-8 hover:shadow-xl transition-shadow duration-300">
+              <div className="text-4xl mb-4">{feature.icon}</div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">{feature.name}</h2>
+              <p className="text-gray-800">{feature.description}</p>
             </div>
-          </div>
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <dt className="text-sm font-medium text-gray-500 truncate">Active Tasks</dt>
-              <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                {loading ? (
-                  <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
-                ) : (
-                  stats.activeTaskCount
-                )}
-              </dd>
-            </div>
-          </div>
-          <div className="bg-white overflow-hidden shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              <dt className="text-sm font-medium text-gray-500 truncate">Team Members</dt>
-              <dd className="mt-1 text-3xl font-semibold text-gray-900">
-                {loading ? (
-                  <div className="animate-pulse bg-gray-200 h-8 w-16 rounded"></div>
-                ) : (
-                  stats.teamMemberCount
-                )}
-              </dd>
-            </div>
-          </div>
-        </div>
+          </Link>
+        ))}
       </div>
     </PageLayout>
-  )
+  );
 }

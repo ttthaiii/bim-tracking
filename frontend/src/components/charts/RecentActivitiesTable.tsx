@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { getRecentActivities, RecentActivity } from '@/services/dashboardService';
 
-export default function RecentActivitiesTable() {
+interface RecentActivitiesTableProps {
+  projectId?: string;
+}
+
+export default function RecentActivitiesTable({ projectId }: RecentActivitiesTableProps) {
   const [activities, setActivities] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,10 +13,10 @@ export default function RecentActivitiesTable() {
   useEffect(() => {
     const fetchActivities = async () => {
       try {
-        console.log("Fetching recent activities...");
+        // console.log("Fetching recent activities...");
         setError(null);
         const data = await getRecentActivities(10);
-        console.log("Fetched activities:", data);
+        // console.log("Fetched activities:", data);
         setActivities(data);
       } catch (error) {
         console.error('Error fetching recent activities:', error);
