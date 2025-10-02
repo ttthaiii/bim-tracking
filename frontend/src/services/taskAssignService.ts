@@ -6,22 +6,16 @@ export interface TaskAssignment {
   relateDrawing: string;
   employeeId: string;
   assignDate: string;
-  time?: string;
-  timeType?: 'normal' | 'ot' | 'leave';
   workingHours?: string;
+  overtimeHours?: string;
   progress: string;
   note?: string;
   status: 'pending' | 'in-progress' | 'completed';
   isUploading?: boolean;
   fileUrl?: string;
   fileName?: string;
-  leaveData?: {
-    leaveType: string;
-    startDate: string;
-    endDate: string;
-    leaveHours: string;
-    reason: string;
-  };
+  isLeaveRow?: boolean;
+  leaveType?: 'sick' | 'personal' | 'vacation' | 'other';
 }
 
 export const getEmployeeTaskAssignments = async (employeeId: string): Promise<TaskAssignment[]> => {
@@ -38,8 +32,8 @@ export const getEmployeeTaskAssignments = async (employeeId: string): Promise<Ta
         relateDrawing: data.relateDrawing,
         employeeId: data.employeeId,
         assignDate: data.assignDate,
-        time: data.time,
         workingHours: data.workingHours,
+        overtimeHours: data.overtimeHours,
         progress: data.progress,
         note: data.note,
         status: data.status

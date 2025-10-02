@@ -40,14 +40,16 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   // คำนวณชั่วโมงรวม
   const calculateTotalHours = () => {
     return taskAssignments.reduce((total, task) => {
-      if (task.timeType === 'leave' && task.leaveData?.leaveHours) {
-        const [hours, minutes] = task.leaveData.leaveHours.split(':').map(Number);
-        return total + hours + (minutes / 60);
-      } else if (task.workingHours && task.workingHours !== '-') {
+      let sum = 0;
+      if (task.workingHours && task.workingHours !== '-') {
         const [hours, minutes] = task.workingHours.split(':').map(Number);
-        return total + hours + (minutes / 60);
+        sum += hours + (minutes / 60);
       }
-      return total;
+      if (task.overtimeHours && task.overtimeHours !== '-') {
+        const [hours, minutes] = task.overtimeHours.split(':').map(Number);
+        sum += hours + (minutes / 60);
+      }
+      return total + sum;
     }, 0);
   };
 
@@ -55,17 +57,17 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 flex gap-4" style={{ maxWidth: '90vw', maxHeight: '90vh' }}>
+      <div className="bg-white rounded-lg p-8 flex gap-8" style={{ minWidth: '80vw', maxHeight: '90vh' }}>
         {/* Left side - Calendar */}
-        <div className="w-80">
+        <div className="w-96">
           <Calendar
             onChange={(value: Value) => setSelectedDate(value)}
             value={selectedDate}
-            className="w-full border rounded-lg shadow-lg bg-white"
+            className="w-full border rounded-lg shadow-lg bg-white text-lg"
           />
-          <div className="mt-4 text-center">
-            <p className="font-semibold">วันที่เลือก:</p>
-            <p>{selectedDate instanceof Date ? selectedDate.toLocaleDateString('th-TH', {
+          <div className="mt-6 text-center">
+            <p className="font-semibold text-lg mb-2">วันที่เลือก:</p>
+            <p className="text-lg">{selectedDate instanceof Date ? selectedDate.toLocaleDateString('th-TH', {
               year: 'numeric',
               month: 'long',
               day: 'numeric',
@@ -75,37 +77,33 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
 
         {/* Right side - Table */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          <h2 className="text-xl font-semibold mb-4">Drawing List</h2>
+          <h2 className="text-2xl font-semibold mb-6">Drawing List</h2>
           
           <div className="overflow-x-auto flex-1">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="bg-gray-50">
-                  <th className="border p-2 w-12">No</th>
-                  <th className="border p-2 w-1/4">Relate Drawing</th>
-                  <th className="border p-2 w-32">Time</th>
-                  <th className="border p-2 w-32">Working hours</th>
-                  <th className="border p-2 w-40">Progress</th>
-                  <th className="border p-2">Note</th>
+                <tr className="bg-gray-100">
+                  <th className="border p-3 w-16 text-lg font-semibold">No</th>
+                  <th className="border p-3 w-1/3 text-lg font-semibold">Relate Drawing</th>
+                  <th className="border p-3 w-40 text-lg font-semibold">เวลาทำงานปกติ</th>
+                  <th className="border p-3 w-40 text-lg font-semibold">เวลาโอที</th>
+                  <th className="border p-3 w-48 text-lg font-semibold">Progress</th>
+                  <th className="border p-3 text-lg font-semibold">Note</th>
                 </tr>
               </thead>
               <tbody>
                 {taskAssignments.map((task, index) => (
-                  <tr key={task.id}>
-                    <td className="border p-2 text-center">{index + 1}</td>
-                    <td className="border p-2">{task.relateDrawing}</td>
-                    <td className="border p-2">
-                      {task.timeType === 'normal' ? 'เวลาปกติ' :
-                       task.timeType === 'ot' ? 'เวลาโอที' :
-                       task.timeType === 'leave' ? 'ลา' : ''}
+                  <tr key={task.id} className="hover:bg-gray-50">
+                    <td className="border p-3 text-center text-lg">{index + 1}</td>
+                    <td className="border p-3 text-lg">{task.relateDrawing}</td>
+                    <td className="border p-3 text-center text-lg">
+                      {task.workingHours || '-'}
                     </td>
-                    <td className="border p-2 text-center">
-                      {task.timeType === 'leave' && task.leaveData
-                        ? task.leaveData.leaveHours
-                        : task.workingHours || '-'}
+                    <td className="border p-3 text-center text-lg">
+                      {task.overtimeHours || '-'}
                     </td>
-                    <td className="border p-2">
-                      <div className={`text-center rounded-full py-1 px-2 ${
+                    <td className="border p-3">
+                      <div className={`text-center rounded-full py-2 px-3 text-lg ${
                         parseInt(task.progress) === 100 
                           ? 'bg-green-100 text-green-800' 
                           : parseInt(task.progress) > 0 
@@ -115,34 +113,51 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
                         {task.progress}
                       </div>
                     </td>
-                    <td className="border p-2">{task.note || '-'}</td>
+                    <td className="border p-3 text-lg">{task.note || '-'}</td>
                   </tr>
                 ))}
-                <tr className="bg-gray-50 font-semibold">
-                  <td colSpan={3} className="border p-2 text-right">รวมชั่วโมงทำงาน:</td>
-                  <td className="border p-2 text-center">{totalHours.toFixed(2)} ชั่วโมง</td>
-                  <td colSpan={2} className="border p-2"></td>
+                <tr className="bg-gray-100 font-semibold">
+                  <td colSpan={2} className="border p-3 text-right text-lg">รวมชั่วโมงทั้งหมด:</td>
+                  <td className="border p-3 text-center text-lg">
+                    {taskAssignments.reduce((total, task) => {
+                      if (task.workingHours && task.workingHours !== '-') {
+                        const [hours, minutes] = task.workingHours.split(':').map(Number);
+                        return total + hours + (minutes / 60);
+                      }
+                      return total;
+                    }, 0).toFixed(2)} ชั่วโมง
+                  </td>
+                  <td className="border p-3 text-center text-lg">
+                    {taskAssignments.reduce((total, task) => {
+                      if (task.overtimeHours && task.overtimeHours !== '-') {
+                        const [hours, minutes] = task.overtimeHours.split(':').map(Number);
+                        return total + hours + (minutes / 60);
+                      }
+                      return total;
+                    }, 0).toFixed(2)} ชั่วโมง
+                  </td>
+                  <td colSpan={2} className="border p-3"></td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <div className="flex justify-end space-x-4 mt-6">
-                          <button
-                onClick={() => {
-                  onClose();
-                  if (onEdit) onEdit();
-                }}
-                className="px-6 py-2 bg-white border border-gray-300 rounded-md hover:bg-gray-50 text-gray-700"
-              >
-                Edit
-              </button>
-              <button
-                onClick={onClose}
-                className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-              >
-                Close
-              </button>
+          <div className="flex justify-end space-x-6 mt-8">
+                                          <button
+                  onClick={() => {
+                    onClose();
+                    if (onEdit) onEdit();
+                  }}
+                  className="px-8 py-3 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700 text-lg font-medium"
+                >
+                  แก้ไขข้อมูล
+                </button>
+                <button
+                  onClick={onConfirm}
+                  className="px-8 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 text-lg font-medium"
+                >
+                  ยืนยันข้อมูล
+                </button>
           </div>
         </div>
       </div>

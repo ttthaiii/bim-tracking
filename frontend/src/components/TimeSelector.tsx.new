@@ -30,39 +30,53 @@ export const TimeSelector: React.FC<TimeSelectorProps> = ({
     onTimeChange: (value: string) => void;
   }) => (
     <div className="flex items-center gap-2">
-      <select
-        value={hour}
-        onChange={(e) => {
-          const newHour = e.target.value;
-          const newMinute = minute || '00';
-          onTimeChange(`${newHour}:${newMinute}`);
-        }}
-        className="appearance-none border rounded px-2 py-1 w-20 text-center bg-white"
-      >
-        <option value="">ชั่วโมง</option>
-        {hours.map((h) => (
-          <option key={h} value={h.toString().padStart(2, '0')}>
-            {h}
-          </option>
-        ))}
-      </select>
+      <div className="relative">
+        <select
+          value={hour}
+          onChange={(e) => {
+            const newHour = e.target.value;
+            const newMinute = minute || '00';
+            onTimeChange(`${newHour}:${newMinute}`);
+          }}
+          className="appearance-none border rounded px-2 py-1 pr-8 bg-white hover:border-gray-400 focus:outline-none focus:border-blue-500"
+        >
+          <option value="">ชั่วโมง</option>
+          {hours.map((h) => (
+            <option key={h} value={h.toString().padStart(2, '0')}>
+              {h} ชั่วโมง
+            </option>
+          ))}
+        </select>
+        <div className="absolute inset-y-0 right-2 flex items-center pointer-events-none">
+          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
 
-      <select
-        value={minute}
-        onChange={(e) => {
-          const newMinute = e.target.value;
-          const newHour = hour || '00';
-          onTimeChange(`${newHour}:${newMinute}`);
-        }}
-        className="appearance-none border rounded px-2 py-1 w-16 text-center bg-white"
-      >
-        <option value="">นาที</option>
-        {minutes.map((m) => (
-          <option key={m.value} value={m.value}>
-            {m.value}
-          </option>
-        ))}
-      </select>
+      <div className="relative">
+        <select
+          value={minute}
+          onChange={(e) => {
+            const newMinute = e.target.value;
+            const newHour = hour || '00';
+            onTimeChange(`${newHour}:${newMinute}`);
+          }}
+          className="appearance-none border rounded px-2 py-1 pr-8 bg-white hover:border-gray-400 focus:outline-none focus:border-blue-500"
+        >
+          <option value="">นาที</option>
+          {minutes.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label} นาที
+            </option>
+          ))}
+        </select>
+        <div className="absolute inset-y-0 right-2 flex items-center pointer-events-none">
+          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
     </div>
   );
 
