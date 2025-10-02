@@ -3,23 +3,29 @@
 import { useState } from 'react';
 
 interface CreateProjectModalProps {
+  isOpen: boolean;
   onClose: () => void;
-  onCreate: (projectData: { name: string; description: string; status: string }) => void;
+  // onSubmit prop is passed instead of onCreate, correcting this
+  onSubmit: (projectData: { name: string; description: string; status: string }) => void;
 }
 
-export default function CreateProjectModal({ onClose, onCreate }: CreateProjectModalProps) {
+export default function CreateProjectModal({ isOpen, onClose, onSubmit }: CreateProjectModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('Active');
 
+  if (!isOpen) {
+    return null;
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onCreate({ name, description, status });
-    onClose();
+    onSubmit({ name, description, status });
+    onClose(); 
   };
 
   return (
-    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center">
+    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50">
       <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6">Create New Project</h2>
         <form onSubmit={handleSubmit}>

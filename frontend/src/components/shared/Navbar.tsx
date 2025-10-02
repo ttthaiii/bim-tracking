@@ -3,12 +3,10 @@ import { usePathname } from 'next/navigation';
 
 const navItems = [
   { name: 'Home', path: '/' },
-  { name: 'Dashboard', path: '/dashboard' },
-  { name: 'Document Tracking', path: '/document-tracking' },
-  { name: 'Task Assignment', path: '/task-assignment' },
-  { name: 'Projects', path: '/projects' },
-  { name: 'Tasks', path: '/tasks' },
+  { name: 'Projects Planing', path: '/projects' },
+  { name: 'Task Assignment', path: '/tasks' },
   { name: 'Daily Report', path: '/daily-report' },
+  { name: 'Dashboard Report', path: '/dashboard' },
 ];
 
 export default function Navbar() {
