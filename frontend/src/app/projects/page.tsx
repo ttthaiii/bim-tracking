@@ -107,7 +107,7 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
   
   return {
     firestoreId: task.id,
-    id: "",
+    id: "",  // เว้นไว้ รอสร้างใหม่ตอนกด SAVE
     relateDrawing: taskData.taskName || "",
     activity: taskData.taskCategory || "",
     startDate: formatDate(taskData.startDate || taskData.planStartDate),
@@ -122,23 +122,38 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
 // ฟังก์ชันสร้าง TASK ID: TTS-BIM-{abbr}-XXX-{runningNo}
 const generateTaskId = (
   projectAbbr: string,
-  existingRows: TaskRow[]
+  activityName: string,
+  existingRows: TaskRow[],
+  activities: any[],
+  currentCounter: number
 ): string => {
-  // หา Running No. สูงสุดจาก Tasks ที่มี TASK ID แล้ว
-  const maxRunning = existingRows.reduce((max, row) => {
-    if (!row.id || !row.id.startsWith('TTS-BIM-')) return max;
-    const parts = row.id.split('-');
-    if (parts.length >= 5) {
-      const running = parseInt(parts[4]) || 0;
-      return Math.max(max, running);
+  // หา Activity Order
+  let activityOrder = "XXX"; // default
+  
+  if (activityName && activityName !== "เลือก Activity") {
+    const activityIndex = activities.findIndex(a => a.activityName === activityName);
+    if (activityIndex >= 0) {
+      activityOrder = String(activityIndex + 1).padStart(3, '0');
     }
-    return max;
-  }, 0);
+  }
   
-  const runningNo = String(maxRunning + 1).padStart(3, '0');
+  const runningNo = String(currentCounter).padStart(3, '0');
+  return `TTS-BIM-${projectAbbr}-${activityOrder}-${runningNo}`;
+};
+
+// ฟังก์ชันแปล Status เป็นภาษาไทย
+const translateStatus = (status: string): string => {
+  const statusMap: { [key: string]: string } = {
+    'PENDING_REVIEW': 'รอตรวจสอบ',
+    'PENDING_CM_APPROVAL': 'ส่ง CM',
+    'REVISION_REQUIRED': 'แก้ไข',
+    'APPROVED': 'อนุมัติ',
+    'APPROVED_WITH_COMMENTS': 'อนุมัติตามคอมเมนต์ (ไม่แก้ไข)',
+    'APPROVED_REVISION_REQUIRED': 'อนุมัติตามคอมเมนต์ (ต้องแก้ไข)',
+    'REJECTED': 'ไม่อนุมัติ'
+  };
   
-  // สร้าง TASK ID โดยเว้น Activity (XXX)
-  return `TTS-BIM-${projectAbbr}-XXX-${runningNo}`;
+  return statusMap[status] || status;
 };
 
 
@@ -155,7 +170,7 @@ const ProjectsPage = () => {
   const [activities, setActivities] = useState<any[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
-
+  const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
   useEffect(() => {
     const loadProjects = async () => {
       try {
@@ -187,44 +202,66 @@ const ProjectsPage = () => {
   }, []);
 
   useEffect(() => {
-    const loadTasks = async () => {
-      if (!selectedProject) {
+  const loadTasks = async () => {
+    if (!selectedProject) {
+      setRows(initialRows);
+      setTouchedRows(new Set());
+      return;
+    }
+
+    try {
+      setTasksLoading(true);
+      const tasksData = await fetchTasks(selectedProject);
+      
+      if (tasksData.length > 0) {
+        const currentProject = projects.find(p => p.id === selectedProject);
+        
+        // แปลง Tasks → TaskRow
+        let taskRows = tasksData.map(convertTaskToRow);
+        
+        // สร้าง TASK ID ให้ข้อมูลเก่าที่ยังไม่มี
+if (currentProject && currentProject.abbr) {
+  let counter = 1;
+  taskRows = taskRows.map(row => {
+    if (row.id) return row;
+    
+    const newId = generateTaskId(
+      currentProject.abbr,
+      row.activity,
+      taskRows,
+      activities,
+      counter
+    );
+    counter++;
+    return { ...row, id: newId };
+  });
+}
+        
+        setRows([...taskRows, {
+          id: "",
+          relateDrawing: "",
+          activity: "",
+          startDate: "",
+          dueDate: "",
+          statusDwg: "",
+          lastRev: "",
+          docNo: "",
+          correct: false
+        }]);
+        setTouchedRows(new Set());
+      } else {
         setRows(initialRows);
         setTouchedRows(new Set());
-        return;
       }
-
-      try {
-        setTasksLoading(true);
-        const tasksData = await fetchTasks(selectedProject);
-        
-        if (tasksData.length > 0) {
-          const taskRows = tasksData.map(convertTaskToRow);
-          setRows([...taskRows, {
-            id: "",
-            relateDrawing: "",
-            activity: "",
-            startDate: "",
-            dueDate: "",
-            statusDwg: "",
-            lastRev: "",
-            docNo: "",
-            correct: false
-          }]);
-          setTouchedRows(new Set());
-        } else {
-          setRows(initialRows);
-          setTouchedRows(new Set());
-        }
-      } catch (error) {
-        console.error('Error loading tasks:', error);
-        setRows(initialRows);
-      } finally {
-        setTasksLoading(false);
-      }
-    };
-    loadTasks();
-  }, [selectedProject]);
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+      setRows(initialRows);
+    } finally {
+      setTasksLoading(false);
+    }
+  };
+  loadTasks();
+}, [selectedProject, projects]);
 
   const handleCreateProject = (projectData: { name: string; code: string; leader: string }) => {
     console.log('Creating project:', projectData);
@@ -282,7 +319,7 @@ const handleDelete = (idx: number) => {
     });
   };
 
-const handleSave = () => {
+const handleSave = async () => {
   if (!selectedProject) {
     alert('กรุณาเลือกโครงการก่อน');
     return;
@@ -294,49 +331,119 @@ const handleSave = () => {
     return;
   }
 
-  // กรอง: เฉพาะแถวที่มีข้อมูล และยังไม่มี TASK ID
-  const newRows = rows.filter(row => 
-    row.relateDrawing && 
-    row.activity && 
-    row.startDate && 
-    row.dueDate && 
-    !row.id
-  );
+  // แยกแถวที่ต้อง UPDATE และ CREATE
+  const rowsToUpdate: TaskRow[] = [];
+  const rowsToCreate: TaskRow[] = [];
 
-  if (newRows.length === 0) {
-    alert('ไม่มีข้อมูลใหม่ที่ต้องบันทึก');
+  rows.forEach(row => {
+    if (!row.relateDrawing || !row.activity || !row.startDate || !row.dueDate) {
+      return;
+    }
+
+    if (row.firestoreId) {
+      rowsToUpdate.push(row);
+    } else if (!row.id) {
+      rowsToCreate.push(row);
+    }
+  });
+
+  if (rowsToUpdate.length === 0 && rowsToCreate.length === 0) {
+    alert('ไม่มีข้อมูลที่ต้องบันทึก');
     return;
   }
 
-  // สร้าง TASK ID ให้แถวใหม่
-  const updatedRows = rows.map(row => {
-    // ถ้ามี ID อยู่แล้ว หรือไม่มีข้อมูลครบ → ไม่แก้ไข
-    if (row.id || !row.relateDrawing || !row.activity || !row.startDate || !row.dueDate) {
-      return row;
-    }
-    
-    // สร้าง TASK ID ใหม่
-    return {
-      ...row,
-      id: generateTaskId(currentProject.abbr, rows)
-    };
-  });
-
-  setRows(updatedRows);
-
-  // แสดง popup ยืนยัน
   const confirmSave = window.confirm(
-    `คุณต้องการบันทึก ${newRows.length} รายการใช่หรือไม่?`
+    `คุณต้องการบันทึก ${rowsToUpdate.length} รายการที่แก้ไข และ ${rowsToCreate.length} รายการใหม่ ใช่หรือไม่?`
   );
 
-  if (confirmSave) {
-    // TODO: บันทึกลง Firestore
-    console.log('Saving to Firestore:', updatedRows.filter(r => r.id));
-    alert('บันทึกสำเร็จ');
+  if (!confirmSave) return;
+
+  try {
+    let finalRows = [...rows];
+
+    // สร้าง TASK ID ให้แถวใหม่
+    if (rowsToCreate.length > 0) {
+      const maxRunning = rows.reduce((max, row) => {
+        if (!row.id || !row.id.startsWith('TTS-BIM-')) return max;
+        const parts = row.id.split('-');
+        if (parts.length >= 5) {
+          const running = parseInt(parts[4]) || 0;
+          return Math.max(max, running);
+        }
+        return max;
+      }, 0);
+
+      let counter = maxRunning + 1;
+
+      finalRows = rows.map(row => {
+        if (row.firestoreId || row.id || !row.relateDrawing || !row.activity) {
+          return row;
+        }
+
+        return {
+          ...row,
+          id: generateTaskId(
+            currentProject.abbr,
+            row.activity,
+            rows,
+            activities,
+            counter++
+          )
+        };
+      });
+
+      setRows(finalRows);
+    }
+
+    // สร้างข้อความสรุป
+    let summary = '📊 สรุปการบันทึก\n\n';
+
+    if (rowsToUpdate.length > 0) {
+      summary += `✏️ แก้ไขข้อมูล: ${rowsToUpdate.length} รายการ\n`;
+      rowsToUpdate.forEach((row, i) => {
+        if (i < 3) {
+          summary += `   • ${row.id} - ${row.relateDrawing}\n`;
+        }
+      });
+      if (rowsToUpdate.length > 3) {
+        summary += `   ... และอีก ${rowsToUpdate.length - 3} รายการ\n`;
+      }
+      summary += '\n';
+    }
+
+    if (rowsToCreate.length > 0) {
+      const newTaskIds = finalRows.filter(r => !r.firestoreId && r.id);
+      
+      summary += `🆕 เพิ่มข้อมูลใหม่: ${rowsToCreate.length} รายการ\n`;
+      newTaskIds.slice(-rowsToCreate.length).forEach((row, i) => {
+        if (i < 3) {
+          summary += `   • ${row.id} - ${row.relateDrawing}\n`;
+        }
+      });
+      if (rowsToCreate.length > 3) {
+        summary += `   ... และอีก ${rowsToCreate.length - 3} รายการ\n`;
+      }
+    }
+
+    summary += '\n✅ บันทึกข้อมูลสำเร็จ';
+
+    console.log('🆕 CREATE:', finalRows.filter(r => !r.firestoreId && r.id));
+    console.log('✏️ UPDATE:', rowsToUpdate);
+    
+    alert(summary);
+    setEditingRowIndex(null);
+
+  } catch (error) {
+    console.error('Error saving:', error);
+    alert('เกิดข้อผิดพลาดในการบันทึก');
   }
 };
 
-  const handleAdd = () => {
+const handleEdit = (idx: number) => {
+  setEditingRowIndex(idx);
+};
+
+const handleAdd = () => {
     setRows(rows => [...rows, {
       id: "",
       relateDrawing: "",
@@ -446,124 +553,186 @@ const handleSave = () => {
             </div>
           </div>
 
-          {tasksLoading ? (
-            <div style={{ textAlign: "center", padding: "40px", color: "#666" }}>กำลังโหลดข้อมูล...</div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", border: "1px solid #e5e7eb" }}>
-                <thead>
-                  <tr style={{ background: "#ff4d00", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "150px" }}>TASK ID</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "250px" }}>RELATE DRAWING</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>ACTIVITY</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "130px" }}>START DATE</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "130px" }}>DUE DATE</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>STATUS DWG.</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "100px" }}>LAST REV.</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>DOC. NO.</th>
-                    <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "80px" }}>CORRECT</th>
-                    <th style={{ padding: "8px 12px", width: 40, color: "white" }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, idx) => (
-                    <tr key={row.firestoreId || `row-${idx}`} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <td style={{ padding: "6px 10px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
-                      <td style={{ padding: "6px 10px", fontSize: 10, minWidth: "250px" }}>
-                        <input
-                          type="text"
-                          value={row.relateDrawing}
-                          onFocus={() => handleRowFocus(idx)}
-                          onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)}
-                          style={{ 
-                            width: "100%", 
-                            padding: "4px 6px", 
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "4px",
-                            fontSize: 10
-                          }}
-                        />
-                      </td>
-                      <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                        <select 
-                          value={row.activity}
-                          onFocus={() => handleRowFocus(idx)}
-                          onChange={e => handleRowChange(idx, "activity", e.target.value)}
-                          disabled={activitiesLoading}
-                          style={{ 
-                            width: "100%", 
-                            padding: "4px 6px", 
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "4px",
-                            fontSize: 10,
-                            backgroundColor: activitiesLoading ? "#f3f4f6" : "#fff",
-                            cursor: activitiesLoading ? "not-allowed" : "pointer"
-                          }}
-                        >
-                          <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
-                          {activities.map(act => (
-                            <option key={act.id} value={act.activityName}>{act.activityName}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                        <input
-                          type="date"
-                          value={row.startDate}
-                          onFocus={() => handleRowFocus(idx)}
-                          onChange={e => handleRowChange(idx, "startDate", e.target.value)}
-                          style={{ 
-                            width: "100%", 
-                            padding: "4px 6px", 
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "4px",
-                            fontSize: 10
-                          }}
-                        />
-                      </td>
-                      <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                        <input
-                          type="date"
-                          value={row.dueDate}
-                          onFocus={() => handleRowFocus(idx)}
-                          onChange={e => handleRowChange(idx, "dueDate", e.target.value)}
-                          style={{ 
-                            width: "100%", 
-                            padding: "4px 6px", 
-                            border: "1px solid #e5e7eb",
-                            borderRadius: "4px",
-                            fontSize: 10
-                          }}
-                        />
-                      </td>
-                      <td style={{ padding: "6px 10px", fontSize: 10, color: "#2563eb" }}>{row.statusDwg}</td>
-                      <td style={{ padding: "6px 10px", fontSize: 10 }}>{row.lastRev}</td>
-                      <td style={{ padding: "6px 10px", fontSize: 10 }}>{row.docNo}</td>
-                      <td style={{ padding: "6px 10px", fontSize: 10, textAlign: "center" }}>
-                        <button style={{
-                          padding: "3px 10px",
-                          background: "#f97316",
-                          border: "none",
-                          borderRadius: "3px",
-                          fontSize: 10,
-                          cursor: "pointer",
-                          color: "white",
-                          boxShadow: "0 2px 4px rgba(249, 115, 22, 0.2)"
-                        }}>
-                          Edit
-                        </button>
-                      </td>
-                      <td style={{ padding: "6px 10px", fontSize: 10, textAlign: "center" }}>
-                        <button
-                          onClick={() => handleDelete(idx)}
-                          style={{ background: "none", border: "none", cursor: "pointer", padding: "2px" }}
-                        >
-                          <span role="img" aria-label="delete">🗑️</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+{tasksLoading ? (
+  <div style={{ textAlign: "center", padding: "40px", color: "#666" }}>กำลังโหลดข้อมูล...</div>
+) : (
+  <div style={{ 
+    overflowX: "auto", 
+    overflowY: "auto", 
+    maxHeight: "600px",
+    position: "relative",
+    border: "1px solid #e5e7eb"
+  }}>
+    <table style={{ 
+      width: "100%", 
+      borderCollapse: "collapse"
+    }}>
+      <thead style={{ 
+        position: "sticky", 
+        top: 0, 
+        zIndex: 10,
+        boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+      }}>
+        <tr style={{ background: "#ff4d00" }}>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "150px" }}>TASK ID</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "250px" }}>RELATE DRAWING</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>ACTIVITY</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "130px" }}>START DATE</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "130px" }}>DUE DATE</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>STATUS DWG.</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "100px" }}>LAST REV.</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>DOC. NO.</th>
+          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "80px" }}>CORRECT</th>
+          <th style={{ padding: "8px 12px", width: 40, color: "white" }}></th>
+        </tr>
+      </thead>
+      <tbody>
+{rows.map((row, idx) => {
+  const isNewRow = !row.id; // แถวใหม่ที่ยังไม่มี TASK ID
+  const isEditing = editingRowIndex === idx; // แถวที่กำลังแก้ไข
+  const isEditable = isNewRow || isEditing; // แก้ไขได้หรือไม่
+  
+  return (
+    <tr 
+      key={row.firestoreId || `row-${idx}`} 
+      style={{ 
+        borderBottom: "1px solid #e5e7eb", 
+        background: isEditing ? "#fff7ed" : "#fff" // ไฮไลท์แถวที่กำลังแก้
+      }}
+    >
+      <td style={{ padding: "6px 10px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
+      <td style={{ padding: "6px 10px", fontSize: 10, minWidth: "250px" }}>
+        <input
+          type="text"
+          value={row.relateDrawing}
+          onFocus={() => handleRowFocus(idx)}
+          onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)}
+          disabled={!isEditable}
+          style={{ 
+            width: "100%", 
+            padding: "4px 6px", 
+            border: "1px solid #e5e7eb",
+            borderRadius: "4px",
+            fontSize: 10,
+            backgroundColor: !isEditable ? "#f9fafb" : "#fff",
+            cursor: !isEditable ? "not-allowed" : "text"
+          }}
+        />
+      </td>
+      <td style={{ padding: "6px 10px", fontSize: 10 }}>
+        <select 
+          value={row.activity}
+          onFocus={() => handleRowFocus(idx)}
+          onChange={e => handleRowChange(idx, "activity", e.target.value)}
+          disabled={activitiesLoading || !isEditable}
+          style={{ 
+            width: "100%", 
+            padding: "4px 6px", 
+            border: "1px solid #e5e7eb",
+            borderRadius: "4px",
+            fontSize: 10,
+            backgroundColor: !isEditable ? "#f9fafb" : activitiesLoading ? "#f3f4f6" : "#fff",
+            cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer"
+          }}
+        >
+          <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
+          {activities.map(act => (
+            <option key={act.id} value={act.activityName}>{act.activityName}</option>
+          ))}
+        </select>
+      </td>
+      <td style={{ padding: "6px 10px", fontSize: 10 }}>
+        <input
+          type="date"
+          value={row.startDate}
+          onFocus={() => handleRowFocus(idx)}
+          onChange={e => handleRowChange(idx, "startDate", e.target.value)}
+          disabled={!isEditable}
+          style={{ 
+            width: "100%", 
+            padding: "4px 6px", 
+            border: "1px solid #e5e7eb",
+            borderRadius: "4px",
+            fontSize: 10,
+            backgroundColor: !isEditable ? "#f9fafb" : "#fff",
+            cursor: !isEditable ? "not-allowed" : "text"
+          }}
+        />
+      </td>
+      <td style={{ padding: "6px 10px", fontSize: 10 }}>
+        <input
+          type="date"
+          value={row.dueDate}
+          onFocus={() => handleRowFocus(idx)}
+          onChange={e => handleRowChange(idx, "dueDate", e.target.value)}
+          disabled={!isEditable}
+          style={{ 
+            width: "100%", 
+            padding: "4px 6px", 
+            border: "1px solid #e5e7eb",
+            borderRadius: "4px",
+            fontSize: 10,
+            backgroundColor: !isEditable ? "#f9fafb" : "#fff",
+            cursor: !isEditable ? "not-allowed" : "text"
+          }}
+        />
+      </td>
+      <td style={{ padding: "6px 10px", fontSize: 10, color: "#2563eb" }}>
+        {row.statusDwg ? translateStatus(row.statusDwg) : ""}
+      </td>
+      <td style={{ padding: "6px 10px", fontSize: 10 }}>{row.lastRev}</td>
+      <td style={{ padding: "6px 10px", fontSize: 10 }}>{row.docNo}</td>
+      <td style={{ padding: "6px 10px", fontSize: 10, textAlign: "center" }}>
+        {row.statusDwg ? (
+          <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
+        ) : isNewRow ? (
+          <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
+        ) : isEditing ? (
+          <button 
+            onClick={() => setEditingRowIndex(null)}
+            style={{
+              padding: "3px 10px",
+              background: "#10b981",
+              border: "none",
+              borderRadius: "3px",
+              fontSize: 10,
+              cursor: "pointer",
+              color: "white",
+              boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)"
+            }}
+          >
+            บันทึก
+          </button>
+        ) : (
+          <button 
+            onClick={() => handleEdit(idx)}
+            style={{
+              padding: "3px 10px",
+              background: "#f97316",
+              border: "none",
+              borderRadius: "3px",
+              fontSize: 10,
+              cursor: "pointer",
+              color: "white",
+              boxShadow: "0 2px 4px rgba(249, 115, 22, 0.2)"
+            }}
+          >
+            Edit
+          </button>
+        )}
+      </td>
+      <td style={{ padding: "6px 10px", fontSize: 10, textAlign: "center" }}>
+        <button
+          onClick={() => handleDelete(idx)}
+          style={{ background: "none", border: "none", cursor: "pointer", padding: "2px" }}
+        >
+          <span role="img" aria-label="delete">🗑️</span>
+        </button>
+      </td>
+    </tr>
+  );
+})}
+      </tbody>
               </table>
             </div>
           )}
