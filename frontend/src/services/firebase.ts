@@ -1,6 +1,6 @@
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
-import { Project, Task, SubTask } from '@/types/database';
+import { Project, Task, SubTask, RelateWork } from '@/types/database'; // เพิ่ม RelateWork ใน import เดียว
 
 export const fetchProjects = async () => {
   const projectsRef = collection(db, 'projects');
@@ -71,4 +71,25 @@ export const getWorkloadByAssignee = async () => {
     assignee,
     workload
   }));
+};
+
+export const fetchRelateWorks = async () => {
+  const relateWorksRef = collection(db, 'relateWorks');
+  const snapshot = await getDocs(relateWorksRef);
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  })) as (RelateWork & { id: string })[];
+};
+
+export const fetchRelateWorksByProject = async (activityName: string) => {
+  const relateWorksRef = collection(db, 'relateWorks');
+  const snapshot = await getDocs(relateWorksRef);
+  
+  return snapshot.docs
+    .map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }))
+    .filter((item: any) => item.activityName === activityName) as (RelateWork & { id: string })[];
 };
