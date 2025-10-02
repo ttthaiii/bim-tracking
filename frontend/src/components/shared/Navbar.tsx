@@ -7,7 +7,7 @@ const navItems = [
   { name: 'Document Tracking', path: '/document-tracking' },
   { name: 'Projects', path: '/projects' },
   { name: 'Tasks', path: '/tasks' },
-  { name: 'Reports', path: '/reports' },
+  { name: 'Daily Report', path: '/daily-report' },
 ];
 
 export default function Navbar() {
