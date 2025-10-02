@@ -40,6 +40,7 @@ export interface Task {
   link?: string;
   documentNumber?: string;
   rev?: string;
+  currentStep?: string; // ← เพิ่มบรรทัดนี้
 }
 
 export interface SubTask {
@@ -62,4 +63,9 @@ export interface SubTask {
     fileName: string;
     fileUrl: string;
   }>;
+}
+
+export interface RelateWork {
+  activityName: string;
+  relatedWorks?: any[]; // หรือกำหนด type ที่ชัดเจนตามโครงสร้างข้อมูล
 }

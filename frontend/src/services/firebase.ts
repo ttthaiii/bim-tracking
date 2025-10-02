@@ -1,6 +1,6 @@
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
-import { Project, Task, SubTask } from '@/types/database';
+import { Project, Task, SubTask, RelateWork } from '@/types/database';
 import { getTaskStatusCategory } from './dashboardService'; // Import the status category function
 
 export const fetchProjects = async () => {
@@ -164,4 +164,25 @@ export const getWorkloadByWeek = async (projectId?: string, excludedStatuses: st
     week: i + 1,
     workload: weekWorkload[i + 1] || 0
   }));
+};
+
+export const fetchRelateWorks = async () => {
+  const relateWorksRef = collection(db, 'relateWorks');
+  const snapshot = await getDocs(relateWorksRef);
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  })) as (RelateWork & { id: string })[];
+};
+
+export const fetchRelateWorksByProject = async (activityName: string) => {
+  const relateWorksRef = collection(db, 'relateWorks');
+  const snapshot = await getDocs(relateWorksRef);
+  
+  return snapshot.docs
+    .map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }))
+    .filter((item: any) => item.activityName === activityName) as (RelateWork & { id: string })[];
 };
