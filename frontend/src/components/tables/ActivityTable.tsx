@@ -7,11 +7,10 @@ import {
   TableHead,
   TableRow,
   Paper,
-  TablePagination,
   TableSortLabel,
   Chip
 } from '@mui/material';
-import { RecentActivity, getRecentActivities } from '@/services/dashboardService'; // Import getRecentActivities
+import { RecentActivity, getRecentActivities } from '@/services/dashboardService';
 import { useDashboard } from '@/context/DashboardContext';
 
 type Order = 'asc' | 'desc';
@@ -24,20 +23,37 @@ interface Column {
   format?: (value: any) => string;
 }
 
-// ... (columns and getStatusColor remain the same)
+// Function to format date to dd/mmm/yyyy (พ.ศ.)
+const formatThaiDate = (value: Date): string => {
+  if (!(value instanceof Date) || isNaN(value.getTime())) {
+    return 'N/A';
+  }
+
+  const thaiMonths = [
+    'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+  ];
+
+  const day = value.getDate();
+  const month = thaiMonths[value.getMonth()];
+  const year = value.getFullYear() + 543;
+
+  return `${day}/${month}/${year}`;
+};
+
 const columns: Column[] = [
   { id: 'runningNumber', label: 'ลำดับ', minWidth: 50, align: 'center' },
-  { 
-    id: 'date', 
-    label: 'วันที่', 
+  {
+    id: 'dueDate',
+    label: 'กำหนดส่ง',
     minWidth: 100,
-    format: (value: Date) => value.toLocaleDateString('th-TH')
+    format: formatThaiDate // Use the new formatting function
   },
   { id: 'projectName', label: 'โครงการ', minWidth: 130 },
   { id: 'documentNumber', label: 'เลขที่เอกสาร', minWidth: 150 },
-  { id: 'description', label: 'กิจกรรม', minWidth: 250 },
+  { id: 'description', label: 'ชื่อเอกสาร', minWidth: 250 },
   { id: 'currentStep', label: 'ขั้นตอนปัจจุบัน', minWidth: 180 },
-  { 
+  {
     id: 'status',
     label: 'สถานะ',
     minWidth: 100,
@@ -66,18 +82,15 @@ function getStatusColor(status: string): { color: string, backgroundColor: strin
   }
 }
 
-export default function ActivityTable() { // Removed activities from props
-  const { selectedStatus, selectedProject, excludedStatuses, setSelectedActivity } = useDashboard(); // Added excludedStatuses
+export default function ActivityTable() {
+  const { selectedStatus, selectedProject, excludedStatuses } = useDashboard();
   const [allActivities, setAllActivities] = useState<RecentActivity[]>([]);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [order, setOrder] = useState<Order>('desc');
-  const [orderBy, setOrderBy] = useState<keyof RecentActivity>('date');
+  const [orderBy, setOrderBy] = useState<keyof RecentActivity>('dueDate');
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [displayedActivities, setDisplayedActivities] = useState<RecentActivity[]>([]);
 
   useEffect(() => {
-    // Fetch activities inside the component
     getRecentActivities().then(data => {
       setAllActivities(data);
     });
@@ -86,25 +99,20 @@ export default function ActivityTable() { // Removed activities from props
   useEffect(() => {
     let filteredActivities = allActivities;
 
-    // Filter by legend (excludedStatuses)
     if (excludedStatuses.length > 0) {
         filteredActivities = filteredActivities.filter(activity => !excludedStatuses.includes(activity.status));
     }
 
-    // Filter by direct click on chart (selectedStatus)
     if (selectedStatus) {
       filteredActivities = filteredActivities.filter(activity => activity.status === selectedStatus);
     }
 
-    // Filter by project dropdown (selectedProject)
     if (selectedProject && selectedProject !== 'all') {
       filteredActivities = filteredActivities.filter(activity => activity.projectName === selectedProject);
     }
 
     setDisplayedActivities(filteredActivities);
-    setPage(0);
-  }, [selectedStatus, selectedProject, excludedStatuses, allActivities]); // Added excludedStatuses and allActivities
-
+  }, [selectedStatus, selectedProject, excludedStatuses, allActivities]);
 
   const handleRequestSort = (property: keyof RecentActivity) => {
     const isAsc = orderBy === property && order === 'asc';
@@ -112,18 +120,8 @@ export default function ActivityTable() { // Removed activities from props
     setOrderBy(property);
   };
 
-  const handleChangePage = (event: unknown, newPage: number) => {
-    setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(+event.target.value);
-    setPage(0);
-  };
-
   const handleRowClick = (activity: RecentActivity) => {
     setSelectedRowId(activity.id);
-    // setSelectedActivity(activity); // This might be used for a detail view
   };
 
   const sortedActivities = [...displayedActivities].sort((a, b) => {
@@ -132,6 +130,8 @@ export default function ActivityTable() { // Removed activities from props
     const valueB = b[orderBy as keyof RecentActivity];
     
     if (valueA instanceof Date && valueB instanceof Date) {
+      if (isNaN(valueA.getTime())) return 1;
+      if (isNaN(valueB.getTime())) return -1;
       return order === 'asc' 
         ? valueA.getTime() - valueB.getTime()
         : valueB.getTime() - valueA.getTime();
@@ -174,9 +174,7 @@ export default function ActivityTable() { // Removed activities from props
             </TableRow>
           </TableHead>
           <TableBody>
-            {sortedActivities
-              .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-              .map((activity, index) => {
+            {sortedActivities.map((activity, index) => {
                 return (
                   <TableRow
                     hover
@@ -191,7 +189,7 @@ export default function ActivityTable() { // Removed activities from props
                       if (column.id === 'runningNumber') {
                         return (
                           <TableCell key={column.id} align={column.align}>
-                            {page * rowsPerPage + index + 1}
+                            {index + 1}
                           </TableCell>
                         );
                       }
@@ -216,7 +214,7 @@ export default function ActivityTable() { // Removed activities from props
                       
                       return (
                         <TableCell key={column.id} align={column.align}>
-                          {column.format && value instanceof Date
+                          {column.format && (column.id === 'dueDate' || value instanceof Date)
                             ? column.format(value)
                             : String(value ?? '')}
                         </TableCell>
@@ -228,19 +226,6 @@ export default function ActivityTable() { // Removed activities from props
           </TableBody>
         </Table>
       </TableContainer>
-      <TablePagination
-        rowsPerPageOptions={[10, 25, 100]}
-        component="div"
-        count={displayedActivities.length}
-        rowsPerPage={rowsPerPage}
-        page={page}
-        onPageChange={handleChangePage}
-        onRowsPerPageChange={handleChangeRowsPerPage}
-        labelRowsPerPage="แถวต่อหน้า"
-        labelDisplayedRows={({ from, to, count }: { from: number, to: number, count: number }) => 
-          `${from}-${to} จาก ${count !== -1 ? count : `มากกว่า ${to}`}`
-        }
-      />
     </Paper>
   );
 }

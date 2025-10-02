@@ -1,15 +1,61 @@
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { Task } from '@/types/database';
 
-// 1. Add documentNumber to the interface
+function parseDate(dateInput: any): Date {
+    if (!dateInput) return new Date(NaN);
+
+    if (dateInput instanceof Date) {
+        return dateInput;
+    }
+
+    if (dateInput.toDate && typeof dateInput.toDate === 'function') {
+        return dateInput.toDate();
+    }
+
+    if (typeof dateInput === 'string') {
+        const thaiMonthMap: { [key: string]: number } = {
+            'ม.ค.': 0, 'ก.พ.': 1, 'มี.ค.': 2, 'เม.ย.': 3, 'พ.ค.': 4, 'มิ.ย.': 5,
+            'ก.ค.': 6, 'ส.ค.': 7, 'ก.ย.': 8, 'ต.ค.': 9, 'พ.ย.': 10, 'ธ.ค.': 11
+        };
+
+        const parts = dateInput.split('/');
+        if (parts.length === 3) {
+            const day = parseInt(parts[0], 10);
+            const monthStr = parts[1];
+            const year = parseInt(parts[2], 10);
+
+            let month = -1;
+            if (thaiMonthMap[monthStr] !== undefined) {
+                month = thaiMonthMap[monthStr];
+            } else if (!isNaN(parseInt(monthStr, 10))) {
+                month = parseInt(monthStr, 10) - 1; // JS month is 0-indexed
+            }
+
+            if (!isNaN(day) && month !== -1 && !isNaN(year)) {
+                // Convert from Buddhist year if applicable
+                const finalYear = year > 2500 ? year - 543 : year;
+                return new Date(finalYear, month, day);
+            }
+        }
+    }
+    
+    const parsedDate = new Date(dateInput);
+    if (!isNaN(parsedDate.getTime())) {
+        return parsedDate;
+    }
+
+    return new Date(NaN); // Return invalid date if all parsing fails
+}
+
 export interface RecentActivity {
   id: string;
   date: Date;
+  dueDate: Date;
   projectId: string;
   projectName: string;
   description: string;
-  documentNumber: string; // Added field
+  documentNumber: string;
   status: string; 
   currentStep?: string;
   subtaskCount?: number;
@@ -105,16 +151,15 @@ export async function getRecentActivities(): Promise<RecentActivity[]> {
     const activities = snapshot.docs
       .map(doc => {
         const task = doc.data() as Task;
-        const lastUpdate = task.lastUpdate?.toDate?.() || new Date();
         
         return {
           id: doc.id,
-          date: lastUpdate,
+          date: parseDate(task.lastUpdate),
+          dueDate: parseDate((task as any).dueDate), // Use any to bypass incorrect type
           projectId: task.projectId,
           projectName: projectsMap.get(task.projectId) || 'Unknown Project',
           activityType: 'Document Updated',
-          // 2. Add documentNumber to the returned object
-          documentNumber: task.documentNumber || '', // Added this line
+          documentNumber: task.documentNumber || '',
           status: getTaskStatusCategory(task),
           currentStep: task.currentStep,
           subtaskCount: task.subtaskCount,

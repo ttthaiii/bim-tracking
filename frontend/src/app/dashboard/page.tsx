@@ -70,7 +70,7 @@ function DashboardContent() {
       <div>
         <div className="flex justify-between items-center mb-8">
           <div className="flex items-center gap-4">
-            <h1 className="text-3xl font-bold">Project Dashboard</h1>
+            <h1 className="text-3xl font-bold text-gray-800">Project Dashboard</h1>
             <select 
               onChange={handleProjectChange}
               value={selectedProject || 'all'}
@@ -98,14 +98,14 @@ function DashboardContent() {
           </div>
 
           <div className="col-span-2 bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Team Workload Distribution</h2>
+            <h2 className="text-lg font-semibold mb-4 text-gray-800">Team Workload Distribution</h2>
             <WorkloadChart />
           </div>
         </div>
 
         {/* Recent Activities Table */}
         <div className="mt-6 bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">Activities</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-800">Activities</h2>
           <ActivityTable />
         </div>
       </div>
