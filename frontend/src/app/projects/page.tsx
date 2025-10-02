@@ -6,6 +6,7 @@ import CreateProjectModal from "@/components/modals/CreateProjectModal";
 import { fetchProjects, fetchRelateWorks, fetchTasks } from "@/services/firebase";
 import { Project, Task } from "@/types/database";
 import { Timestamp } from "firebase/firestore";
+import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
 
 interface TaskRow {
   firestoreId?: string;
@@ -171,6 +172,14 @@ const ProjectsPage = () => {
   const [activitiesLoading, setActivitiesLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
+  const [editedRows, setEditedRows] = useState<Set<number>>(new Set());
+  const [originalRows, setOriginalRows] = useState<Map<number, TaskRow>>(new Map());
+  const [showSaveModal, setShowSaveModal] = useState(false);
+const [saveModalData, setSaveModalData] = useState<{
+  updated: Array<{ id: string; name: string; changes: string[] }>;
+  created: Array<{ id: string; name: string; changes: string[] }>;
+}>({ updated: [], created: [] });
+
   useEffect(() => {
     const loadProjects = async () => {
       try {
@@ -270,6 +279,10 @@ if (currentProject && currentProject.abbr) {
 
 const handleRowChange = (idx: number, field: keyof TaskRow, value: string | boolean) => {
   setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
+  // บันทึกว่าแถวนี้ถูกแก้ไข
+  if (rows[idx]?.firestoreId) {
+    setEditedRows(prev => new Set(prev).add(idx));
+  }
 };
 
   const handleRowFocus = (idx: number) => {
@@ -319,6 +332,7 @@ const handleDelete = (idx: number) => {
     });
   };
 
+  
 const handleSave = async () => {
   if (!selectedProject) {
     alert('กรุณาเลือกโครงการก่อน');
@@ -335,12 +349,12 @@ const handleSave = async () => {
   const rowsToUpdate: TaskRow[] = [];
   const rowsToCreate: TaskRow[] = [];
 
-  rows.forEach(row => {
+  rows.forEach((row, idx) => {
     if (!row.relateDrawing || !row.activity || !row.startDate || !row.dueDate) {
       return;
     }
 
-    if (row.firestoreId) {
+    if (row.firestoreId && editedRows.has(idx)) {
       rowsToUpdate.push(row);
     } else if (!row.id) {
       rowsToCreate.push(row);
@@ -352,94 +366,104 @@ const handleSave = async () => {
     return;
   }
 
-  const confirmSave = window.confirm(
-    `คุณต้องการบันทึก ${rowsToUpdate.length} รายการที่แก้ไข และ ${rowsToCreate.length} รายการใหม่ ใช่หรือไม่?`
-  );
 
-  if (!confirmSave) return;
+// เตรียมข้อมูลสำหรับ Modal พร้อมรายละเอียดที่เปลี่ยนแปลง
+  const modalData = {
+    updated: rowsToUpdate.map((r, index) => {
+      const rowIdx = rows.findIndex(row => row.firestoreId === r.firestoreId);
+      const original = originalRows.get(rowIdx);
+      
+      const changes: string[] = [];
+      if (original) {
+        if (original.relateDrawing !== r.relateDrawing) {
+          changes.push(`ชื่อเอกสาร: "${original.relateDrawing}" → "${r.relateDrawing}"`);
+        }
+        if (original.activity !== r.activity) {
+          changes.push(`Activity: "${original.activity}" → "${r.activity}"`);
+        }
+        if (original.startDate !== r.startDate) {
+          changes.push(`วันเริ่ม: ${original.startDate || '-'} → ${r.startDate}`);
+        }
+        if (original.dueDate !== r.dueDate) {
+          changes.push(`วันครบกำหนด: ${original.dueDate || '-'} → ${r.dueDate}`);
+        }
+      }
+      
+      return {
+        id: r.id,
+        name: r.relateDrawing,
+        changes: changes.length > 0 ? changes : ['ไม่มีการเปลี่ยนแปลง']
+      };
+    }),
+    created: rowsToCreate.map(r => ({
+      id: '(จะสร้างใหม่)',
+      name: r.relateDrawing,
+      changes: [
+        `Activity: ${r.activity}`,
+        `วันเริ่ม: ${r.startDate}`,
+        `วันครบกำหนด: ${r.dueDate}`
+      ]
+    }))
+  };
+
+  setSaveModalData(modalData);
+  setShowSaveModal(true);
+};
+
+const confirmSave = async () => {
+  setShowSaveModal(false);
 
   try {
-    let finalRows = [...rows];
+    const currentProject = projects.find(p => p.id === selectedProject);
+    if (!currentProject) return;
 
-    // สร้าง TASK ID ให้แถวใหม่
+    let finalRows = [...rows];
+    const rowsToCreate = saveModalData.created;
+
     if (rowsToCreate.length > 0) {
       const maxRunning = rows.reduce((max, row) => {
         if (!row.id || !row.id.startsWith('TTS-BIM-')) return max;
         const parts = row.id.split('-');
         if (parts.length >= 5) {
-          const running = parseInt(parts[4]) || 0;
-          return Math.max(max, running);
+          return Math.max(max, parseInt(parts[4]) || 0);
         }
         return max;
       }, 0);
 
       let counter = maxRunning + 1;
-
       finalRows = rows.map(row => {
         if (row.firestoreId || row.id || !row.relateDrawing || !row.activity) {
           return row;
         }
-
         return {
           ...row,
-          id: generateTaskId(
-            currentProject.abbr,
-            row.activity,
-            rows,
-            activities,
-            counter++
-          )
+          id: generateTaskId(currentProject.abbr, row.activity, rows, activities, counter++)
         };
       });
 
       setRows(finalRows);
     }
 
-    // สร้างข้อความสรุป
-    let summary = '📊 สรุปการบันทึก\n\n';
-
-    if (rowsToUpdate.length > 0) {
-      summary += `✏️ แก้ไขข้อมูล: ${rowsToUpdate.length} รายการ\n`;
-      rowsToUpdate.forEach((row, i) => {
-        if (i < 3) {
-          summary += `   • ${row.id} - ${row.relateDrawing}\n`;
-        }
-      });
-      if (rowsToUpdate.length > 3) {
-        summary += `   ... และอีก ${rowsToUpdate.length - 3} รายการ\n`;
-      }
-      summary += '\n';
-    }
-
-    if (rowsToCreate.length > 0) {
-      const newTaskIds = finalRows.filter(r => !r.firestoreId && r.id);
-      
-      summary += `🆕 เพิ่มข้อมูลใหม่: ${rowsToCreate.length} รายการ\n`;
-      newTaskIds.slice(-rowsToCreate.length).forEach((row, i) => {
-        if (i < 3) {
-          summary += `   • ${row.id} - ${row.relateDrawing}\n`;
-        }
-      });
-      if (rowsToCreate.length > 3) {
-        summary += `   ... และอีก ${rowsToCreate.length - 3} รายการ\n`;
-      }
-    }
-
-    summary += '\n✅ บันทึกข้อมูลสำเร็จ';
-
     console.log('🆕 CREATE:', finalRows.filter(r => !r.firestoreId && r.id));
-    console.log('✏️ UPDATE:', rowsToUpdate);
-    
-    alert(summary);
+    console.log('✏️ UPDATE:', saveModalData.updated);
+
+    alert('✅ บันทึกข้อมูลสำเร็จ');
     setEditingRowIndex(null);
+    setEditedRows(new Set());
 
   } catch (error) {
     console.error('Error saving:', error);
-    alert('เกิดข้อผิดพลาดในการบันทึก');
+    alert('❌ เกิดข้อผิดพลาดในการบันทึก');
   }
 };
 
 const handleEdit = (idx: number) => {
+  // เก็บข้อมูลเดิมก่อนแก้ไข
+  setOriginalRows(prev => {
+    const newMap = new Map(prev);
+    newMap.set(idx, { ...rows[idx] });
+    return newMap;
+  });
   setEditingRowIndex(idx);
 };
 
@@ -773,6 +797,13 @@ const handleAdd = () => {
           </div>
         </div>
       </div>
+
+      <SaveConfirmationModal
+        isOpen={showSaveModal}
+        data={saveModalData}
+        onConfirm={confirmSave}
+        onCancel={() => setShowSaveModal(false)}
+      />
     </div>
   );
 };
