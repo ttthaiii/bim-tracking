@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
-import { getEmployeeTaskAssignments, TaskAssignment } from '@/services/taskAssignService';
+import { getEmployeeTaskAssignments, TaskAssignment, getRelateDrawingOptions } from '@/services/taskAssignService';
 import { RecheckPopup } from '@/components/RecheckPopup';
 import { LeavePopup } from '@/components/LeavePopup';
 import { TimeSelector } from '@/components/TimeSelector';
@@ -17,6 +17,7 @@ export default function DailyReport() {
   const [date, setDate] = useState<Value>(new Date());
   const [employeeId, setEmployeeId] = useState('');
   const [employeeData, setEmployeeData] = useState<{ employeeId: string; fullName: string } | null>(null);
+  const [availableSubtasks, setAvailableSubtasks] = useState<{ value: string; label: string; }[]>([]);
   const [workDate, setWorkDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -42,6 +43,32 @@ export default function DailyReport() {
       if (employee) {
         setEmployeeData(employee);
         setTaskAssignments(assignments);
+        
+        // ดึงข้อมูลสำหรับ Dropdown
+        const drawingOptions = await getRelateDrawingOptions(employee.fullName);
+        setAvailableSubtasks(drawingOptions);
+      } else {
+        setError('ไม่พบข้อมูลพนักงาน');
+        setEmployeeData(null);
+      }
+      
+      if (employee) {
+        setEmployeeData(employee);
+        setTaskAssignments(assignments);
+        
+        // ดึงข้อมูล Relate Drawing options
+        const drawingOptions = await getRelateDrawingOptions(employee.fullName);
+        
+        // เพิ่มตัวเลือกการลาต่อท้าย options
+        const allOptions = [
+          ...drawingOptions,
+          { value: 'ลาป่วย', label: 'ลาป่วย' },
+          { value: 'ลากิจ', label: 'ลากิจ' },
+          { value: 'ลาพักร้อน', label: 'ลาพักร้อน' },
+          { value: 'ลาอื่นๆ', label: 'ลาอื่นๆ' }
+        ];
+        
+        setAvailableSubtasks(allOptions);
       } else {
         setError('ไม่พบข้อมูลพนักงาน');
         setEmployeeData(null);
@@ -96,6 +123,7 @@ export default function DailyReport() {
         {/* Left side - Calendar */}
         <div className="w-80">
           <Calendar
+            locale="th-TH"
             onChange={(value: Value) => {
               if (value instanceof Date) {
                 if (hasUnsavedChanges) {
@@ -153,22 +181,21 @@ export default function DailyReport() {
                 return taskDate.getTime() === tileDateOnly.getTime();
               });
 
-              // ตรวจสอบเงื่อนไขและส่งคืน class ที่เหมาะสม
               let classes = ['rounded-full'];
 
-              // เช็ควันที่ปัจจุบัน
+              // แก้ไขจาก bg-blue-200 เป็น bg-blue-500 สำหรับวันที่ปัจจุบัน
               if (tileDateOnly.getTime() === today.getTime()) {
-                classes.push('bg-blue-200'); // วันที่ปัจจุบัน (สีฟ้า)
+                classes.push('bg-blue-500'); // เปลี่ยนเป็นสีฟ้าเข้มขึ้น
               }
 
               // เช็คว่ามีข้อมูลในวันนี้หรือไม่
               if (hasData) {
-                classes.push('bg-gray-200'); // วันที่มีการลงข้อมูลแล้ว (สีเทา)
+                classes.push('bg-gray-200');
                 if (tileDateOnly >= twoDaysAgo && tileDateOnly <= today) {
-                  classes.push('ring-2 ring-yellow-400'); // วันที่มีการแก้ไขข้อมูล (ขอบสีเหลือง)
+                  classes.push('ring-2 ring-yellow-400');
                 }
               } else if (tileDateOnly >= twoDaysAgo && tileDateOnly <= today) {
-                classes.push('bg-green-200'); // วันที่สามารถลงข้อมูลย้อนหลังได้ (สีเขียว)
+                classes.push('bg-green-200');
               }
               
               return classes.join(' ');
@@ -212,7 +239,7 @@ export default function DailyReport() {
                   <button
                     type="button"
                     onClick={handleEmployeeSearch}
-                    className="ml-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                    className="ml-2 px-4 py-2 bg-blue-500 text-white rounded"
                     disabled={loading}
                   >
                     {loading ? 'กำลังค้นหา...' : 'ค้นหา'}
@@ -247,8 +274,8 @@ export default function DailyReport() {
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
-                                    <tr className="bg-gray-100">
-                    <th className="border p-2 text-left w-12">No</th>
+                  <tr className="bg-[#FF4B12] text-white">
+                    <th className="border px-4 py-2 text-left w-12">No</th>
                     <th className="border p-2 text-left w-1/4">Relate Drawing</th>
                     <th className="border p-2 text-left w-48">เวลาทำงาน / Working Hours</th>
                     <th className="border p-2 text-left w-48">เวลาโอที / Overtime</th>
@@ -270,13 +297,22 @@ export default function DailyReport() {
                         {assignment.isLeaveRow ? (
                           <div className="font-medium text-gray-700">{assignment.relateDrawing}</div>
                         ) : (
-                          <input
-                            type="text"
-                            value={assignment.relateDrawing || ''}
+                          <select
+                            value={assignment.relateDrawing}
                             onChange={(e) => handleUpdateTask(assignment.id, { relateDrawing: e.target.value })}
-                            className="border rounded p-1 w-full"
-                            placeholder="ใส่ชื่องาน"
-                          />
+                            className="w-full border border-gray-300 rounded p-2"
+                          >
+                            <option value="">เลือกงาน</option>
+                            {availableSubtasks.map((option, index) => (
+                              <option key={index} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                            <option value="ลาป่วย">ลาป่วย</option>
+                            <option value="ลากิจ">ลากิจ</option>
+                            <option value="ลาพักร้อน">ลาพักร้อน</option>
+                            <option value="ลาอื่นๆ">ลาอื่นๆ</option>
+                          </select>
                         )}
                       </td>
                       <td className="border p-2">
@@ -510,7 +546,7 @@ export default function DailyReport() {
             <div className="mt-4 flex justify-between">
               <button
                 type="button"
-                className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600"
+                className="bg-[#FF4B12] hover:bg-[#ff5c28] text-white px-4 py-2 rounded transition-colors duration-200"
                 onClick={() => {
                   const newTask: TaskAssignment = {
                     id: `temp-${Date.now()}`,
@@ -524,37 +560,7 @@ export default function DailyReport() {
                     status: 'pending',
                     isLeaveRow: false
                   };
-                  
-                  // Create leave rows if they don't exist
-                  const leaveTypes: Array<{type: TaskAssignment['leaveType'], name: string}> = [
-                    { type: 'sick', name: 'ลาป่วย' },
-                    { type: 'personal', name: 'ลากิจ' },
-                    { type: 'vacation', name: 'ลาพักร้อน' },
-                    { type: 'other', name: 'ลาอื่นๆ' }
-                  ];
-                  
-                  const existingLeaveRows = taskAssignments.filter(task => task.isLeaveRow);
-                  let newLeaveRows: TaskAssignment[] = [];
-                  
-                  if (existingLeaveRows.length === 0) {
-                    newLeaveRows = leaveTypes.map(leave => ({
-                      id: `leave-${leave.type}-${Date.now()}`,
-                      relateDrawing: leave.name,
-                      employeeId: employeeId || '',
-                      assignDate: workDate,
-                      workingHours: '',
-                      overtimeHours: '',
-                      progress: '0%',
-                      note: '',
-                      status: 'pending',
-                      isLeaveRow: true,
-                      leaveType: leave.type
-                    }));
-                  }
-                  
-                  // Filter out any existing leave rows and add them back at the bottom
-                  const regularTasks = taskAssignments.filter(task => !task.isLeaveRow);
-                  setTaskAssignments([...regularTasks, newTask, ...existingLeaveRows.length > 0 ? existingLeaveRows : newLeaveRows]);
+                  setTaskAssignments([...taskAssignments, newTask]);
                 }}
                 disabled={!employeeId}
               >
@@ -562,7 +568,7 @@ export default function DailyReport() {
               </button>
               <button
                 type="submit"
-                className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
+                className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded transition-colors duration-200"
                 onClick={handleSubmit}
               >
                 Submit
