@@ -1,4 +1,4 @@
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 
 export interface RelateWork {
@@ -8,7 +8,7 @@ export interface RelateWork {
 }
 
 export interface ActivityOption {
-  value: string; // document ID
+  value: string; // activityName
   label: string; // activityName
 }
 
@@ -28,7 +28,7 @@ export const getActivities = async (): Promise<ActivityOption[]> => {
     return snapshot.docs.map(doc => {
       const data = doc.data() as RelateWork;
       return {
-        value: doc.id,
+        value: data.activityName || doc.id,
         label: data.activityName || doc.id
       };
     });
@@ -39,28 +39,38 @@ export const getActivities = async (): Promise<ActivityOption[]> => {
 };
 
 /**
- * ดึงข้อมูล Relate Works ตาม Activity ที่เลือก
+ * ดึงข้อมูล Relate Works ตาม Activity Name ที่เลือก
+ * แก้ไขให้ใช้ activityName แทน document ID
  */
 export const getRelateWorksByActivity = async (
-  activityId: string
+  activityName: string
 ): Promise<RelateWorkOption[]> => {
   try {
-    if (!activityId) return [];
+    if (!activityName) return [];
     
     const relateWorksCol = collection(db, 'relateWorks');
-    const snapshot = await getDocs(relateWorksCol);
     
-    const doc = snapshot.docs.find(d => d.id === activityId);
-    if (!doc) return [];
+    // ใช้ query where activityName แทนการ find by document id
+    const q = query(relateWorksCol, where('activityName', '==', activityName));
+    const snapshot = await getDocs(q);
     
+    if (snapshot.empty) {
+      console.warn(`No relate works found for activity: ${activityName}`);
+      return [];
+    }
+    
+    // เอา document แรก (ควรมีแค่ document เดียวที่ match)
+    const doc = snapshot.docs[0];
     const data = doc.data() as RelateWork;
     const relatedWorks = data.relatedWorks || {};
     
-    // แปลง object เป็น array of options
-    return Object.values(relatedWorks).map(work => ({
-      value: work,
-      label: work
-    }));
+    // แปลง object เป็น array of options และเรียงลำดับ
+    return Object.values(relatedWorks)
+      .map(work => ({
+        value: work,
+        label: work
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   } catch (error) {
     console.error('Error fetching relate works:', error);
     return [];

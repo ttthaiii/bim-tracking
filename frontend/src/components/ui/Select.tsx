@@ -43,14 +43,13 @@ export default function Select({
         <option value="" disabled>
           {loading ? 'Loading...' : placeholder}
         </option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
+        {options.map((option, index) => (
+          <option key={`${option.value}-${index}`} value={option.value}>
             {option.label}
           </option>
         ))}
       </select>
       
-      {/* Dropdown Arrow */}
       <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
         <svg
           className="w-5 h-5 text-gray-400"

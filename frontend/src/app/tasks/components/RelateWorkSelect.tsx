@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Select, { SelectOption } from '@/components/ui/Select';
-import { getRelateWorksByActivity } from '@/lib/relateWorks';
+import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
+import { getCachedRelateWorks } from '@/services/cachedFirestoreService';
 
 interface RelateWorkSelectProps {
   activityId: string;
@@ -17,6 +18,7 @@ export default function RelateWorkSelect({
   disabled = false,
   className = ''
 }: RelateWorkSelectProps) {
+  const { getCache, setCache } = useFirestoreCache();
   const [relateWorks, setRelateWorks] = useState<SelectOption[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +31,7 @@ export default function RelateWorkSelect({
 
       setLoading(true);
       try {
-        const data = await getRelateWorksByActivity(activityId);
+        const data = await getCachedRelateWorks(activityId, getCache, setCache);
         setRelateWorks(data);
       } catch (error) {
         console.error('Error loading relate works:', error);
@@ -39,7 +41,7 @@ export default function RelateWorkSelect({
     };
 
     fetchRelateWorks();
-  }, [activityId]);
+  }, [activityId, getCache, setCache]);
 
   return (
     <Select
