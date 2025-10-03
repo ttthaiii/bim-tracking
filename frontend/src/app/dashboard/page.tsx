@@ -54,7 +54,7 @@ function DashboardContent() {
 
   useEffect(() => {
     setLoading(true);
-    getDashboardStats(selectedProject !== 'all' ? selectedProject : undefined)
+    getDashboardStats(selectedProject !== 'all' ? (selectedProject ?? undefined) : undefined)
       .then(statsData => {
         setStats(statsData);
       })
