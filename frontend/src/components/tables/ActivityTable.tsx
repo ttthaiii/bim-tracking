@@ -51,6 +51,7 @@ const columns: Column[] = [
   },
   { id: 'projectName', label: 'โครงการ', minWidth: 130 },
   { id: 'documentNumber', label: 'เลขที่เอกสาร', minWidth: 150 },
+  { id: 'revNo', label: 'Rev', minWidth: 50, align: 'center' }, // เพิ่มคอลัมน์ Rev เข้ามา
   { id: 'description', label: 'ชื่อเอกสาร', minWidth: 250 },
   { id: 'currentStep', label: 'ขั้นตอนปัจจุบัน', minWidth: 180 },
   {

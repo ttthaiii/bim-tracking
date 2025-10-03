@@ -61,6 +61,7 @@ export interface RecentActivity {
   subtaskCount?: number;
   totalMH?: number;
   activityType: string;
+  revNo?: string; // เพิ่มฟิลด์ revNo เข้ามาใน RecentActivity
 }
 
 export async function getProjectCount() {
@@ -164,7 +165,8 @@ export async function getRecentActivities(): Promise<RecentActivity[]> {
           currentStep: task.currentStep,
           subtaskCount: task.subtaskCount,
           totalMH: task.totalMH,
-          description: getActivityDescription(task)
+          description: getActivityDescription(task),
+          revNo: task.rev || '' // ดึงค่า rev จาก task เข้ามาใน RecentActivity
         };
       })
       .sort((a, b) => b.date.getTime() - a.date.getTime());

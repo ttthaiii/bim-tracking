@@ -6,9 +6,11 @@ export interface TaskAssignment {
   relateDrawing: string;
   employeeId: string;
   assignDate: string;
-  time?: string;
+  // Removed time?: string; as per request
   timeType?: 'normal' | 'ot' | 'leave';
-  workingHours?: string;
+  // Removed workingHours?: string; as per request
+  normalWorkingHours?: string; // New field for normal working hours
+  otWorkingHours?: string;     // New field for OT working hours
   progress: string;
   note?: string;
   status: 'pending' | 'in-progress' | 'completed';
@@ -38,8 +40,10 @@ export const getEmployeeTaskAssignments = async (employeeId: string): Promise<Ta
         relateDrawing: data.relateDrawing,
         employeeId: data.employeeId,
         assignDate: data.assignDate,
-        time: data.time,
-        workingHours: data.workingHours,
+        // time: data.time, // Removed
+        timeType: data.timeType || 'normal', // Default to 'normal'
+        normalWorkingHours: data.normalWorkingHours || '', // Initialize new fields
+        otWorkingHours: data.otWorkingHours || '',
         progress: data.progress,
         note: data.note,
         status: data.status

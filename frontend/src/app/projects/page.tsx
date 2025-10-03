@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useEffect, useState } from "react";
-import Navbar from "@/components/shared/Navbar";
 import CreateProjectModal from "@/components/modals/CreateProjectModal";
 import { fetchProjects, fetchRelateWorks, fetchTasks } from "@/services/firebase";
 import { Project, Task } from "@/types/database";
 import { Timestamp } from "firebase/firestore";
+import PageLayout from "@/components/shared/PageLayout"; 
 
 interface TaskRow {
   firestoreId?: string;
@@ -18,6 +18,7 @@ interface TaskRow {
   lastRev: string;
   docNo: string;
   correct: boolean;
+  rev?: string; 
 }
 
 const initialRows: TaskRow[] = [
@@ -41,23 +42,16 @@ const formatDate = (timestamp: any): string => {
     return "";
   }
   
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
   try {
+    let date: Date;
+
     if (timestamp instanceof Timestamp) {
-      const date = timestamp.toDate();
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    }
-    
-    if (timestamp instanceof Date) {
-      const year = timestamp.getFullYear();
-      const month = String(timestamp.getMonth() + 1).padStart(2, '0');
-      const day = String(timestamp.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    }
-    
-    if (typeof timestamp === 'string') {
+      date = timestamp.toDate();
+    } else if (timestamp instanceof Date) {
+      date = timestamp;
+    } else if (typeof timestamp === 'string') {
       const thaiMonthMap: { [key: string]: string } = {
         'ม.ค.': '01', 'ก.พ.': '02', 'มี.ค.': '03', 'เม.ย.': '04',
         'พ.ค.': '05', 'มิ.ย.': '06', 'ก.ค.': '07', 'ส.ค.': '08',
@@ -73,29 +67,30 @@ const formatDate = (timestamp: any): string => {
         const month = thaiMonthMap[monthThai];
         
         if (month && !isNaN(dayNum) && !isNaN(yearNum)) {
-          const day = String(dayNum).padStart(2, '0');
-          return `${yearNum}-${month}-${day}`;
+          // Adjust year for B.E. to C.E. conversion if it's a Thai year
+          const finalYear = yearNum > 2500 ? yearNum - 543 : yearNum; 
+          date = new Date(finalYear, parseInt(month) - 1, dayNum);
+        } else {
+          date = new Date(timestamp);
         }
+      } else {
+        date = new Date(timestamp);
       }
-      
-      const date = new Date(timestamp);
-      if (!isNaN(date.getTime())) {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      }
+    } else if (typeof timestamp === 'object' && timestamp.seconds) {
+      date = new Date(timestamp.seconds * 1000);
+    } else {
+      return "";
     }
     
-    if (typeof timestamp === 'object' && timestamp.seconds) {
-      const date = new Date(timestamp.seconds * 1000);
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+    if (isNaN(date.getTime())) {
+      return "";
     }
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const monthAbbr = monthNames[date.getMonth()];
+    const year = String(date.getFullYear()).slice(-2); // Get last 2 digits of year
     
-    return "";
+    return `${day}-${monthAbbr}-${year}`;
   } catch (error) {
     console.error('Error formatting date:', error, timestamp);
     return "";
@@ -107,15 +102,16 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
   
   return {
     firestoreId: task.id,
-    id: "",  // เว้นไว้ รอสร้างใหม่ตอนกด SAVE
+    id: "",  
     relateDrawing: taskData.taskName || "",
     activity: taskData.taskCategory || "",
     startDate: formatDate(taskData.startDate || taskData.planStartDate),
     dueDate: formatDate(taskData.dueDate),
     statusDwg: taskData.currentStep || "",
-    lastRev: taskData.id_Document || "",
+    lastRev: taskData.lastRev || "", 
     docNo: taskData.documentNumber || "",
-    correct: false
+    correct: false,
+    rev: taskData.rev || "", 
   };
 };
 
@@ -301,17 +297,13 @@ const ProjectsPage = () => {
   const statuses = ["กำลังดำเนินการ", "เสร็จสิ้น", "รอดำเนินการ"];
 
   return (
-    <div style={{ maxWidth: "100%", minHeight: "100vh", background: "#f0f2f5" }}>
-      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", position: "sticky", top: 0, zIndex: 20, boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
-        <Navbar />
-      </div>
-      
-      <div style={{ padding: "40px 40px", maxWidth: "100%", margin: "0 auto" }}>
-        <div style={{ marginBottom: "24px", display: "flex", gap: "16px", alignItems: "center" }}>
+    <PageLayout> 
+      <div className="py-8"> 
+        <div className="mb-6 flex items-center gap-4"> 
           <button 
             onClick={() => setIsCreateModalOpen(true)}
-            style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
-            <span style={{ color: "#6366f1", fontWeight: "bold" }}>+</span> สร้างโครงการใหม่
+            className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2" >
+            <span className="font-bold text-blue-600">+</span> สร้างโครงการใหม่
           </button>
           
           <CreateProjectModal
@@ -324,7 +316,7 @@ const ProjectsPage = () => {
             value={selectedProject}
             onChange={e => setSelectedProject(e.target.value)}
             disabled={loading}
-            style={{ padding: "8px 12px", width: "200px", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", backgroundColor: "#fff", color: "#374151", cursor: "pointer" }}>
+            className="w-52 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500" >
             <option value="">{loading ? "กำลังโหลด..." : "เลือกโครงการ"}</option>
             {projects.map(p => (
               <option key={p.id} value={p.id}>{p.name}</option>
@@ -334,7 +326,7 @@ const ProjectsPage = () => {
           <select
             value={selectedStatus}
             onChange={e => setSelectedStatus(e.target.value)}
-            style={{ padding: "8px 12px", width: "150px", border: "1px solid #ddd", borderRadius: "4px", fontSize: "14px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
+            className="w-36 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500" >
             <option value="">สถานะ</option>
             {statuses.map(status => (
               <option key={status} value={status}>{status}</option>
@@ -342,33 +334,20 @@ const ProjectsPage = () => {
           </select>
         </div>
 
-        <div style={{ background: "#fff", padding: "24px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.1), 0 1px 2px -1px rgba(0,0,0,0.1)", border: "1px solid #e5e7eb" }}>
-          <div style={{ marginBottom: "16px", borderBottom: "1px solid #e5e7eb", paddingBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: "14px", color: '#1f2937' }}>Project Name</div>
-            <div style={{ color: "#666", fontSize: "14px" }}>
+        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-md"> 
+          <div className="mb-4 flex items-center justify-between border-b border-gray-200 pb-4">
+            <div className="text-sm text-gray-800">Project Name</div>
+            <div className="text-sm text-gray-600">
               {selectedProject ? projects.find(p => p.id === selectedProject)?.name : "แสดง ชื่อโครงการ"}
             </div>
           </div>
 
           {tasksLoading ? (
-            <div style={{ textAlign: "center", padding: "40px", color: "#666" }}>กำลังโหลดข้อมูล...</div>
+            <div className="py-10 text-center text-gray-600">กำลังโหลดข้อมูล...</div>
           ) : (
-            <div style={{ overflowX: "auto", maxHeight: "600px", border: "1px solid #e5e7eb", borderRadius: '4px' }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
-                  <tr style={{ background: "#ff4d00" }}>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>TASK ID</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>RELATE DRAWING</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>ACTIVITY</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>START DATE</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>DUE DATE</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>STATUS DWG.</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>LAST REV.</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "left", color: "white", whiteSpace: "nowrap" }}>DOC. NO.</th>
-                    <th style={{ padding: "10px 12px", fontSize: 12, textAlign: "center", color: "white", whiteSpace: "nowrap" }}>CORRECT</th>
-                    <th style={{ padding: "10px 12px", width: 40 }}></th>
-                  </tr>
-                </thead>
+            <div className="overflow-x-auto rounded-md border border-gray-200" style={{ maxHeight: "600px" }}>
+              <table className="w-full table-auto border-collapse"> 
+                <thead className="bg-red-600 sticky top-0 z-10"><tr><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">TASK ID</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">RELATE DRAWING</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">ACTIVITY</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">START DATE</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">DUE DATE</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">REV</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">STATUS DWG.</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">LAST REV.</th><th className="px-3 py-2 text-left text-xs font-semibold uppercase text-white whitespace-nowrap">DOC. NO.</th><th className="px-3 py-2 text-center text-xs font-semibold uppercase text-white whitespace-nowrap">CORRECT</th><th className="px-3 py-2 w-10"></th></tr></thead>
                 <tbody>
                   {rows.map((row, idx) => {
                     const isNewRow = !row.firestoreId;
@@ -376,40 +355,41 @@ const ProjectsPage = () => {
                     const isEditable = isNewRow || isEditing;
                     
                     return (
-                      <tr key={row.firestoreId || `row-${idx}`} style={{ borderBottom: "1px solid #e5e7eb", background: isEditing ? "#fef3c7" : "#fff" }}>
-                        <td style={{ padding: "4px 12px", fontSize: 12, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
-                        <td style={{ padding: "4px 12px", minWidth: "250px" }}>
-                          <input type="text" value={row.relateDrawing} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "4px", fontSize: 12, backgroundColor: "#fff", color: '#1f2937', cursor: isEditable ? "text" : "not-allowed" }} />
+                      <tr key={row.firestoreId || `row-${idx}`} className={`border-b border-gray-200 ${isEditing ? "bg-yellow-50" : "bg-white"}`}> 
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-blue-600 min-w-[150px]">{row.id}</td>
+                        <td className="px-3 py-2 min-w-[250px]">
+                          <input type="text" value={row.relateDrawing} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-50" />
                         </td>
-                        <td style={{ padding: "4px 12px", minWidth: "180px" }}>
-                          <select value={row.activity} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "activity", e.target.value)} disabled={activitiesLoading || !isEditable} style={{ width: "100%", padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "4px", fontSize: 12, backgroundColor: "#fff", color: '#1f2937', cursor: isEditable ? "pointer" : "not-allowed" }}>
+                        <td className="px-3 py-2 min-w-[180px]">
+                          <select value={row.activity} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "activity", e.target.value)} disabled={activitiesLoading || !isEditable} className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-50">
                             <option value="">{activitiesLoading ? "Loading..." : "Select Activity"}</option>
                             {activities.map(act => (
                               <option key={act.id} value={act.activityName}>{act.activityName}</option>
                             ))}
                           </select>
                         </td>
-                        <td style={{ padding: "4px 12px", minWidth: "130px" }}>
-                          <input type="date" value={row.startDate} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "startDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "4px", fontSize: 12, backgroundColor: "#fff", color: '#1f2937', cursor: isEditable ? "text" : "not-allowed" }} />
+                        <td className="px-3 py-2 min-w-[130px]">
+                          <input type="date" value={row.startDate} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "startDate", e.target.value)} disabled={!isEditable} className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-50" />
                         </td>
-                        <td style={{ padding: "4px 12px", minWidth: "130px" }}>
-                          <input type="date" value={row.dueDate} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "dueDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "6px 8px", border: "1px solid #d1d5db", borderRadius: "4px", fontSize: 12, backgroundColor: "#fff", color: '#1f2937', cursor: isEditable ? "text" : "not-allowed" }} />
+                        <td className="px-3 py-2 min-w-[130px]">
+                          <input type="date" value={row.dueDate} onFocus={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "dueDate", e.target.value)} disabled={!isEditable} className="w-full rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-50" />
                         </td>
-                        <td style={{ padding: "4px 12px", fontSize: 12, color: "#1f2937" }}>{row.statusDwg ? translateStatus(row.statusDwg) : ""}</td>
-                        <td style={{ padding: "4px 12px", fontSize: 12, color: "#1f2937" }}>{row.lastRev}</td>
-                        <td style={{ padding: "4px 12px", fontSize: 12, color: "#1f2937" }}>{row.docNo}</td>
-                        <td style={{ padding: "4px 12px", textAlign: "center" }}>
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-800 min-w-[80px]">{row.rev}</td> 
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-800">{row.statusDwg ? translateStatus(row.statusDwg) : ""}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-800">{row.lastRev}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-800">{row.docNo}</td>
+                        <td className="px-3 py-2 text-center">
                           {isNewRow && !row.statusDwg ? (
-                            <span style={{ fontSize: 12, color: "#6b7280" }}>New</span>
+                            <span className="text-xs text-gray-500">New</span>
                           ) : isEditing ? (
-                            <button onClick={() => setEditingRowIndex(null)} style={{ padding: "4px 12px", background: "#10b981", border: "none", borderRadius: "4px", fontSize: 12, cursor: "pointer", color: "white" }}>Save</button>
+                            <button onClick={() => setEditingRowIndex(null)} className="rounded-md bg-green-500 px-3 py-1 text-xs text-white hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2">Save</button>
                           ) : (
-                            <button onClick={() => handleEdit(idx)} style={{ padding: "4px 12px", background: "#f97316", border: "none", borderRadius: "4px", fontSize: 12, cursor: "pointer", color: "white" }}>Edit</button>
+                            <button onClick={() => handleEdit(idx)} className="rounded-md bg-orange-500 px-3 py-1 text-xs text-white hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2">Edit</button>
                           )}
                         </td>
-                        <td style={{ padding: "4px 12px", textAlign: "center" }}>
-                          <button onClick={() => handleDelete(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px" }} disabled={!!row.statusDwg}>
-                            <span role="img" aria-label="delete" style={{ opacity: row.statusDwg ? 0.5 : 1 }}>🗑️</span>
+                        <td className="px-3 py-2 text-center">
+                          <button onClick={() => handleDelete(idx)} className="p-1 text-gray-600 hover:text-red-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled={!!row.statusDwg}>
+                            <span role="img" aria-label="delete">🗑️</span>
                           </button>
                         </td>
                       </tr>
@@ -420,13 +400,13 @@ const ProjectsPage = () => {
             </div>
           )}
 
-          <div style={{ marginTop: 24, display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-            <button onClick={handleSave} style={{ padding: "8px 24px", background: "#f97316", border: "none", borderRadius: "6px", fontSize: "14px", cursor: "pointer", color: "white", fontWeight: 500 }}>SAVE</button>
-            <button onClick={handleAdd} style={{ padding: "8px 16px", background: "#4f46e5", border: "none", borderRadius: "6px", fontSize: "14px", cursor: "pointer", color: "white", fontWeight: 500 }}>Add new Rev.</button>
+          <div className="mt-6 flex justify-end gap-3"> 
+            <button onClick={handleSave} className="rounded-md bg-orange-500 px-6 py-2 text-sm font-medium text-white shadow hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2">SAVE</button>
+            <button onClick={handleAdd} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">Add new Rev.</button>
           </div>
         </div>
       </div>
-    </div>
+    </PageLayout>
   );
 };
 

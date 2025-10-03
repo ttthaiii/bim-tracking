@@ -8,12 +8,15 @@ export interface Project {
 }
 
 export interface User {
-  Name: string;
-  ตำแหน่ง: string;
-  Email: string;
-  โครงการ: string;
-  Password: string;
-  รหัสพนักงาน: string;
+  employeeId: string; // รหัสพนักงาน
+  fullNameTh: string; // ชื่อ-นามสกุล ภาษาไทย
+  fullNameEn: string; // ชื่อ-นามสกุลภาษาอักฤษ
+  user: string;       // สำหรับกรอก userName ระบบ Login (e.g., pongsada.p)
+  password: string;   // รหัสพนักงานในการ Login (password is also employeeId)
+  // Fields that might already exist or be added later, made optional for flexibility
+  ตำแหน่ง?: string;
+  Email?: string;
+  โครงการ?: string;
 }
 
 export interface Task {
@@ -30,17 +33,14 @@ export interface Task {
   estWorkload: number;
   subtaskCount: number;
   subtasks?: Array<{ id: string }>;
-  subtasks?: Array<{ id: string }>;
   totalMH?: number;
   lastUpdate: Timestamp;
   startDate: Timestamp;
   endDate: Timestamp;
-  totalMH: number;
   progress: number;
   link?: string;
   documentNumber?: string;
-  rev?: string;
-  currentStep?: string; // ← เพิ่มบรรทัดนี้
+  rev?: string; // เพิ่มฟิลด์ rev เข้ามา
 }
 
 export interface SubTask {
