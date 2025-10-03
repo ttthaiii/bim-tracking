@@ -1,6 +1,6 @@
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp, doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/config/firebase';
-import { Project, Task, SubTask, RelateWork } from '@/types/database'; // เพิ่ม RelateWork ใน import เดียว
+import { Project, Task, SubTask, RelateWork } from '@/types/database';
 
 export const fetchProjects = async () => {
   const projectsRef = collection(db, 'projects');
@@ -92,4 +92,40 @@ export const fetchRelateWorksByProject = async (activityName: string) => {
       ...doc.data()
     }))
     .filter((item: any) => item.activityName === activityName) as (RelateWork & { id: string })[];
+};
+
+export const updateTask = async (taskId: string, data: Partial<Task>) => {
+  const taskRef = doc(db, 'tasks', taskId);
+  await updateDoc(taskRef, {
+    ...data,
+    lastUpdate: serverTimestamp()
+  });
+};
+
+export const createTask = async (projectId: string, taskData: any) => {
+  const taskId = taskData.id;
+  const taskRef = doc(db, 'tasks', taskId);
+  
+  const newTask = {
+    projectId,
+    taskName: taskData.relateDrawing,
+    taskNumber: taskData.id,
+    taskCategory: taskData.activity,
+    taskAssignee: '',
+    planStartDate: taskData.startDate ? Timestamp.fromDate(new Date(taskData.startDate)) : null,
+    startDate: null,
+    dueDate: taskData.dueDate ? Timestamp.fromDate(new Date(taskData.dueDate)) : null,
+    endDate: null,
+    estWorkload: 0,
+    subtaskCount: 0,
+    totalMH: 0,
+    progress: 0,
+    currentStep: '',
+    rev: taskData.rev || '00',
+    documentNumber: '',
+    lastUpdate: serverTimestamp()
+  };
+  
+  await setDoc(taskRef, newTask);
+  return taskId;
 };

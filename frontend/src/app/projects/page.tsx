@@ -7,6 +7,9 @@ import { fetchProjects, fetchRelateWorks, fetchTasks } from "@/services/firebase
 import { Project, Task } from "@/types/database";
 import { Timestamp } from "firebase/firestore";
 import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
+import { updateTask, createTask } from "@/services/firebase";
+import SuccessModal from "@/components/modals/SuccessModal";
+import AddRevisionModal from "@/components/modals/AddRevisionModal";
 
 interface TaskRow {
   firestoreId?: string;
@@ -108,13 +111,13 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
   
   return {
     firestoreId: task.id,
-    id: "",  // เว้นไว้ รอสร้างใหม่ตอนกด SAVE
+    id: "",
     relateDrawing: taskData.taskName || "",
     activity: taskData.taskCategory || "",
-    startDate: formatDate(taskData.startDate || taskData.planStartDate),
+    startDate: formatDate(taskData.planStartDate),
     dueDate: formatDate(taskData.dueDate),
     statusDwg: taskData.currentStep || "",
-    lastRev: taskData.rev || "",
+    lastRev: taskData.rev || "00",
     docNo: taskData.documentNumber || "",
     correct: false
   };
@@ -171,14 +174,17 @@ const ProjectsPage = () => {
   const [activities, setActivities] = useState<any[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
-  const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
+  const [editingRows, setEditingRows] = useState<Set<number>>(new Set());
   const [editedRows, setEditedRows] = useState<Set<number>>(new Set());
   const [originalRows, setOriginalRows] = useState<Map<number, TaskRow>>(new Map());
   const [showSaveModal, setShowSaveModal] = useState(false);
-const [saveModalData, setSaveModalData] = useState<{
-  updated: Array<{ id: string; name: string; changes: string[] }>;
-  created: Array<{ id: string; name: string; changes: string[] }>;
-}>({ updated: [], created: [] });
+  const [saveModalData, setSaveModalData] = useState<{
+    updated: Array<{ id: string; name: string; changes: string[] }>;
+    created: Array<{ id: string; name: string; changes: string[] }>;
+  }>({ updated: [], created: [] });
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showAddRevModal, setShowAddRevModal] = useState(false);
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -345,21 +351,36 @@ const handleSave = async () => {
     return;
   }
 
-  // แยกแถวที่ต้อง UPDATE และ CREATE
-  const rowsToUpdate: TaskRow[] = [];
-  const rowsToCreate: TaskRow[] = [];
+ // แยกแถวที่ต้อง UPDATE และ CREATE
+const rowsToUpdate: TaskRow[] = [];
+const rowsToCreate: TaskRow[] = [];
 
-  rows.forEach((row, idx) => {
-    if (!row.relateDrawing || !row.activity || !row.startDate || !row.dueDate) {
-      return;
-    }
+rows.forEach((row, idx) => {
+  // ข้ามแถวว่าง
+  if (!row.relateDrawing || !row.activity || !row.startDate || !row.dueDate) {
+    return;
+  }
 
-    if (row.firestoreId && editedRows.has(idx)) {
-      rowsToUpdate.push(row);
-    } else if (!row.id) {
-      rowsToCreate.push(row);
-    }
-  });
+  // UPDATE: แถวที่มี firestoreId และถูกแก้ไข
+  if (row.firestoreId && editedRows.has(idx)) {
+    rowsToUpdate.push(row);
+  } 
+  // CREATE: แถวที่ไม่มี firestoreId (ไม่ว่าจะมี id หรือไม่ก็ตาม)
+  else if (!row.firestoreId) {
+    rowsToCreate.push(row);
+  }
+});
+
+console.log('🔍 Save analysis:', {
+  totalRows: rows.length,
+  toUpdate: rowsToUpdate.length,
+  toCreate: rowsToCreate.length,
+  createRows: rowsToCreate.map(r => ({
+    name: r.relateDrawing,
+    rev: r.lastRev,
+    hasId: !!r.id
+  }))
+});
 
   if (rowsToUpdate.length === 0 && rowsToCreate.length === 0) {
     alert('ไม่มีข้อมูลที่ต้องบันทึก');
@@ -382,7 +403,7 @@ const handleSave = async () => {
           changes.push(`Activity: "${original.activity}" → "${r.activity}"`);
         }
         if (original.startDate !== r.startDate) {
-          changes.push(`วันเริ่ม: ${original.startDate || '-'} → ${r.startDate}`);
+          changes.push(`วันเริ่มตามแผน: ${original.startDate || '-'} → ${r.startDate}`);
         }
         if (original.dueDate !== r.dueDate) {
           changes.push(`วันครบกำหนด: ${original.dueDate || '-'} → ${r.dueDate}`);
@@ -400,7 +421,7 @@ const handleSave = async () => {
       name: r.relateDrawing,
       changes: [
         `Activity: ${r.activity}`,
-        `วันเริ่ม: ${r.startDate}`,
+        `วันเริ่มตามแผน: ${r.startDate}`,
         `วันครบกำหนด: ${r.dueDate}`
       ]
     }))
@@ -417,54 +438,142 @@ const confirmSave = async () => {
     const currentProject = projects.find(p => p.id === selectedProject);
     if (!currentProject) return;
 
+    // ==================== UPDATE ====================
+    const updatePromises = saveModalData.updated.map(async (updatedItem) => {
+      const row = rows.find(r => r.id === updatedItem.id);
+      if (!row || !row.firestoreId) return;
+
+      await updateTask(row.firestoreId, {
+        taskName: row.relateDrawing,
+        taskCategory: row.activity,
+        planStartDate: row.startDate ? Timestamp.fromDate(new Date(row.startDate)) : null,
+        dueDate: row.dueDate ? Timestamp.fromDate(new Date(row.dueDate)) : null
+      } as any);
+    });
+
+    await Promise.all(updatePromises);
+
+    // ==================== CREATE ====================
     let finalRows = [...rows];
-    const rowsToCreate = saveModalData.created;
+    const rowsToCreate = rows.filter(r => !r.firestoreId && !r.id && r.relateDrawing && r.activity);
 
-    if (rowsToCreate.length > 0) {
-      const maxRunning = rows.reduce((max, row) => {
-        if (!row.id || !row.id.startsWith('TTS-BIM-')) return max;
-        const parts = row.id.split('-');
-        if (parts.length >= 5) {
-          return Math.max(max, parseInt(parts[4]) || 0);
-        }
-        return max;
-      }, 0);
-
-      let counter = maxRunning + 1;
-      finalRows = rows.map(row => {
-        if (row.firestoreId || row.id || !row.relateDrawing || !row.activity) {
-          return row;
-        }
-        return {
-          ...row,
-          id: generateTaskId(currentProject.abbr, row.activity, rows, activities, counter++)
-        };
-      });
-
-      setRows(finalRows);
+if (rowsToCreate.length > 0) {
+  // หา Running No. สูงสุด
+  const maxRunning = rows.reduce((max, row) => {
+    if (!row.id || !row.id.startsWith('TTS-BIM-')) return max;
+    const parts = row.id.split('-');
+    if (parts.length >= 5) {
+      return Math.max(max, parseInt(parts[4]) || 0);
     }
+    return max;
+  }, 0);
 
-    console.log('🆕 CREATE:', finalRows.filter(r => !r.firestoreId && r.id));
-    console.log('✏️ UPDATE:', saveModalData.updated);
+  let counter = maxRunning + 1;
 
-    alert('✅ บันทึกข้อมูลสำเร็จ');
-    setEditingRowIndex(null);
+  // สร้าง Task ID และบันทึกลง Firestore
+  const createPromises = rowsToCreate.map(async (row) => {
+    // ถ้ายังไม่มี TASK ID ให้สร้างให้
+    const taskId = row.id || generateTaskId(
+      currentProject.abbr,
+      row.activity,
+      rows,
+      activities,
+      counter++
+    );
+
+    const newFirestoreId = await createTask(selectedProject, {
+      ...row,
+      id: taskId,
+      rev: row.lastRev || '00'
+    });
+
+    return { ...row, id: taskId, firestoreId: newFirestoreId };
+  });
+
+  const createdRows = await Promise.all(createPromises);
+
+  // อัพเดท state
+  finalRows = rows.map(row => {
+    const created = createdRows.find(cr => 
+      cr.relateDrawing === row.relateDrawing && !row.firestoreId
+    );
+    return created || row;
+  });
+
+  setRows(finalRows);
+}
+
+    console.log('✅ บันทึกสำเร็จ');
+    console.log('📝 อัพเดท:', saveModalData.updated.length, 'รายการ');
+    console.log('🆕 สร้างใหม่:', rowsToCreate.length, 'รายการ');
+
+    setSuccessMessage(`บันทึกสำเร็จ ${saveModalData.updated.length} รายการแก้ไข และ ${rowsToCreate.length} รายการใหม่`);
+    setShowSuccessModal(true);
+    setEditingRows(new Set());
     setEditedRows(new Set());
+    setOriginalRows(new Map());
 
   } catch (error) {
-    console.error('Error saving:', error);
-    alert('❌ เกิดข้อผิดพลาดในการบันทึก');
+    console.error('❌ Error saving:', error);
+    alert('❌ เกิดข้อผิดพลาดในการบันทึก: ' + (error instanceof Error ? error.message : 'Unknown error'));
   }
 };
 
 const handleEdit = (idx: number) => {
-  // เก็บข้อมูลเดิมก่อนแก้ไข
   setOriginalRows(prev => {
     const newMap = new Map(prev);
-    newMap.set(idx, { ...rows[idx] });
+    if (!prev.has(idx)) {
+      newMap.set(idx, { ...rows[idx] });
+    }
     return newMap;
   });
-  setEditingRowIndex(idx);
+  setEditingRows(prev => new Set(prev).add(idx));
+};
+
+const handleCancelEdit = (idx: number) => {
+  const original = originalRows.get(idx);
+  if (original) {
+    setRows(rows => rows.map((row, i) => i === idx ? original : row));
+  }
+  setEditingRows(prev => {
+    const newSet = new Set(prev);
+    newSet.delete(idx);
+    return newSet;
+  });
+  setEditedRows(prev => {
+    const newSet = new Set(prev);
+    newSet.delete(idx);
+    return newSet;
+  });
+};
+
+const handleSelectTaskForRevision = (task: any) => {
+  // หา rev. ล่าสุด
+  const relatedTasks = rows.filter(r => 
+    r.relateDrawing.startsWith(task.taskName.replace(/\sREV\.\d+$/, ''))
+  );
+  
+  const maxRev = relatedTasks.reduce((max, r) => {
+    const revMatch = r.lastRev?.match(/\d+/);
+    return revMatch ? Math.max(max, parseInt(revMatch[0])) : max;
+  }, 0);
+  
+  const nextRev = String(maxRev + 1).padStart(2, '0');
+  
+  // สร้างแถวใหม่
+  const newRow = {
+    id: "",
+    relateDrawing: `${task.taskName} REV.${nextRev}`,
+    activity: task.taskCategory,
+    startDate: "",
+    dueDate: "",
+    statusDwg: "",
+    lastRev: nextRev,
+    docNo: "",
+    correct: false
+  };
+  
+  setRows([...rows.filter(r => r.relateDrawing || r.activity), newRow, initialRows[0]]);
 };
 
 const handleAdd = () => {
@@ -583,7 +692,7 @@ const handleAdd = () => {
   <div style={{ 
     overflowX: "auto", 
     overflowY: "auto", 
-    maxHeight: "600px",
+    maxHeight: "calc(100vh - 300px)",
     position: "relative",
     border: "1px solid #e5e7eb"
   }}>
@@ -598,22 +707,23 @@ const handleAdd = () => {
         boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
       }}>
         <tr style={{ background: "#ff4d00" }}>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "150px" }}>TASK ID</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "250px" }}>RELATE DRAWING</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>ACTIVITY</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "130px" }}>START DATE</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "130px" }}>DUE DATE</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>STATUS DWG.</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "100px" }}>LAST REV.</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>DOC. NO.</th>
-          <th style={{ padding: "8px 12px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "80px" }}>CORRECT</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>TASK ID</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>RELATE DRAWING</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>ACTIVITY</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>PLAN START DATE</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "110px" }}>DUE DATE</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>STATUS DWG.</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "70px" }}>LINK FILE</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>DOC. NO.</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "80px" }}>LAST REV.</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "90px" }}>CORRECT</th>
           <th style={{ padding: "8px 12px", width: 40, color: "white" }}></th>
         </tr>
       </thead>
       <tbody>
 {rows.map((row, idx) => {
   const isNewRow = !row.id; // แถวใหม่ที่ยังไม่มี TASK ID
-  const isEditing = editingRowIndex === idx; // แถวที่กำลังแก้ไข
+  const isEditing = editingRows.has(idx); // แถวที่กำลังแก้ไข
   const isEditable = isNewRow || isEditing; // แก้ไขได้หรือไม่
   
   return (
@@ -624,8 +734,8 @@ const handleAdd = () => {
         background: isEditing ? "#fff7ed" : "#fff" // ไฮไลท์แถวที่กำลังแก้
       }}
     >
-      <td style={{ padding: "6px 10px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
-      <td style={{ padding: "6px 10px", fontSize: 10, minWidth: "250px" }}>
+      <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
+      <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
         <input
           type="text"
           value={row.relateDrawing}
@@ -701,19 +811,37 @@ const handleAdd = () => {
           }}
         />
       </td>
-      <td style={{ padding: "6px 10px", fontSize: 10, color: "#2563eb" }}>
+      <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
         {row.statusDwg ? translateStatus(row.statusDwg) : ""}
       </td>
-      <td style={{ padding: "6px 10px", fontSize: 10 }}>{row.lastRev}</td>
-      <td style={{ padding: "6px 10px", fontSize: 10 }}>{row.docNo}</td>
-      <td style={{ padding: "6px 10px", fontSize: 10, textAlign: "center" }}>
+      <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+        {row.docNo ? (
+          <a 
+            href="#" 
+            style={{ color: "#3b82f6", textDecoration: "none" }}
+            onClick={(e) => {
+              e.preventDefault();
+              alert('Link file feature coming soon');
+            }}
+          >
+            📎
+          </a>
+        ) : (
+          <span style={{ color: "#9ca3af" }}>-</span>
+        )}
+      </td>
+      <td style={{ padding: "4px 6px", fontSize: 10 }}>{row.docNo}</td>
+      <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
+        {row.lastRev || "00"}
+      </td>
+      <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
         {row.statusDwg ? (
           <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
         ) : isNewRow ? (
           <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
         ) : isEditing ? (
           <button 
-            onClick={() => setEditingRowIndex(null)}
+            onClick={() => handleCancelEdit(idx)}
             style={{
               padding: "3px 10px",
               background: "#10b981",
@@ -745,7 +873,7 @@ const handleAdd = () => {
           </button>
         )}
       </td>
-      <td style={{ padding: "6px 10px", fontSize: 10, textAlign: "center" }}>
+      <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
         <button
           onClick={() => handleDelete(idx)}
           style={{ background: "none", border: "none", cursor: "pointer", padding: "2px" }}
@@ -778,9 +906,9 @@ const handleAdd = () => {
               >
                 SAVE
               </button>
-            <button
-              onClick={handleAdd}
-              style={{
+              <button
+                onClick={() => setShowAddRevModal(true)}
+                style={{
                 padding: "8px 16px",
                 background: "#4f46e5",
                 border: "none",
@@ -803,6 +931,23 @@ const handleAdd = () => {
         data={saveModalData}
         onConfirm={confirmSave}
         onCancel={() => setShowSaveModal(false)}
+      />
+      <SuccessModal
+        isOpen={showSuccessModal}
+        message={successMessage}
+        onClose={() => setShowSuccessModal(false)}
+      />
+      <AddRevisionModal
+        isOpen={showAddRevModal}
+        tasks={rows.filter(r => r.firestoreId).map(r => ({
+          id: r.id,
+          taskName: r.relateDrawing,
+          taskCategory: r.activity,
+          currentStep: r.statusDwg,
+          rev: r.lastRev
+        }))}
+        onSelect={handleSelectTaskForRevision}
+        onClose={() => setShowAddRevModal(false)}
       />
     </div>
   );
