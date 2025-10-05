@@ -100,3 +100,102 @@ export const aggregateSubtaskData = onDocumentWritten(
     }
   }
 );
+
+export const aggregateTaskData = onDocumentWritten(
+  {
+    document: "tasks/{taskId}/subtasks/{subtaskId}",
+    region: "asia-southeast1",
+  },
+  async (event) => {
+    logger.info("--- aggregateTaskData function triggered! ---");
+
+    // 1. ดึง taskId จาก event parameter เพื่อหาว่า task ตัวไหนที่ต้องอัปเดต
+    const taskId = event.params.taskId;
+    logger.info(`Parent task ID to update: ${taskId}`);
+
+    // 2. อ้างอิงไปยัง collection ของ subtasks ทั้งหมดของ task นี้
+    const subtasksCollectionRef = db.collection(`tasks/${taskId}/subtasks`);
+
+    // 3. ดึงข้อมูล subtasks ทั้งหมดออกมา
+    const allSubtasksSnapshot = await subtasksCollectionRef.get();
+    const allSubtasks = allSubtasksSnapshot.docs.map(doc => doc.data());
+
+    // 4. ถ้าไม่มี subtask เหลืออยู่เลย (เช่น ถูกลบไปหมด) ให้ reset ค่าที่ task หลัก
+    if (allSubtasks.length === 0) {
+      logger.info(`No subtasks found for task ${taskId}. Resetting task values.`);
+      const taskRef = db.collection("tasks").doc(taskId);
+      await taskRef.update({
+        subtaskCount: 0,
+        progress: 0,
+        estWorkload: 0,
+        totalMH: 0,
+        startDate: null,
+        endDate: null,
+        lastUpdate: admin.firestore.FieldValue.serverTimestamp(), // อัปเดตเวลาล่าสุด
+      });
+      return;
+    }
+
+    logger.info(`Found ${allSubtasks.length} subtasks. Starting calculation...`);
+
+    // 5. เริ่มทำการคำนวณค่าต่างๆ
+    let subtaskCount = allSubtasks.length;
+    let totalProgress = 0;
+    let estWorkload = 0;
+    let totalMH = 0;
+    let startDates: Date[] = [];
+    let lastUpdates: Date[] = [];
+    let endDates: Date[] = [];
+    let allSubtasksAreDone = true;
+
+    allSubtasks.forEach(subtask => {
+      // --- คำนวณผลรวม ---
+      totalProgress += subtask.subTaskProgress || 0;
+      estWorkload += subtask.wlFromscale || 0;
+      totalMH += (subtask.mhOD || 0) + (subtask.mhOT || 0);
+
+      // --- เก็บค่าวันที่เพื่อหา min/max ---
+      if (subtask.startDate?.toDate) startDates.push(subtask.startDate.toDate());
+      if (subtask.lastUpdate?.toDate) lastUpdates.push(subtask.lastUpdate.toDate());
+      
+      // --- ตรวจสอบเงื่อนไข endDate ---
+      if (subtask.subTaskProgress < 100) {
+        allSubtasksAreDone = false;
+      }
+      if (subtask.endDate?.toDate) {
+        endDates.push(subtask.endDate.toDate());
+      }
+    });
+
+    // 6. สรุปผลการคำนวณ
+    const progress = totalProgress / subtaskCount;
+    const startDate = startDates.length > 0 ? new Date(Math.min(...startDates.map(d => d.getTime()))) : null;
+    const lastUpdate = lastUpdates.length > 0 ? new Date(Math.max(...lastUpdates.map(d => d.getTime()))) : null;
+    
+    // endDate จะมีค่าก็ต่อเมื่อทุก subtask เสร็จ 100%
+    const endDate = allSubtasksAreDone && endDates.length > 0 
+      ? new Date(Math.max(...endDates.map(d => d.getTime()))) 
+      : null;
+
+    // 7. เตรียมข้อมูลสำหรับอัปเดต
+    const updatePayload = {
+      subtaskCount,
+      progress,
+      estWorkload,
+      totalMH,
+      startDate,
+      endDate,
+      lastUpdate,
+    };
+    logger.info("Final payload for parent task:", updatePayload);
+
+    // 8. อัปเดตข้อมูลที่เอกสาร task หลัก
+    const taskRef = db.collection("tasks").doc(taskId);
+    try {
+      await taskRef.update(updatePayload);
+      logger.info(`✅ Successfully updated parent task '${taskId}'!`);
+    } catch (error) {
+      logger.error(`❌ Error updating parent task '${taskId}':`, error);
+    }
+  }
+);

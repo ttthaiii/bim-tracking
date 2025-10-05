@@ -1,8 +1,0 @@
-# pack-refs with: peeled fully-peeled sorted 
-f4c161c42ee8f46e097ac5aaef11efd92c80d70d refs/heads/feature/DailyReport
-1ed82140371c97443d12b5e7ff72131bdb7abe59 refs/heads/feature/ReportDashboard
-5f41057d17e292bd6a4bbbafcfdbd411c4ff56bc refs/heads/feature/TaskAssignment
-a54b723256cf6d53f74199a9714e51a946d395ee refs/heads/feature/TaskOverview
-ee0ce77a66fd1d2e34319d1fd9449af8daba3327 refs/heads/function
-9e781a7385cd8634a68dd6fb897f9d3e08cd1cb9 refs/heads/main
-523bc7a0cde50ac5ca93c820a3032c7c6fb29a2d refs/pull/1/head
