@@ -44,31 +44,10 @@ export default function DailyReport() {
         setEmployeeData(employee);
         setTaskAssignments(assignments);
         
-        // ดึงข้อมูลสำหรับ Dropdown
+        // ดึงข้อมูล Relate Drawing options (รวม leave options แล้ว)
         const drawingOptions = await getRelateDrawingOptions(employee.fullName);
+        
         setAvailableSubtasks(drawingOptions);
-      } else {
-        setError('ไม่พบข้อมูลพนักงาน');
-        setEmployeeData(null);
-      }
-      
-      if (employee) {
-        setEmployeeData(employee);
-        setTaskAssignments(assignments);
-        
-        // ดึงข้อมูล Relate Drawing options
-        const drawingOptions = await getRelateDrawingOptions(employee.fullName);
-        
-        // เพิ่มตัวเลือกการลาต่อท้าย options
-        const allOptions = [
-          ...drawingOptions,
-          { value: 'ลาป่วย', label: 'ลาป่วย' },
-          { value: 'ลากิจ', label: 'ลากิจ' },
-          { value: 'ลาพักร้อน', label: 'ลาพักร้อน' },
-          { value: 'ลาอื่นๆ', label: 'ลาอื่นๆ' }
-        ];
-        
-        setAvailableSubtasks(allOptions);
       } else {
         setError('ไม่พบข้อมูลพนักงาน');
         setEmployeeData(null);
@@ -118,10 +97,62 @@ export default function DailyReport() {
   };
 
   return (
-    <div className="container-fluid mx-auto p-4">
-      <div className="flex gap-4">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-100">
+      <style jsx global>{`
+        .custom-calendar {
+          font-family: 'Inter', sans-serif;
+        }
+        .custom-calendar .react-calendar__navigation {
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+          border-radius: 16px 16px 0 0;
+          margin-bottom: 0;
+          padding: 16px;
+        }
+        .custom-calendar .react-calendar__navigation button {
+          color: white;
+          font-weight: 600;
+          font-size: 16px;
+          border: none;
+          background: none;
+          padding: 8px 12px;
+          border-radius: 8px;
+          transition: all 0.2s ease;
+        }
+        .custom-calendar .react-calendar__navigation button:hover {
+          background: rgba(255, 255, 255, 0.2);
+          transform: scale(1.05);
+        }
+        .custom-calendar .react-calendar__month-view__weekdays {
+          background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+          padding: 12px 0;
+        }
+        .custom-calendar .react-calendar__month-view__weekdays__weekday {
+          color: #9a3412;
+          font-weight: 600;
+          font-size: 14px;
+        }
+        .custom-calendar .react-calendar__tile {
+          border: 1px solid #fed7aa;
+          transition: all 0.2s ease;
+          font-weight: 500;
+        }
+        .custom-calendar .react-calendar__tile:hover {
+          transform: scale(1.1);
+          z-index: 10;
+          box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3);
+        }
+        .custom-calendar .react-calendar__tile--active {
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+          color: white !important;
+          border-color: #ea580c;
+          box-shadow: 0 6px 20px rgba(249, 115, 22, 0.4);
+        }
+      `}</style>
+      <div className="container-fluid mx-auto p-6">
+        <div className="flex gap-6">
         {/* Left side - Calendar */}
         <div className="w-80">
+          <div className="bg-white rounded-2xl shadow-xl p-6 backdrop-blur-sm">
           <Calendar
             locale="th-TH"
             onChange={(value: Value) => {
@@ -157,7 +188,7 @@ export default function DailyReport() {
               }
             }}
             value={date}
-            className="w-full border rounded-lg shadow-lg bg-white custom-calendar"
+            className="w-full border-0 rounded-2xl shadow-lg bg-white custom-calendar"
             tileClassName={({ date: tileDate, view }) => {
               if (view !== 'month') return '';
 
@@ -183,48 +214,51 @@ export default function DailyReport() {
 
               let classes = ['rounded-full'];
 
-              // แก้ไขจาก bg-blue-200 เป็น bg-blue-500 สำหรับวันที่ปัจจุบัน
+              // วันที่ปัจจุบัน (สีส้ม)
               if (tileDateOnly.getTime() === today.getTime()) {
-                classes.push('bg-blue-500'); // เปลี่ยนเป็นสีฟ้าเข้มขึ้น
+                classes.push('bg-gradient-to-r from-orange-400 to-orange-500 text-white shadow-lg');
               }
-
-              // เช็คว่ามีข้อมูลในวันนี้หรือไม่
-              if (hasData) {
-                classes.push('bg-gray-200');
-                if (tileDateOnly >= twoDaysAgo && tileDateOnly <= today) {
-                  classes.push('ring-2 ring-yellow-400');
+              // วันที่มีข้อมูลแล้ว
+              else if (hasData) {
+                classes.push('bg-gradient-to-r from-gray-300 to-gray-400 shadow-md');
+                // ถ้าเป็นวันที่แก้ไขได้ (ใน 2 วัน) ให้เพิ่มกรอบสีเหลือง
+                if (tileDateOnly >= twoDaysAgo && tileDateOnly < today) {
+                  classes.push('ring-2 ring-amber-400');
                 }
-              } else if (tileDateOnly >= twoDaysAgo && tileDateOnly <= today) {
-                classes.push('bg-green-200');
+              }
+              // วันที่สามารถลงข้อมูลย้อนหลังได้ (2 วัน) - สีฟ้าเทา
+              else if (tileDateOnly >= twoDaysAgo && tileDateOnly < today) {
+                classes.push('bg-gradient-to-r from-slate-400 to-slate-500 text-white shadow-md');
               }
               
               return classes.join(' ');
             }}
           />
+          </div>
           {/* คำอธิบายสี */}
-          <div className="mt-4 space-y-2 text-sm">
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-blue-200"></div>
-              <span>วันที่ปัจจุบัน</span>
+          <div className="mt-6 space-y-3 text-sm bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-100">
+            <div className="flex items-center space-x-3">
+              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-orange-400 to-orange-500 shadow-md"></div>
+              <span className="text-gray-700 font-medium">วันที่ปัจจุบัน</span>
             </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-gray-200 ring-2 ring-yellow-400"></div>
-              <span>วันที่มีการลงข้อมูลแล้ว (สามารถแก้ไขได้)</span>
+            <div className="flex items-center space-x-3">
+              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-amber-200 to-amber-300 ring-2 ring-amber-400 shadow-md"></div>
+              <span className="text-gray-700 font-medium">วันที่มีการลงข้อมูลแล้ว (สามารถแก้ไขได้)</span>
             </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-gray-200"></div>
-              <span>วันที่มีการลงข้อมูลแล้ว</span>
+            <div className="flex items-center space-x-3">
+              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-gray-300 to-gray-400 shadow-md"></div>
+              <span className="text-gray-700 font-medium">วันที่มีการลงข้อมูลแล้ว</span>
             </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-green-200"></div>
-              <span>วันที่สามารถลงข้อมูลย้อนหลังได้</span>
+            <div className="flex items-center space-x-3">
+              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-slate-400 to-slate-500 shadow-md"></div>
+              <span className="text-gray-700 font-medium">วันที่สามารถลงข้อมูลย้อนหลังได้</span>
             </div>
           </div>
         </div>
 
         {/* Right side - Form */}
         <div className="flex-1">
-          <div className="bg-white rounded-lg shadow-lg p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 backdrop-blur-sm border border-orange-100">
             <div className="flex justify-between mb-6">
               <div className="w-1/2 pr-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">รหัสพนักงาน</label>
@@ -233,13 +267,13 @@ export default function DailyReport() {
                     type="text"
                     value={employeeId}
                     onChange={(e) => setEmployeeId(e.target.value)}
-                    className="w-full p-2 border rounded-md"
+                    className="w-full p-3 border-2 border-orange-200 rounded-xl focus:border-orange-400 focus:ring-4 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                     placeholder="XXXXXX"
                   />
                   <button
                     type="button"
                     onClick={handleEmployeeSearch}
-                    className="ml-2 px-4 py-2 bg-blue-500 text-white rounded"
+                    className="ml-3 px-6 py-3 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 font-medium"
                     disabled={loading}
                   >
                     {loading ? 'กำลังค้นหา...' : 'ค้นหา'}
@@ -247,7 +281,7 @@ export default function DailyReport() {
                 </div>
                 {error && <p className="mt-1 text-red-500 text-sm">{error}</p>}
                 {employeeData && (
-                  <p className="mt-1 text-green-600 text-sm">
+                  <p className="mt-2 text-black text-lg font-semibold">
                     ชื่อ-นามสกุล: {employeeData.fullName}
                   </p>
                 )}
@@ -259,7 +293,7 @@ export default function DailyReport() {
                     type="date"
                     value={workDate}
                     disabled
-                    className="w-full p-2 border rounded-md pr-10 bg-gray-50 cursor-not-allowed"
+                    className="w-full p-3 border-2 border-orange-200 rounded-xl pr-12 bg-gradient-to-r from-gray-50 to-orange-50 cursor-not-allowed"
                   />
                   <span className="absolute right-2 top-2">
                     <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -274,15 +308,15 @@ export default function DailyReport() {
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
-                  <tr className="bg-[#FF4B12] text-white">
-                    <th className="border px-4 py-2 text-left w-12">No</th>
-                    <th className="border p-2 text-left w-1/4">Relate Drawing</th>
-                    <th className="border p-2 text-left w-48">เวลาทำงาน / Working Hours</th>
-                    <th className="border p-2 text-left w-48">เวลาโอที / Overtime</th>
-                    <th className="border p-2 text-left w-40">Progress</th>
-                    <th className="border p-2 text-left w-1/4">Note</th>
-                    <th className="border p-2 text-left w-40">Upload File</th>
-                    <th className="border p-2 text-left w-16">Actions</th>
+                  <tr className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg">
+                    <th className="border border-orange-300 px-4 py-4 text-left w-12 font-semibold">No</th>
+                    <th className="border border-orange-300 p-4 text-left w-1/4 font-semibold">Relate Drawing</th>
+                    <th className="border border-orange-300 p-4 text-left w-48 font-semibold">เวลาทำงาน / Working Hours</th>
+                    <th className="border border-orange-300 p-4 text-left w-48 font-semibold">เวลาโอที / Overtime</th>
+                    <th className="border border-orange-300 p-4 text-left w-40 font-semibold">Progress</th>
+                    <th className="border border-orange-300 p-4 text-left w-1/4 font-semibold">Note</th>
+                    <th className="border border-orange-300 p-4 text-left w-40 font-semibold">Upload File</th>
+                    <th className="border border-orange-300 p-4 text-left w-16 font-semibold">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -292,15 +326,15 @@ export default function DailyReport() {
                       assignment.status === 'completed' ? 'bg-green-50' :
                       assignment.status === 'in-progress' ? 'bg-yellow-50' : ''
                     }`}>
-                      <td className="border p-2">{assignment.isLeaveRow ? '-' : index + 1}</td>
-                      <td className="border p-2">
+                      <td className="border border-orange-200 p-3">{assignment.isLeaveRow ? '-' : index + 1}</td>
+                      <td className="border border-orange-200 p-3">
                         {assignment.isLeaveRow ? (
                           <div className="font-medium text-gray-700">{assignment.relateDrawing}</div>
                         ) : (
                           <select
                             value={assignment.relateDrawing}
                             onChange={(e) => handleUpdateTask(assignment.id, { relateDrawing: e.target.value })}
-                            className="w-full border border-gray-300 rounded p-2"
+                            className="w-full border-2 border-orange-200 rounded-xl p-3 focus:border-orange-400 focus:ring-4 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                           >
                             <option value="">เลือกงาน</option>
                             {availableSubtasks.map((option, index) => (
@@ -308,10 +342,6 @@ export default function DailyReport() {
                                 {option.label}
                               </option>
                             ))}
-                            <option value="ลาป่วย">ลาป่วย</option>
-                            <option value="ลากิจ">ลากิจ</option>
-                            <option value="ลาพักร้อน">ลาพักร้อน</option>
-                            <option value="ลาอื่นๆ">ลาอื่นๆ</option>
                           </select>
                         )}
                       </td>
@@ -325,7 +355,7 @@ export default function DailyReport() {
                                 workingHours: `${e.target.value}:${minutes}` 
                               });
                             }}
-                            className="border rounded p-1 text-center"
+                            className="border-2 border-orange-200 rounded-xl p-2 text-center focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                           >
                             <option value="">ชั่วโมง</option>
                             {Array.from({ length: 8 }, (_, i) => (
@@ -342,7 +372,7 @@ export default function DailyReport() {
                                 workingHours: `${hours}:${e.target.value}` 
                               });
                             }}
-                            className="border rounded p-1 text-center"
+                            className="border-2 border-orange-200 rounded-xl p-2 text-center focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                           >
                             <option value="">นาที</option>
                             {['15', '30', '45'].map((minute) => (
@@ -363,7 +393,7 @@ export default function DailyReport() {
                                 overtimeHours: `${e.target.value}:${minutes}` 
                               });
                             }}
-                            className="border rounded p-1 text-center"
+                            className="border-2 border-orange-200 rounded-xl p-2 text-center focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                           >
                             <option value="">ชั่วโมง</option>
                             {Array.from({ length: 8 }, (_, i) => (
@@ -380,7 +410,7 @@ export default function DailyReport() {
                                 overtimeHours: `${hours}:${e.target.value}` 
                               });
                             }}
-                            className="border rounded p-1 text-center"
+                            className="border-2 border-orange-200 rounded-xl p-2 text-center focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                           >
                             <option value="">นาที</option>
                             {['15', '30', '45'].map((minute) => (
@@ -401,10 +431,10 @@ export default function DailyReport() {
                                   const status = e.target.value as TaskAssignment['status'];
                                   handleUpdateTask(assignment.id, { status });
                                 }}
-                                className={`rounded p-1 flex-1 ${
-                                  assignment.status === 'completed' ? 'bg-green-100' :
-                                  assignment.status === 'in-progress' ? 'bg-yellow-100' :
-                                  'bg-gray-100'
+                                className={`rounded-xl p-2 flex-1 border-2 transition-all duration-200 ${
+                                  assignment.status === 'completed' ? 'bg-gradient-to-r from-green-100 to-green-200 border-green-300' :
+                                  assignment.status === 'in-progress' ? 'bg-gradient-to-r from-amber-100 to-amber-200 border-amber-300' :
+                                  'bg-gradient-to-r from-gray-100 to-gray-200 border-gray-300'
                                 }`}
                               >
                                 <option value="pending">รอดำเนินการ</option>
@@ -425,7 +455,7 @@ export default function DailyReport() {
                                             'in-progress'
                                   });
                                 }}
-                                className="w-20 rounded p-1 border text-center"
+                                className="w-20 rounded-xl p-2 border-2 border-orange-200 text-center focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all duration-200"
                                 placeholder="0-100"
                               />
                               <span className="flex items-center">%</span>
@@ -441,7 +471,7 @@ export default function DailyReport() {
                             type="text"
                             value={assignment.note || ''}
                             onChange={(e) => handleUpdateTask(assignment.id, { note: e.target.value })}
-                            className="border rounded p-1 w-full"
+                            className="border-2 border-orange-200 rounded-xl p-2 w-full focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                             placeholder={assignment.leaveType === 'other' ? 'โปรดระบุประเภทการลา' : 'เพิ่มหมายเหตุ'}
                           />
                         ) : (
@@ -449,7 +479,7 @@ export default function DailyReport() {
                             type="text"
                             value={assignment.note || ''}
                             onChange={(e) => handleUpdateTask(assignment.id, { note: e.target.value })}
-                            className="border rounded p-1 w-full"
+                            className="border-2 border-orange-200 rounded-xl p-2 w-full focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all duration-200 bg-gradient-to-r from-white to-orange-50"
                             placeholder="เพิ่มหมายเหตุ"
                           />
                         )}
@@ -509,7 +539,7 @@ export default function DailyReport() {
                                 ) : (
                                   <label
                                     htmlFor={`file-${assignment.id}`}
-                                    className="bg-blue-100 text-blue-600 px-3 py-1 rounded hover:bg-blue-200 cursor-pointer"
+                                    className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-2 rounded-xl hover:shadow-lg cursor-pointer transition-all duration-200 transform hover:scale-105"
                                   >
                                     Upload File
                                   </label>
@@ -528,7 +558,7 @@ export default function DailyReport() {
                         <div className="flex justify-center">
                           <button 
                             onClick={() => handleDeleteTask(assignment.id)}
-                            className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded"
+                            className="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 transform hover:scale-110"
                             title="ลบ"
                           >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -546,7 +576,7 @@ export default function DailyReport() {
             <div className="mt-4 flex justify-between">
               <button
                 type="button"
-                className="bg-[#FF4B12] hover:bg-[#ff5c28] text-white px-4 py-2 rounded transition-colors duration-200"
+                className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 font-medium"
                 onClick={() => {
                   const newTask: TaskAssignment = {
                     id: `temp-${Date.now()}`,
@@ -568,7 +598,7 @@ export default function DailyReport() {
               </button>
               <button
                 type="submit"
-                className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-4 py-2 rounded transition-colors duration-200"
+                className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 font-medium"
                 onClick={handleSubmit}
               >
                 Submit
@@ -615,6 +645,7 @@ export default function DailyReport() {
         }}
       />
 
+      </div>
     </div>
   );
 }

@@ -91,7 +91,13 @@ export async function getRelateDrawingOptions(fullName: string): Promise<{ value
       { value: 'ลาอื่นๆ', label: 'ลาอื่นๆ' }
     ];
 
-    return [...options, ...leaveOptions];
+    // รวม options และกรองข้อมูลซ้ำด้วย Set
+    const allOptions = [...options, ...leaveOptions];
+    const uniqueOptions = Array.from(
+      new Map(allOptions.map(option => [option.value, option])).values()
+    );
+
+    return uniqueOptions;
 
   } catch (error) {
     console.error('Error fetching drawing options:', error);
