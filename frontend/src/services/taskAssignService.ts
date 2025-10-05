@@ -11,7 +11,7 @@ interface Task {
   taskName: string;
   taskCategory: string;
   projectId: string;
-  assignee: string;
+  taskAssignee: string; // เปลี่ยนจาก assignee เป็น taskAssignee
   subtasks?: {
     subTaskName: string;
     subTaskAssignee: string;
@@ -29,55 +29,111 @@ interface TaskData {
 
 export async function getRelateDrawingOptions(fullName: string): Promise<{ value: string; label: string; }[]> {
   try {
+    console.log('getRelateDrawingOptions called with fullName:', fullName);
+    
+    // Get projects collection
+    const projectsRef = collection(db, 'projects');
+    const projectsSnap = await getDocs(projectsRef);
+    
+    console.log('Projects found:', projectsSnap.docs.length);
+    
+    // Create a map for quick project lookup
+    const projectsMap = new Map();
+    projectsSnap.docs.forEach(doc => {
+      const data = doc.data();
+      console.log('Project data:', { projectId: doc.id, abbr: data.abbr, name: data.name });
+      projectsMap.set(doc.id, data.abbr);
+    });
+
+    // Get tasks collection
     const tasksRef = collection(db, 'tasks');
     const tasksSnap = await getDocs(tasksRef);
     
-    // Get unique tasks assigned to the user
-    const uniqueTasks = new Map<string, Task>();
-    
-    tasksSnap.docs.forEach(doc => {
-      const data = doc.data() as Task;
-      if (data.assignee === fullName && !uniqueTasks.has(data.taskName)) {
-        uniqueTasks.set(data.taskName, {
-          taskNumber: doc.id,
-          taskName: data.taskName,
-          taskCategory: data.taskCategory,
-          projectId: data.projectId,
-          assignee: data.assignee
-        });
-      }
-    });
+    console.log('Tasks found:', tasksSnap.docs.length);
 
-    // Convert Map values to array
-    const tasks = Array.from(uniqueTasks.values());
-
-    // Get subtasks from each task document
+    // Get subtasks from each task document and filter by subTaskAssignee
     const options: { value: string; label: string; }[] = [];
     
-    for (const task of tasks) {
+    for (const taskDoc of tasksSnap.docs) {
+      const taskData = taskDoc.data();
+      console.log('Processing task:', taskData.taskName);
+      
       // Get subtasks subcollection for each task
-      const subtasksRef = collection(db, 'tasks', task.taskNumber, 'subtasks');
+      const subtasksRef = collection(db, 'tasks', taskDoc.id, 'subtasks');
       const subtasksSnap = await getDocs(subtasksRef);
+      
+      console.log('Subtasks found for task', taskData.taskName, ':', subtasksSnap.docs.length);
       
       subtasksSnap.docs.forEach(subtaskDoc => {
         const subtaskData = subtaskDoc.data();
         
-        // Check if subtask is assigned to this user and not completed
-        if (subtaskData.subTaskAssignee === fullName && 
-            (subtaskData.subTaskProgress || 0) < 100) {
+        // Multiple matching strategies for subTaskAssignee
+        const exactMatch = subtaskData.subTaskAssignee === fullName;
+        const trimmedMatch = subtaskData.subTaskAssignee?.trim() === fullName?.trim();
+        const partialMatch = subtaskData.subTaskAssignee?.includes(fullName) || fullName?.includes(subtaskData.subTaskAssignee);
+        
+        console.log('Subtask matching check:', {
+          subTaskName: subtaskData.subTaskName,
+          subTaskAssignee: subtaskData.subTaskAssignee,
+          searchFullName: fullName,
+          subTaskProgress: subtaskData.subTaskProgress,
+          exactMatch,
+          trimmedMatch,
+          partialMatch,
+          progressOk: (subtaskData.subTaskProgress || 0) < 100
+        });
+        
+        // Check if subtask is assigned to this user and not completed (progress < 100)
+        if ((exactMatch || trimmedMatch) && (subtaskData.subTaskProgress || 0) < 100) {
           
-          // Extract project abbreviation from taskNumber
-          const parts = task.taskNumber.split('_');
-          const abbr = parts[0].split('-')[1]; // Gets "AS" from "ART-AS-Built"
+          // Get project abbreviation from projectsMap
+          const abbr = projectsMap.get(taskData.projectId) || 'Unknown';
           
-          // Use taskCategory for better organization
-          const value = `${abbr}_${task.taskCategory}_${subtaskData.subTaskName}_${subtaskDoc.id}`;
+          // Create the display format: abbr_taskName_subtaskName
+          const value = `${abbr}_${taskData.taskName}_${subtaskData.subTaskName}`;
+          const label = value;
+          
+          console.log('✅ Adding option:', { value, label });
+          
           options.push({
             value,
-            label: value
+            label
           });
         }
       });
+    }
+
+    console.log('Total options before deduplication:', options.length);
+
+    // If no exact matches found, try partial matches
+    if (options.length === 0) {
+      console.log('No exact matches found, trying partial matches...');
+      
+      for (const taskDoc of tasksSnap.docs) {
+        const taskData = taskDoc.data();
+        
+        const subtasksRef = collection(db, 'tasks', taskDoc.id, 'subtasks');
+        const subtasksSnap = await getDocs(subtasksRef);
+        
+        subtasksSnap.docs.forEach(subtaskDoc => {
+          const subtaskData = subtaskDoc.data();
+          
+          const partialMatch = subtaskData.subTaskAssignee?.includes(fullName) || fullName?.includes(subtaskData.subTaskAssignee);
+          
+          if (partialMatch && (subtaskData.subTaskProgress || 0) < 100) {
+            const abbr = projectsMap.get(taskData.projectId) || 'Unknown';
+            const value = `${abbr}_${taskData.taskName}_${subtaskData.subTaskName}`;
+            const label = value;
+            
+            console.log('✅ Adding option (partial match):', { value, label });
+            
+            options.push({
+              value,
+              label
+            });
+          }
+        });
+      }
     }
 
     // Sort options alphabetically
@@ -96,6 +152,9 @@ export async function getRelateDrawingOptions(fullName: string): Promise<{ value
     const uniqueOptions = Array.from(
       new Map(allOptions.map(option => [option.value, option])).values()
     );
+
+    console.log('Final unique options:', uniqueOptions.length);
+    console.log('Final options:', uniqueOptions);
 
     return uniqueOptions;
 
