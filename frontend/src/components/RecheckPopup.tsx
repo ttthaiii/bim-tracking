@@ -60,12 +60,16 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
       <style jsx global>{`
         .custom-calendar {
           font-family: 'Inter', sans-serif;
+          background: white;
+          border: none;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
         .custom-calendar .react-calendar__navigation {
           background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
           border-radius: 12px 12px 0 0;
           margin-bottom: 0;
           padding: 12px;
+          border: none;
         }
         .custom-calendar .react-calendar__navigation button {
           color: white;
@@ -81,28 +85,58 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           transform: scale(1.05);
         }
         .custom-calendar .react-calendar__month-view__weekdays {
-          background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+          background: #f8f9fa;
           padding: 8px 0;
+          border-bottom: 1px solid #e5e7eb;
         }
         .custom-calendar .react-calendar__month-view__weekdays__weekday {
-          color: #9a3412;
+          color: #6b7280;
           font-weight: 600;
           font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
         }
         .custom-calendar .react-calendar__tile {
-          border: 1px solid #fed7aa;
+          border: none;
+          background: white;
           transition: all 0.2s ease;
           font-weight: 500;
+          color: #374151;
+          height: 40px;
+          width: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 1px;
+          border-radius: 6px;
+          font-size: 13px;
+          min-height: 40px;
+          text-align: center;
+        }
+        .custom-calendar .react-calendar__month-view__days {
+          display: grid !important;
+          grid-template-columns: repeat(7, 1fr);
+          gap: 2px;
+          padding: 6px;
         }
         .custom-calendar .react-calendar__tile:hover {
+          background: #fef3e2;
           transform: scale(1.05);
-          box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+          box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);
         }
         .custom-calendar .react-calendar__tile--active {
           background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
           color: white !important;
-          border-color: #ea580c;
           box-shadow: 0 4px 16px rgba(249, 115, 22, 0.4);
+          font-weight: 600;
+        }
+        .custom-calendar .react-calendar__tile--now {
+          background: #f97316 !important;
+          color: white !important;
+          font-weight: 600;
+        }
+        .custom-calendar .react-calendar__month-view__days__day--neighboringMonth {
+          color: #d1d5db;
         }
       `}</style>
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
@@ -131,15 +165,15 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           <h2 className="text-2xl font-semibold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-orange-800">Drawing List</h2>
           
           <div className="overflow-x-auto flex-1">
-            <table className="w-full border-collapse">
+            <table className="w-full border-collapse rounded-xl overflow-hidden shadow-lg">
               <thead>
                 <tr className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg">
-                  <th className="border border-orange-300 p-4 w-16 text-lg font-semibold">No</th>
+                  <th className="border border-orange-300 p-4 w-16 text-lg font-semibold first:rounded-tl-xl">No</th>
                   <th className="border border-orange-300 p-4 w-1/3 text-lg font-semibold">Relate Drawing</th>
                   <th className="border border-orange-300 p-4 w-40 text-lg font-semibold">เวลาทำงานปกติ</th>
                   <th className="border border-orange-300 p-4 w-40 text-lg font-semibold">เวลาโอที</th>
                   <th className="border border-orange-300 p-4 w-48 text-lg font-semibold">Progress</th>
-                  <th className="border border-orange-300 p-4 text-lg font-semibold">Note</th>
+                  <th className="border border-orange-300 p-4 text-lg font-semibold last:rounded-tr-xl">Note</th>
                 </tr>
               </thead>
               <tbody>

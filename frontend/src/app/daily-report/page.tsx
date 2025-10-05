@@ -24,8 +24,14 @@ export default function DailyReport() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingDate, setPendingDate] = useState<Date | null>(null);
+  const [isClient, setIsClient] = useState(false);
 
   const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>([]);
+
+  // Fix hydration error by ensuring Calendar only renders on client
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const handleEmployeeSearch = async () => {
     if (!employeeId) return;
@@ -86,13 +92,36 @@ export default function DailyReport() {
 
   const handleConfirmSubmit = async () => {
     try {
-      // TODO: Save to Firebase
-      console.log({ employeeId, employeeData, workDate, taskAssignments });
+      // Save data to localStorage (simulate database save)
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          const savedData = JSON.parse(localStorage.getItem('dailyReportData') || '{}');
+          savedData[workDate] = {
+            employeeId,
+            employeeData,
+            taskAssignments: taskAssignments.filter(task => task.assignDate === workDate),
+            savedAt: new Date().toISOString()
+          };
+          localStorage.setItem('dailyReportData', JSON.stringify(savedData));
+        } catch (error) {
+          console.error('Error saving to localStorage:', error);
+          alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+          return;
+        }
+      }
+      
+      console.log('Data saved:', { employeeId, employeeData, workDate, taskAssignments });
       setIsRecheckOpen(false);
-      // Show success message or redirect
+      setHasUnsavedChanges(false);
+      
+      // Force calendar re-render to show new colors
+      setDate(new Date(date as Date));
+      
+      // Show success message
+      alert('บันทึกข้อมูลเรียบร้อยแล้ว');
     } catch (error) {
       console.error('Error submitting data:', error);
-      // Show error message
+      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     }
   };
 
@@ -101,12 +130,28 @@ export default function DailyReport() {
       <style jsx global>{`
         .custom-calendar {
           font-family: 'Inter', sans-serif;
+          background: white;
+          border: none;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+          width: 100%;
+          max-width: 350px;
         }
         .custom-calendar .react-calendar__navigation {
           background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
           border-radius: 16px 16px 0 0;
           margin-bottom: 0;
           padding: 16px;
+          border: none;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .custom-calendar .react-calendar__navigation__label {
+          font-size: 18px;
+          font-weight: 700;
+          color: white;
+          flex-grow: 1;
+          text-align: center;
         }
         .custom-calendar .react-calendar__navigation button {
           color: white;
@@ -123,29 +168,59 @@ export default function DailyReport() {
           transform: scale(1.05);
         }
         .custom-calendar .react-calendar__month-view__weekdays {
-          background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+          background: #f8f9fa;
           padding: 12px 0;
+          border-bottom: 1px solid #e5e7eb;
         }
         .custom-calendar .react-calendar__month-view__weekdays__weekday {
-          color: #9a3412;
+          color: #6b7280;
           font-weight: 600;
-          font-size: 14px;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          text-align: center;
+          padding: 8px 4px;
         }
         .custom-calendar .react-calendar__tile {
-          border: 1px solid #fed7aa;
+          border: none;
+          background: white;
           transition: all 0.2s ease;
           font-weight: 500;
+          color: #374151;
+          height: 42px;
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 8px;
+          font-size: 13px;
+          text-align: center;
+          aspect-ratio: 1;
+        }
+        .custom-calendar .react-calendar__month-view__days {
+          display: grid !important;
+          grid-template-columns: repeat(7, 1fr);
+          gap: 3px;
+          padding: 12px;
         }
         .custom-calendar .react-calendar__tile:hover {
-          transform: scale(1.1);
-          z-index: 10;
-          box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3);
+          background: #fef3e2;
+          transform: scale(1.05);
+          box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);
         }
         .custom-calendar .react-calendar__tile--active {
           background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
           color: white !important;
-          border-color: #ea580c;
-          box-shadow: 0 6px 20px rgba(249, 115, 22, 0.4);
+          box-shadow: 0 4px 16px rgba(249, 115, 22, 0.4);
+          font-weight: 600;
+        }
+        .custom-calendar .react-calendar__tile--now {
+          background: #f97316 !important;
+          color: white !important;
+          font-weight: 600;
+        }
+        .custom-calendar .react-calendar__month-view__days__day--neighboringMonth {
+          color: #d1d5db;
         }
       `}</style>
       <div className="container-fluid mx-auto p-6">
@@ -153,9 +228,10 @@ export default function DailyReport() {
         {/* Left side - Calendar */}
         <div className="w-80">
           <div className="bg-white rounded-2xl shadow-xl p-6 backdrop-blur-sm">
+          {isClient && (
           <Calendar
             locale="th-TH"
-            onChange={(value: Value) => {
+            onChange={async (value: Value) => {
               if (value instanceof Date) {
                 if (hasUnsavedChanges) {
                   setPendingDate(value);
@@ -172,15 +248,31 @@ export default function DailyReport() {
                 setDate(value);
                 setWorkDate(selectedDate);
 
-                // เช็คว่ามีข้อมูลในวันที่เลือกหรือไม่
-                const existingData = taskAssignments.filter(
-                  task => task.assignDate === selectedDate
-                );
+                // Load existing data for the selected date
+                let dateData = null;
+                if (typeof window !== 'undefined' && window.localStorage) {
+                  try {
+                    const savedData = JSON.parse(localStorage.getItem('dailyReportData') || '{}');
+                    dateData = savedData[selectedDate];
+                  } catch (error) {
+                    console.error('Error reading localStorage:', error);
+                  }
+                }
 
-                if (existingData.length > 0) {
-                  // ถ้ามีข้อมูลอยู่แล้ว ให้แสดงข้อมูลนั้น
-                  setTaskAssignments(existingData);
-                  setIsRecheckOpen(true); // แสดง RecheckPopup เพื่อดูข้อมูล
+                if (dateData) {
+                  // ถ้ามีข้อมูลอยู่แล้ว ให้โหลดข้อมูลนั้น
+                  setEmployeeId(dateData.employeeId || '');
+                  setEmployeeData(dateData.employeeData || null);
+                  setTaskAssignments(dateData.taskAssignments || []);
+                  
+                  // โหลด dropdown options ถ้ามี employee data
+                  if (dateData.employeeData) {
+                    const drawingOptions = await getRelateDrawingOptions(dateData.employeeData.fullName);
+                    setAvailableSubtasks(drawingOptions);
+                  }
+                  
+                  // แสดง RecheckPopup เพื่อดูข้อมูล
+                  setIsRecheckOpen(true);
                 } else if (employeeId) {
                   // ถ้าไม่มีข้อมูลแต่มีรหัสพนักงานแล้ว ให้เตรียมสำหรับการลงข้อมูลใหม่
                   setTaskAssignments([]);
@@ -204,13 +296,18 @@ export default function DailyReport() {
               const twoDaysAgo = new Date(today);
               twoDaysAgo.setDate(today.getDate() - 2);
 
-              // เช็คว่าเป็นวันที่มีการแก้ไขข้อมูลหรือไม่
-              const hasData = taskAssignments.some(task => {
-                if (!task.assignDate) return false;
-                const taskDate = new Date(task.assignDate);
-                taskDate.setHours(0, 0, 0, 0);
-                return taskDate.getTime() === tileDateOnly.getTime();
-              });
+              // เช็คว่าเป็นวันที่มีการบันทึกข้อมูลหรือไม่
+              let hasData = false;
+              if (typeof window !== 'undefined' && window.localStorage) {
+                try {
+                  const savedData = JSON.parse(localStorage.getItem('dailyReportData') || '{}');
+                  const tileDateString = `${tileDateOnly.getFullYear()}-${String(tileDateOnly.getMonth() + 1).padStart(2, '0')}-${String(tileDateOnly.getDate()).padStart(2, '0')}`;
+                  hasData = savedData[tileDateString] && savedData[tileDateString].taskAssignments && savedData[tileDateString].taskAssignments.length > 0;
+                } catch (error) {
+                  console.error('Error reading localStorage:', error);
+                  hasData = false;
+                }
+              }
 
               let classes = ['rounded-full'];
 
@@ -220,10 +317,12 @@ export default function DailyReport() {
               }
               // วันที่มีข้อมูลแล้ว
               else if (hasData) {
-                classes.push('bg-gradient-to-r from-gray-300 to-gray-400 shadow-md');
-                // ถ้าเป็นวันที่แก้ไขได้ (ใน 2 วัน) ให้เพิ่มกรอบสีเหลือง
+                // ถ้าเป็นวันที่แก้ไขได้ (ใน 2 วัน) ให้ใช้สีส้มอ่อน
                 if (tileDateOnly >= twoDaysAgo && tileDateOnly < today) {
-                  classes.push('ring-2 ring-amber-400');
+                  classes.push('bg-gradient-to-r from-amber-200 to-amber-300 ring-2 ring-amber-400 shadow-md');
+                } else {
+                  // วันที่มีข้อมูลแล้ว (แก้ไขไม่ได้) - กรอบสีเทา
+                  classes.push('bg-white border-2 border-gray-400 text-gray-700');
                 }
               }
               // วันที่สามารถลงข้อมูลย้อนหลังได้ (2 วัน) - สีฟ้าเทา
@@ -234,6 +333,7 @@ export default function DailyReport() {
               return classes.join(' ');
             }}
           />
+          )}
           </div>
           {/* คำอธิบายสี */}
           <div className="mt-6 space-y-3 text-sm bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-100">
@@ -246,7 +346,7 @@ export default function DailyReport() {
               <span className="text-gray-700 font-medium">วันที่มีการลงข้อมูลแล้ว (สามารถแก้ไขได้)</span>
             </div>
             <div className="flex items-center space-x-3">
-              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-gray-300 to-gray-400 shadow-md"></div>
+              <div className="w-4 h-4 rounded-full bg-white border-2 border-gray-400 shadow-md"></div>
               <span className="text-gray-700 font-medium">วันที่มีการลงข้อมูลแล้ว</span>
             </div>
             <div className="flex items-center space-x-3">
@@ -306,17 +406,17 @@ export default function DailyReport() {
 
             {/* Table */}
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
+              <table className="w-full border-collapse rounded-xl overflow-hidden shadow-lg">
                 <thead>
                   <tr className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg">
-                    <th className="border border-orange-300 px-4 py-4 text-left w-12 font-semibold">No</th>
-                    <th className="border border-orange-300 p-4 text-left w-1/4 font-semibold">Relate Drawing</th>
-                    <th className="border border-orange-300 p-4 text-left w-48 font-semibold">เวลาทำงาน / Working Hours</th>
-                    <th className="border border-orange-300 p-4 text-left w-48 font-semibold">เวลาโอที / Overtime</th>
-                    <th className="border border-orange-300 p-4 text-left w-40 font-semibold">Progress</th>
-                    <th className="border border-orange-300 p-4 text-left w-1/4 font-semibold">Note</th>
-                    <th className="border border-orange-300 p-4 text-left w-40 font-semibold">Upload File</th>
-                    <th className="border border-orange-300 p-4 text-left w-16 font-semibold">Actions</th>
+                    <th className="border border-orange-300 px-4 py-4 text-center w-12 font-semibold text-lg first:rounded-tl-xl">No</th>
+                    <th className="border border-orange-300 p-4 text-center w-1/4 font-semibold text-lg">Relate Drawing</th>
+                    <th className="border border-orange-300 p-4 text-center w-48 font-semibold text-lg">เวลาทำงาน / Working Hours</th>
+                    <th className="border border-orange-300 p-4 text-center w-48 font-semibold text-lg">เวลาโอที / Overtime</th>
+                    <th className="border border-orange-300 p-4 text-center w-40 font-semibold text-lg">Progress</th>
+                    <th className="border border-orange-300 p-4 text-center w-1/4 font-semibold text-lg">Note</th>
+                    <th className="border border-orange-300 p-4 text-center w-40 font-semibold text-lg">Upload File</th>
+                    <th className="border border-orange-300 p-4 text-center w-16 font-semibold text-lg last:rounded-tr-xl">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -615,10 +715,34 @@ export default function DailyReport() {
         taskAssignments={taskAssignments.filter(task => task.assignDate === workDate)}
         workDate={workDate}
         onEdit={() => {
-          // เมื่อกดปุ่ม Edit จะโหลดข้อมูลของวันที่เลือกมาแสดงในฟอร์ม
-          const dateData = taskAssignments.filter(task => task.assignDate === workDate);
-          if (dateData.length > 0) {
-            setTaskAssignments(dateData);
+          // เมื่อกดปุ่ม Edit ให้ปิด popup และให้แก้ไขข้อมูลได้
+          setIsRecheckOpen(false);
+          
+          // ถ้าเป็นวันที่แก้ไขไม่ได้ ให้แจ้งเตือน
+          const selectedDateObj = new Date(workDate);
+          selectedDateObj.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const twoDaysAgo = new Date(today);
+          twoDaysAgo.setDate(today.getDate() - 2);
+          
+          if (selectedDateObj < twoDaysAgo && selectedDateObj.getTime() !== today.getTime()) {
+            alert('ไม่สามารถแก้ไขข้อมูลที่เก่ากว่า 2 วันได้');
+            return;
+          }
+          
+          // โหลดข้อมูลของวันที่เลือกมาแสดงในฟอร์ม
+          let dateData = null;
+          if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+              const savedData = JSON.parse(localStorage.getItem('dailyReportData') || '{}');
+              dateData = savedData[workDate];
+            } catch (error) {
+              console.error('Error reading localStorage:', error);
+            }
+          }
+          if (dateData && dateData.taskAssignments) {
+            setTaskAssignments(dateData.taskAssignments);
           }
         }}
       />
