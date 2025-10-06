@@ -4,6 +4,7 @@ export interface Project {
   name: string;
   abbr: string;
   createdAt: Timestamp;
+  projectAssignee?: string;  // ← เพิ่มบรรทัดนี้
 }
 
 export interface User {
@@ -33,7 +34,9 @@ export interface Task {
   link?: string;
   documentNumber?: string;
   rev?: string;
-  currentStep?: string; // ← เพิ่มบรรทัดนี้
+  currentStep?: string;
+  taskStatus?: string;      // ← เพิ่ม
+  deletedAt?: Timestamp;    // ← เพิ่ม
 }
 
 export interface SubTask {
@@ -56,9 +59,11 @@ export interface SubTask {
     fileName: string;
     fileUrl: string;
   }>;
+  subtaskStatus?: string;   // ← เพิ่ม
+  deletedAt?: Timestamp;    // ← เพิ่ม
 }
 
 export interface RelateWork {
   activityName: string;
-  relatedWorks?: any[]; // หรือกำหนด type ที่ชัดเจนตามโครงสร้างข้อมูล
+  relatedWorks?: any[];
 }

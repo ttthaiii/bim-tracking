@@ -3,6 +3,8 @@
 import React, { useEffect, useState } from "react";
 import Navbar from "@/components/shared/Navbar";
 import CreateProjectModal from "@/components/modals/CreateProjectModal";
+import ProjectListModal from "@/components/modals/ProjectListModal";
+import { createProject, updateProjectLeader } from "@/services/firebase";
 import { fetchProjects, fetchRelateWorks, fetchTasks } from "@/services/firebase";
 import { Project, Task } from "@/types/database";
 import { Timestamp } from "firebase/firestore";
@@ -10,6 +12,9 @@ import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
 import { updateTask, createTask } from "@/services/firebase";
 import SuccessModal from "@/components/modals/SuccessModal";
 import AddRevisionModal from "@/components/modals/AddRevisionModal";
+import DeleteConfirmModal from "@/components/modals/DeleteConfirmModal";
+import { deleteTask } from "@/services/firebase";
+
 
 interface TaskRow {
   firestoreId?: string;
@@ -21,6 +26,8 @@ interface TaskRow {
   statusDwg: string;
   lastRev: string;
   docNo: string;
+  link?: string;
+  progress?: number;  // ← เพิ่ม progress
   correct: boolean;
 }
 
@@ -34,6 +41,8 @@ const initialRows: TaskRow[] = [
     statusDwg: "",
     lastRev: "",
     docNo: "",
+    link: "",
+    progress: 0,
     correct: false
   }
 ];
@@ -57,7 +66,7 @@ const formatDate = (timestamp: any): string => {
     if (timestamp instanceof Date) {
       const year = timestamp.getFullYear();
       const month = String(timestamp.getMonth() + 1).padStart(2, '0');
-      const day = String(timestamp.getDate()).padStart(2, '0');
+      const day = String(timestamp.getDate()).padStart(2, '0');  // ✅ ถูกต้อง
       return `${year}-${month}-${day}`;
     }
     
@@ -111,7 +120,7 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
   
   return {
     firestoreId: task.id,
-    id: "",
+    id: taskData.taskNumber || task.id,
     relateDrawing: taskData.taskName || "",
     activity: taskData.taskCategory || "",
     startDate: formatDate(taskData.planStartDate),
@@ -119,11 +128,12 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
     statusDwg: taskData.currentStep || "",
     lastRev: taskData.rev || "00",
     docNo: taskData.documentNumber || "",
+    link: taskData.link || "",
+    progress: taskData.progress || 0,  // ← เพิ่ม progress
     correct: false
   };
 };
 
-// ฟังก์ชันสร้าง TASK ID: TTS-BIM-{abbr}-XXX-{runningNo}
 const generateTaskId = (
   projectAbbr: string,
   activityName: string,
@@ -131,8 +141,7 @@ const generateTaskId = (
   activities: any[],
   currentCounter: number
 ): string => {
-  // หา Activity Order
-  let activityOrder = "XXX"; // default
+  let activityOrder = "XXX";
   
   if (activityName && activityName !== "เลือก Activity") {
     const activityIndex = activities.findIndex(a => a.activityName === activityName);
@@ -145,7 +154,6 @@ const generateTaskId = (
   return `TTS-BIM-${projectAbbr}-${activityOrder}-${runningNo}`;
 };
 
-// ฟังก์ชันแปล Status เป็นภาษาไทย
 const translateStatus = (status: string): string => {
   const statusMap: { [key: string]: string } = {
     'PENDING_REVIEW': 'รอตรวจสอบ',
@@ -160,12 +168,12 @@ const translateStatus = (status: string): string => {
   return statusMap[status] || status;
 };
 
-
 const ProjectsPage = () => {
-  const [selectedProject, setSelectedProject] = useState("");
+  const [selectedProject, setSelectedProject] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("");
   const [rows, setRows] = useState<TaskRow[]>(initialRows);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isProjectListOpen, setIsProjectListOpen] = useState(false);
   const [touchedRows, setTouchedRows] = useState<Set<number>>(new Set());
   
   const [projects, setProjects] = useState<(Project & { id: string })[]>([]);
@@ -185,74 +193,163 @@ const ProjectsPage = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [showAddRevModal, setShowAddRevModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ idx: number; row: TaskRow } | null>(null);
+  const [allTasksCache, setAllTasksCache] = useState<(Task & { id: string })[]>([]);
+  const [cacheLoaded, setCacheLoaded] = useState(false);
+  const [filterActivity, setFilterActivity] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [highlightedRow, setHighlightedRow] = useState<number | null>(null);
 
-  useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        setLoading(true);
-        const projectsData = await fetchProjects();
-        setProjects(projectsData);
-      } catch (error) {
-        console.error('Error loading projects:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadProjects();
-  }, []);
-
-  useEffect(() => {
-    const loadActivities = async () => {
-      try {
-        setActivitiesLoading(true);
-        const activitiesData = await fetchRelateWorks();
-        setActivities(activitiesData);
-      } catch (error) {
-        console.error('Error loading activities:', error);
-      } finally {
-        setActivitiesLoading(false);
-      }
-    };
-    loadActivities();
-  }, []);
-
-  useEffect(() => {
-  const loadTasks = async () => {
-    if (!selectedProject) {
-      setRows(initialRows);
-      setTouchedRows(new Set());
-      return;
+useEffect(() => {
+  const loadActivities = async () => {
+    try {
+      setActivitiesLoading(true);
+      const activitiesData = await fetchRelateWorks();
+      setActivities(activitiesData);
+    } catch (error) {
+      console.error('Error loading activities:', error);
+    } finally {
+      setActivitiesLoading(false);
     }
+  };
+  loadActivities();
+}, []);
 
+useEffect(() => {
+  const loadAllTasks = async () => {
+    if (cacheLoaded || projects.length === 0) return;
+    
     try {
       setTasksLoading(true);
-      const tasksData = await fetchTasks(selectedProject);
+      const allTasks = await fetchTasks();
+      setAllTasksCache(allTasks);
+      setCacheLoaded(true);
+    } catch (error) {
+      console.error('Error loading tasks:', error);
+    } finally {
+      setTasksLoading(false);
+    }
+  };
+  
+  loadAllTasks();
+}, [projects, cacheLoaded]);
+
+useEffect(() => {
+  const loadProjects = async () => {
+    try {
+      setLoading(true);
+      const projectsData = await fetchProjects();
+      setProjects(projectsData);
+    } catch (error) {
+      console.error('Error loading projects:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  loadProjects();
+}, []);
+
+useEffect(() => {
+  if (!cacheLoaded || allTasksCache.length === 0) {
+    return;
+  }
+  
+  const filterTasks = () => {
+    let tasksData = selectedProject === "all"
+      ? allTasksCache
+      : allTasksCache.filter(t => t.projectId === selectedProject);
+
+    if (filterActivity) {
+      tasksData = tasksData.filter(t => t.taskCategory === filterActivity);
+    }
+
+    if (filterStatus) {
+      tasksData = tasksData.filter(t => t.currentStep === filterStatus);
+    }
+
+    if (tasksData.length > 0) {
+      let taskRows = tasksData.map(convertTaskToRow);
       
-      if (tasksData.length > 0) {
-        const currentProject = projects.find(p => p.id === selectedProject);
-        
-        // แปลง Tasks → TaskRow
-        let taskRows = tasksData.map(convertTaskToRow);
-        
-        // สร้าง TASK ID ให้ข้อมูลเก่าที่ยังไม่มี
-if (currentProject && currentProject.abbr) {
-  let counter = 1;
-  taskRows = taskRows.map(row => {
-    if (row.id) return row;
+      const currentProject = projects.find(p => 
+        selectedProject === "all" ? false : p.id === selectedProject
+      );
+      
+      if (currentProject && currentProject.abbr) {
+        let counter = 1;
+        taskRows = taskRows.map(row => {
+          if (row.id) return row;
+          const newId = generateTaskId(
+            currentProject.abbr,
+            row.activity,
+            taskRows,
+            activities,
+            counter
+          );
+          counter++;
+          return { ...row, id: newId };
+        });
+      }
+      
+      setRows([...taskRows, initialRows[0]]);
+      setTouchedRows(new Set());
+    } else {
+      setRows(initialRows);
+      setTouchedRows(new Set());
+    }
+  };
+  
+  filterTasks();
+}, [selectedProject, allTasksCache, cacheLoaded, projects, activities, filterActivity, filterStatus]);
+ 
+const handleCreateProject = async (projectData: { name: string; code: string; leader: string }) => {
+  try {
+    await createProject(projectData);
+    setIsCreateModalOpen(false);
     
-    const newId = generateTaskId(
-      currentProject.abbr,
-      row.activity,
-      taskRows,
-      activities,
-      counter
-    );
-    counter++;
-    return { ...row, id: newId };
-  });
-}
-        
-        setRows([...taskRows, {
+    // รีโหลดรายการโปรเจกต์
+    const projectsData = await fetchProjects();
+    setProjects(projectsData);
+    
+    alert('สร้างโปรเจกต์สำเร็จ');
+  } catch (error) {
+    console.error('Error creating project:', error);
+    alert('เกิดข้อผิดพลาดในการสร้างโปรเจกต์');
+  }
+};
+
+const handleUpdateLeader = async (projectId: string, newLeader: string) => {
+  try {
+    await updateProjectLeader(projectId, newLeader);
+    
+    // รีโหลดรายการโปรเจกต์
+    const projectsData = await fetchProjects();
+    setProjects(projectsData);
+    
+    alert('อัพเดท Leader สำเร็จ');
+  } catch (error) {
+    console.error('Error updating leader:', error);
+    alert('เกิดข้อผิดพลาดในการอัพเดท');
+  }
+};
+
+const handleRowChange = (idx: number, field: keyof TaskRow, value: string | boolean) => {
+  setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
+  if (rows[idx]?.firestoreId) {
+    setEditedRows(prev => new Set(prev).add(idx));
+  }
+};
+
+const handleRowFocus = (idx: number) => {
+  console.log('🔍 handleRowFocus called:', { idx, touched: touchedRows.has(idx), rowsLength: rows.length });
+  
+  if (!touchedRows.has(idx)) {
+    console.log('✅ Adding new row');
+    setTouchedRows(prev => new Set(prev).add(idx));
+    setRows(rows => {
+      if (!rows[idx + 1]) {
+        console.log('🆕 Creating new empty row');
+        return [...rows, {
           id: "",
           relateDrawing: "",
           activity: "",
@@ -261,73 +358,57 @@ if (currentProject && currentProject.abbr) {
           statusDwg: "",
           lastRev: "",
           docNo: "",
+          link: "",
+          progress: 0,  // ← เพิ่ม
           correct: false
-        }]);
-        setTouchedRows(new Set());
-      } else {
-        setRows(initialRows);
-        setTouchedRows(new Set());
+        }];
       }
-    } catch (error) {
-      console.error('Error loading tasks:', error);
-      setRows(initialRows);
-    } finally {
-      setTasksLoading(false);
-    }
-  };
-  loadTasks();
-}, [selectedProject, projects]);
-
-  const handleCreateProject = (projectData: { name: string; code: string; leader: string }) => {
-    console.log('Creating project:', projectData);
-    setIsCreateModalOpen(false);
-  };
-
-const handleRowChange = (idx: number, field: keyof TaskRow, value: string | boolean) => {
-  setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
-  // บันทึกว่าแถวนี้ถูกแก้ไข
-  if (rows[idx]?.firestoreId) {
-    setEditedRows(prev => new Set(prev).add(idx));
+      console.log('⏭️ Next row already exists');
+      return rows;
+    });
+  } else {
+    console.log('⛔ Row already touched');
   }
 };
 
-  const handleRowFocus = (idx: number) => {
-    if (!touchedRows.has(idx)) {
-      setTouchedRows(prev => new Set(prev).add(idx));
-      setRows(rows => {
-        if (!rows[idx + 1]) {
-          return [...rows, {
-            id: "",
-            relateDrawing: "",
-            activity: "",
-            startDate: "",
-            dueDate: "",
-            statusDwg: "",
-            lastRev: "",
-            docNo: "",
-            correct: false
-          }];
-        }
-        return rows;
-      });
-    }
-  };
-
 const handleDelete = (idx: number) => {
-  if (rows.length === 1) return;
-  
   const rowToDelete = rows[idx];
   
-  // ป้องกันลบ: ถ้ามี STATUS DWG.
+  const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
+  
+  if (isEmptyRow && idx === rows.length - 1) {
+    alert('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
+    return;
+  }
+  
   if (rowToDelete.statusDwg) {
     alert('ไม่สามารถลบแถวที่มีสถานะเอกสารได้');
     return;
   }
   
-  const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
-  if (isEmptyRow && idx === rows.length - 1) return;
+  // ← เพิ่มเงื่อนไข: ห้ามลบถ้า progress > 0
+  if (rowToDelete.progress && rowToDelete.progress > 0) {
+    alert('ไม่สามารถลบงานที่มีความคืบหน้าแล้ว');
+    return;
+  }
+  
+  setDeleteTarget({ idx, row: rowToDelete });
+  setShowDeleteModal(true);
+};
 
+const confirmDelete = async () => {
+  if (!deleteTarget) return;
+  
+  try {
+    const { idx, row } = deleteTarget;
+    
+    if (row.firestoreId) {
+      await deleteTask(row.firestoreId);
+      console.log('✅ ลบจาก Firestore:', row.firestoreId);
+    }
+    
     setRows(prevRows => prevRows.filter((_, i) => i !== idx));
+    
     setTouchedRows(prev => {
       const newTouched = new Set<number>();
       prev.forEach(touchedIdx => {
@@ -336,9 +417,36 @@ const handleDelete = (idx: number) => {
       });
       return newTouched;
     });
-  };
+    
+    setEditingRows(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(idx);
+      return newSet;
+    });
+    
+    setEditedRows(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(idx);
+      return newSet;
+    });
+    
+    setOriginalRows(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(idx);
+      return newMap;
+    });
+    
+    console.log('✅ ลบแถวสำเร็จ:', row.relateDrawing);
+    
+  } catch (error) {
+    console.error('❌ Error deleting:', error);
+    alert('เกิดข้อผิดพลาดในการลบ');
+  } finally {
+    setShowDeleteModal(false);
+    setDeleteTarget(null);
+  }
+};
 
-  
 const handleSave = async () => {
   if (!selectedProject) {
     alert('กรุณาเลือกโครงการก่อน');
@@ -351,22 +459,17 @@ const handleSave = async () => {
     return;
   }
 
- // แยกแถวที่ต้อง UPDATE และ CREATE
 const rowsToUpdate: TaskRow[] = [];
 const rowsToCreate: TaskRow[] = [];
 
 rows.forEach((row, idx) => {
-  // ข้ามแถวว่าง
   if (!row.relateDrawing || !row.activity || !row.startDate || !row.dueDate) {
     return;
   }
 
-  // UPDATE: แถวที่มี firestoreId และถูกแก้ไข
   if (row.firestoreId && editedRows.has(idx)) {
     rowsToUpdate.push(row);
-  } 
-  // CREATE: แถวที่ไม่มี firestoreId (ไม่ว่าจะมี id หรือไม่ก็ตาม)
-  else if (!row.firestoreId) {
+  } else if (!row.firestoreId) {
     rowsToCreate.push(row);
   }
 });
@@ -387,8 +490,6 @@ console.log('🔍 Save analysis:', {
     return;
   }
 
-
-// เตรียมข้อมูลสำหรับ Modal พร้อมรายละเอียดที่เปลี่ยนแปลง
   const modalData = {
     updated: rowsToUpdate.map((r, index) => {
       const rowIdx = rows.findIndex(row => row.firestoreId === r.firestoreId);
@@ -438,7 +539,6 @@ const confirmSave = async () => {
     const currentProject = projects.find(p => p.id === selectedProject);
     if (!currentProject) return;
 
-    // ==================== UPDATE ====================
     const updatePromises = saveModalData.updated.map(async (updatedItem) => {
       const row = rows.find(r => r.id === updatedItem.id);
       if (!row || !row.firestoreId) return;
@@ -453,12 +553,10 @@ const confirmSave = async () => {
 
     await Promise.all(updatePromises);
 
-    // ==================== CREATE ====================
     let finalRows = [...rows];
     const rowsToCreate = rows.filter(r => !r.firestoreId && !r.id && r.relateDrawing && r.activity);
 
 if (rowsToCreate.length > 0) {
-  // หา Running No. สูงสุด
   const maxRunning = rows.reduce((max, row) => {
     if (!row.id || !row.id.startsWith('TTS-BIM-')) return max;
     const parts = row.id.split('-');
@@ -470,9 +568,7 @@ if (rowsToCreate.length > 0) {
 
   let counter = maxRunning + 1;
 
-  // สร้าง Task ID และบันทึกลง Firestore
   const createPromises = rowsToCreate.map(async (row) => {
-    // ถ้ายังไม่มี TASK ID ให้สร้างให้
     const taskId = row.id || generateTaskId(
       currentProject.abbr,
       row.activity,
@@ -492,7 +588,6 @@ if (rowsToCreate.length > 0) {
 
   const createdRows = await Promise.all(createPromises);
 
-  // อัพเดท state
   finalRows = rows.map(row => {
     const created = createdRows.find(cr => 
       cr.relateDrawing === row.relateDrawing && !row.firestoreId
@@ -548,7 +643,6 @@ const handleCancelEdit = (idx: number) => {
 };
 
 const handleSelectTaskForRevision = (task: any) => {
-  // หา rev. ล่าสุด
   const relatedTasks = rows.filter(r => 
     r.relateDrawing.startsWith(task.taskName.replace(/\sREV\.\d+$/, ''))
   );
@@ -560,7 +654,9 @@ const handleSelectTaskForRevision = (task: any) => {
   
   const nextRev = String(maxRev + 1).padStart(2, '0');
   
-  // สร้างแถวใหม่
+  const originalRow = rows.find(r => r.id === task.id);
+  const docNo = originalRow?.docNo || "";
+  
   const newRow = {
     id: "",
     relateDrawing: `${task.taskName} REV.${nextRev}`,
@@ -569,28 +665,22 @@ const handleSelectTaskForRevision = (task: any) => {
     dueDate: "",
     statusDwg: "",
     lastRev: nextRev,
-    docNo: "",
+    docNo: docNo,
+    link: "",
+    progress: 0,
     correct: false
   };
   
-  setRows([...rows.filter(r => r.relateDrawing || r.activity), newRow, initialRows[0]]);
+  // แทรกแถวใหม่ไว้ก่อนแถวว่างสุดท้าย
+  const nonEmptyRows = rows.filter(r => r.relateDrawing || r.activity);
+  setRows([...nonEmptyRows, newRow, initialRows[0]]);
+  
+  // ตั้ง highlight ชั่วคระ
+  setHighlightedRow(nonEmptyRows.length); // index ของแถวใหม่
+  setTimeout(() => setHighlightedRow(null), 2000); // หายหลัง 2 วินาที
 };
 
-const handleAdd = () => {
-    setRows(rows => [...rows, {
-      id: "",
-      relateDrawing: "",
-      activity: "",
-      startDate: "",
-      dueDate: "",
-      statusDwg: "",
-      lastRev: "",
-      docNo: "",
-      correct: false
-    }]);
-  };
-
-  const statuses = ["กำลังดำเนินการ", "เสร็จสิ้น", "รอดำเนินการ"];
+const statuses = ["กำลังดำเนินการ", "เสร็จสิ้น", "รอดำเนินการ"];
 
   return (
     <div style={{ maxWidth: "100%", minHeight: "100vh", background: "#f0f2f5" }}>
@@ -624,6 +714,17 @@ const handleAdd = () => {
             isOpen={isCreateModalOpen}
             onClose={() => setIsCreateModalOpen(false)}
             onSubmit={handleCreateProject}
+            onViewProjects={() => {
+              setIsCreateModalOpen(false);
+              setIsProjectListOpen(true);
+            }}
+          />
+
+          <ProjectListModal
+            isOpen={isProjectListOpen}
+            onClose={() => setIsProjectListOpen(false)}
+            projects={projects}
+            onUpdateLeader={handleUpdateLeader}
           />
           
           <select
@@ -642,7 +743,7 @@ const handleAdd = () => {
               cursor: loading ? "not-allowed" : "pointer"
             }}
           >
-            <option value="">{loading ? "กำลังโหลด..." : "เลือกโครงการ"}</option>
+            <option value="all">ทุกโครงการ</option>
             {projects.map(p => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
@@ -677,12 +778,14 @@ const handleAdd = () => {
           <div style={{ marginBottom: "16px", borderBottom: "1px solid #e5e7eb", paddingBottom: "16px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: "14px" }}>Project Name</div>
-              <div style={{ color: "#666", fontSize: "14px" }}>
-                {selectedProject 
-                  ? projects.find(p => p.id === selectedProject)?.name || "ไม่พบโครงการ"
-                  : "แสดง ชื่อโครงการ"
-                }
-              </div>
+                <div style={{ color: "#666", fontSize: "14px" }}>
+                  {selectedProject === "all"
+                    ? "ทุกโครงการ"
+                    : selectedProject 
+                    ? projects.find(p => p.id === selectedProject)?.name || "ไม่พบโครงการ"
+                    : "แสดง ชื่อโครงการ"
+                  }
+                </div>
             </div>
           </div>
 
@@ -709,10 +812,62 @@ const handleAdd = () => {
         <tr style={{ background: "#ff4d00" }}>
           <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>TASK ID</th>
           <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>RELATE DRAWING</th>
-          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>ACTIVITY</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span>ACTIVITY</span>
+              <select
+                value={filterActivity}
+                onChange={e => setFilterActivity(e.target.value)}
+                onClick={e => e.stopPropagation()}
+                style={{
+                  width: "20px",
+                  padding: "0",
+                  fontSize: "10px",
+                  border: "1px solid #fff",
+                  borderRadius: "3px",
+                  background: "#fff",
+                  color: "#000",
+                  cursor: "pointer"
+                }}
+              >
+                <option value="">ทั้งหมด</option>
+               {[...new Set(allTasksCache.map(t => t.taskCategory))].filter(Boolean).map(act => (
+                  <option key={act} value={act}>{act}</option>
+                ))}
+              </select>
+            </div>
+          </th>
           <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>PLAN START DATE</th>
           <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "110px" }}>DUE DATE</th>
-          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>STATUS DWG.</th>
+          <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <span>STATUS DWG.</span>
+                <select
+                  value={filterStatus}
+                  onChange={e => setFilterStatus(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    width: "20px",
+                    padding: "0",
+                    fontSize: "10px",
+                    border: "1px solid #fff",
+                    borderRadius: "3px",
+                    background: "#fff",
+                    color: "#000",
+                    cursor: "pointer"
+                  }}
+                >
+                  <option value="">ทั้งหมด</option>
+                <option value="PENDING_REVIEW">รอตรวจสอบ</option>
+                <option value="PENDING_CM_APPROVAL">ส่ง CM</option>
+                <option value="REVISION_REQUIRED">แก้ไข</option>
+                <option value="APPROVED">อนุมัติ</option>
+                <option value="APPROVED_WITH_COMMENTS">อนุมัติตามคอมเมนต์ (ไม่แก้ไข)</option>
+                <option value="APPROVED_REVISION_REQUIRED">อนุมัติตามคอมเมนต์ (ต้องแก้ไข)</option>
+                <option value="REJECTED">ไม่อนุมัติ</option>
+              </select>
+            </div>
+          </th>
           <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "70px" }}>LINK FILE</th>
           <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>DOC. NO.</th>
           <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "80px" }}>LAST REV.</th>
@@ -722,235 +877,277 @@ const handleAdd = () => {
       </thead>
       <tbody>
 {rows.map((row, idx) => {
-  const isNewRow = !row.id; // แถวใหม่ที่ยังไม่มี TASK ID
-  const isEditing = editingRows.has(idx); // แถวที่กำลังแก้ไข
-  const isEditable = isNewRow || isEditing; // แก้ไขได้หรือไม่
+  const isNewRow = !row.id;
+  const isEditing = editingRows.has(idx);
+  const isEditable = isNewRow || isEditing;
   
-  return (
-    <tr 
-      key={row.firestoreId || `row-${idx}`} 
-      style={{ 
-        borderBottom: "1px solid #e5e7eb", 
-        background: isEditing ? "#fff7ed" : "#fff" // ไฮไลท์แถวที่กำลังแก้
-      }}
-    >
-      <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
-      <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
-        <input
-          type="text"
-          value={row.relateDrawing}
-          onFocus={() => handleRowFocus(idx)}
-          onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)}
-          disabled={!isEditable}
-          style={{ 
-            width: "100%", 
-            padding: "4px 6px", 
-            border: "1px solid #e5e7eb",
-            borderRadius: "4px",
+return (
+<tr 
+  key={row.firestoreId || `row-${idx}`} 
+  style={{ 
+    borderBottom: "1px solid #e5e7eb", 
+    background: highlightedRow === idx 
+      ? "#fef08a" 
+      : isEditing 
+      ? "#fff7ed" 
+      : idx % 2 === 0 
+      ? "#f9fafb" 
+      : "#fff",
+    transition: "background-color 0.15s ease-out",
+    cursor: "pointer"
+  }}
+  onMouseEnter={(e) => {
+    if (highlightedRow !== idx && !isEditing) {
+      e.currentTarget.style.backgroundColor = "#e0f2fe";
+    }
+  }}
+  onMouseLeave={(e) => {
+    if (highlightedRow !== idx && !isEditing) {
+      e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#f9fafb" : "#fff";
+    }
+  }}
+>
+    <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
+    <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
+<input
+  type="text"
+  value={row.relateDrawing}
+  onClick={() => handleRowFocus(idx)}
+  onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)}
+        disabled={!isEditable}
+        style={{ 
+          width: "100%", 
+          padding: "4px 6px", 
+          border: "1px solid #e5e7eb",
+          borderRadius: "4px",
+          fontSize: 10,
+          backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff",
+          cursor: !isEditable ? "not-allowed" : "text"
+        }}
+      />
+    </td>
+    <td style={{ padding: "6px 10px", fontSize: 10 }}>
+<select 
+  value={row.activity}
+  onClick={() => handleRowFocus(idx)}
+  onChange={e => handleRowChange(idx, "activity", e.target.value)}
+        disabled={activitiesLoading || !isEditable}
+        style={{ 
+          width: "100%", 
+          padding: "4px 6px", 
+          border: "1px solid #e5e7eb",
+          borderRadius: "4px",
+          fontSize: 10,
+          backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff",
+          cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer"
+        }}
+      >
+        <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
+        {activities.map(act => (
+          <option key={act.id} value={act.activityName}>{act.activityName}</option>
+        ))}
+      </select>
+    </td>
+    <td style={{ padding: "6px 10px", fontSize: 10 }}>
+<input
+  type="date"
+  value={row.startDate}
+  onClick={() => handleRowFocus(idx)}
+  onChange={e => handleRowChange(idx, "startDate", e.target.value)}
+        disabled={!isEditable}
+        style={{ 
+          width: "100%", 
+          padding: "4px 6px", 
+          border: "1px solid #e5e7eb",
+          borderRadius: "4px",
+          fontSize: 10,
+          backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff",
+          cursor: !isEditable ? "not-allowed" : "text"
+        }}
+      />
+    </td>
+    <td style={{ padding: "6px 10px", fontSize: 10 }}>
+<input
+  type="date"
+  value={row.dueDate}
+  onClick={() => handleRowFocus(idx)}
+  onChange={e => handleRowChange(idx, "dueDate", e.target.value)}
+        disabled={!isEditable}
+        style={{ 
+          width: "100%", 
+          padding: "4px 6px", 
+          border: "1px solid #e5e7eb",
+          borderRadius: "4px",
+          fontSize: 10,
+          backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff",
+          cursor: !isEditable ? "not-allowed" : "text"
+        }}
+      />
+    </td>
+    <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
+      {row.statusDwg ? translateStatus(row.statusDwg) : ""}
+    </td>
+    <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+      {row.link ? (
+        <a 
+          href={row.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "#3b82f6", textDecoration: "none", fontSize: "16px" }}
+          title="คลิกเพื่อดูไฟล์"
+        >
+          📎
+        </a>
+      ) : (
+        <span style={{ color: "#9ca3af" }}>-</span>
+      )}
+    </td>
+    <td style={{ padding: "4px 6px", fontSize: 10 }}>{row.docNo}</td>
+    <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
+      {row.lastRev || "00"}
+    </td>
+    <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+      {row.statusDwg ? (
+        <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
+      ) : isNewRow ? (
+        <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
+      ) : isEditing ? (
+        <button 
+          onClick={() => handleCancelEdit(idx)}
+          style={{
+            padding: "3px 10px",
+            background: "#10b981",
+            border: "none",
+            borderRadius: "3px",
             fontSize: 10,
-            backgroundColor: !isEditable ? "#f9fafb" : "#fff",
-            cursor: !isEditable ? "not-allowed" : "text"
-          }}
-        />
-      </td>
-      <td style={{ padding: "6px 10px", fontSize: 10 }}>
-        <select 
-          value={row.activity}
-          onFocus={() => handleRowFocus(idx)}
-          onChange={e => handleRowChange(idx, "activity", e.target.value)}
-          disabled={activitiesLoading || !isEditable}
-          style={{ 
-            width: "100%", 
-            padding: "4px 6px", 
-            border: "1px solid #e5e7eb",
-            borderRadius: "4px",
-            fontSize: 10,
-            backgroundColor: !isEditable ? "#f9fafb" : activitiesLoading ? "#f3f4f6" : "#fff",
-            cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer"
+            cursor: "pointer",
+            color: "white",
+            boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)"
           }}
         >
-          <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
-          {activities.map(act => (
-            <option key={act.id} value={act.activityName}>{act.activityName}</option>
-          ))}
-        </select>
-      </td>
-      <td style={{ padding: "6px 10px", fontSize: 10 }}>
-        <input
-          type="date"
-          value={row.startDate}
-          onFocus={() => handleRowFocus(idx)}
-          onChange={e => handleRowChange(idx, "startDate", e.target.value)}
-          disabled={!isEditable}
-          style={{ 
-            width: "100%", 
-            padding: "4px 6px", 
-            border: "1px solid #e5e7eb",
-            borderRadius: "4px",
-            fontSize: 10,
-            backgroundColor: !isEditable ? "#f9fafb" : "#fff",
-            cursor: !isEditable ? "not-allowed" : "text"
-          }}
-        />
-      </td>
-      <td style={{ padding: "6px 10px", fontSize: 10 }}>
-        <input
-          type="date"
-          value={row.dueDate}
-          onFocus={() => handleRowFocus(idx)}
-          onChange={e => handleRowChange(idx, "dueDate", e.target.value)}
-          disabled={!isEditable}
-          style={{ 
-            width: "100%", 
-            padding: "4px 6px", 
-            border: "1px solid #e5e7eb",
-            borderRadius: "4px",
-            fontSize: 10,
-            backgroundColor: !isEditable ? "#f9fafb" : "#fff",
-            cursor: !isEditable ? "not-allowed" : "text"
-          }}
-        />
-      </td>
-      <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
-        {row.statusDwg ? translateStatus(row.statusDwg) : ""}
-      </td>
-      <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-        {row.docNo ? (
-          <a 
-            href="#" 
-            style={{ color: "#3b82f6", textDecoration: "none" }}
-            onClick={(e) => {
-              e.preventDefault();
-              alert('Link file feature coming soon');
-            }}
-          >
-            📎
-          </a>
-        ) : (
-          <span style={{ color: "#9ca3af" }}>-</span>
-        )}
-      </td>
-      <td style={{ padding: "4px 6px", fontSize: 10 }}>{row.docNo}</td>
-      <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
-        {row.lastRev || "00"}
-      </td>
-      <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-        {row.statusDwg ? (
-          <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
-        ) : isNewRow ? (
-          <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
-        ) : isEditing ? (
-          <button 
-            onClick={() => handleCancelEdit(idx)}
-            style={{
-              padding: "3px 10px",
-              background: "#10b981",
-              border: "none",
-              borderRadius: "3px",
-              fontSize: 10,
-              cursor: "pointer",
-              color: "white",
-              boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)"
-            }}
-          >
-            บันทึก
-          </button>
-        ) : (
-          <button 
-            onClick={() => handleEdit(idx)}
-            style={{
-              padding: "3px 10px",
-              background: "#f97316",
-              border: "none",
-              borderRadius: "3px",
-              fontSize: 10,
-              cursor: "pointer",
-              color: "white",
-              boxShadow: "0 2px 4px rgba(249, 115, 22, 0.2)"
-            }}
-          >
-            Edit
-          </button>
-        )}
-      </td>
-      <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-        <button
-          onClick={() => handleDelete(idx)}
-          style={{ background: "none", border: "none", cursor: "pointer", padding: "2px" }}
-        >
-          <span role="img" aria-label="delete">🗑️</span>
+          บันทึก
         </button>
-      </td>
-    </tr>
-  );
+      ) : (
+        <button 
+          onClick={() => handleEdit(idx)}
+          style={{
+            padding: "3px 10px",
+            background: "#f97316",
+            border: "none",
+            borderRadius: "3px",
+            fontSize: 10,
+            cursor: "pointer",
+            color: "white",
+            boxShadow: "0 2px 4px rgba(249, 115, 22, 0.2)"
+          }}
+        >
+          Edit
+        </button>
+      )}
+    </td>
+    <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+      {(() => {
+        // เช็คเงื่อนไขที่ห้ามลบ
+        const isEmptyRow = !row.id && !row.relateDrawing && !row.activity && !row.startDate && !row.dueDate;
+        const isLastEmptyRow = isEmptyRow && idx === rows.length - 1;
+        const hasStatus = !!row.statusDwg;
+        const hasProgress = row.progress && row.progress > 0;
+        
+        // ถ้าเข้าเงื่อนไขใดๆ → ซ่อนปุ่มลบ
+        if (isLastEmptyRow || hasStatus || hasProgress) {
+          return <span style={{ color: "#9ca3af" }}>-</span>;
+        }
+        
+        // ถ้าไม่เข้าเงื่อนไข → แสดงปุ่มลบ
+        return (
+          <button
+            onClick={() => handleDelete(idx)}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: "2px" }}
+          >
+            <span role="img" aria-label="delete">🗑️</span>
+          </button>
+        );
+      })()}
+    </td>
+  </tr>
+);
 })}
       </tbody>
-              </table>
-            </div>
-          )}
+    </table>
+  </div>
+)}
 
           <div style={{ marginTop: 24, textAlign: "right", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
-              <button
-                onClick={handleSave}
-                style={{
-                  padding: "8px 24px",
-                  background: "#f97316",
-                  border: "none",
-                  borderRadius: "6px",
-                  fontSize: "14px",
-                  cursor: "pointer",
-                  color: "white",
-                  fontWeight: 500,
-                  boxShadow: "0 1px 2px rgba(249, 115, 22, 0.1)"
-                }}
-              >
-                SAVE
-              </button>
-              <button
-                onClick={() => setShowAddRevModal(true)}
-                style={{
-                padding: "8px 16px",
-                background: "#4f46e5",
+            <button
+              onClick={handleSave}
+              style={{
+                padding: "8px 24px",
+                background: "#f97316",
                 border: "none",
                 borderRadius: "6px",
                 fontSize: "14px",
                 cursor: "pointer",
                 color: "white",
                 fontWeight: 500,
-                boxShadow: "0 1px 2px rgba(79, 70, 229, 0.1)"
+                boxShadow: "0 1px 2px rgba(249, 115, 22, 0.1)"
               }}
             >
-              Add new Rev.
+              SAVE
             </button>
-          </div>
+            <button
+              onClick={() => setShowAddRevModal(true)}
+              style={{
+              padding: "8px 16px",
+              background: "#4f46e5",
+              border: "none",
+              borderRadius: "6px",
+              fontSize: "14px",
+              cursor: "pointer",
+              color: "white",
+              fontWeight: 500,
+              boxShadow: "0 1px 2px rgba(79, 70, 229, 0.1)"
+            }}
+          >
+            Add new Rev.
+          </button>
         </div>
       </div>
-
-      <SaveConfirmationModal
-        isOpen={showSaveModal}
-        data={saveModalData}
-        onConfirm={confirmSave}
-        onCancel={() => setShowSaveModal(false)}
-      />
-      <SuccessModal
-        isOpen={showSuccessModal}
-        message={successMessage}
-        onClose={() => setShowSuccessModal(false)}
-      />
-      <AddRevisionModal
-        isOpen={showAddRevModal}
-        tasks={rows.filter(r => r.firestoreId).map(r => ({
-          id: r.id,
-          taskName: r.relateDrawing,
-          taskCategory: r.activity,
-          currentStep: r.statusDwg,
-          rev: r.lastRev
-        }))}
-        onSelect={handleSelectTaskForRevision}
-        onClose={() => setShowAddRevModal(false)}
-      />
     </div>
-  );
+
+    <SaveConfirmationModal
+      isOpen={showSaveModal}
+      data={saveModalData}
+      onConfirm={confirmSave}
+      onCancel={() => setShowSaveModal(false)}
+    />
+    <SuccessModal
+      isOpen={showSuccessModal}
+      message={successMessage}
+      onClose={() => setShowSuccessModal(false)}
+    />
+    <AddRevisionModal
+      isOpen={showAddRevModal}
+      tasks={rows.filter(r => r.firestoreId).map(r => ({
+        id: r.id,
+        taskName: r.relateDrawing,
+        taskCategory: r.activity,
+        currentStep: r.statusDwg,
+        rev: r.lastRev
+      }))}
+      onSelect={handleSelectTaskForRevision}
+      onClose={() => setShowAddRevModal(false)}
+    />
+    <DeleteConfirmModal
+      isOpen={showDeleteModal}
+      taskName={deleteTarget?.row.relateDrawing || ''}
+      onConfirm={confirmDelete}
+      onCancel={() => {
+        setShowDeleteModal(false);
+        setDeleteTarget(null);
+      }}
+    />
+  </div>
+);
 };
 
 export default ProjectsPage;
