@@ -151,9 +151,14 @@ export default function DailyReport() {
           font-weight: 700;
           color: white;
           flex-grow: 1;
-          text-align: center;
+          text-align: left !important;
+          padding-left: 0;
+          margin: 0;
+          background: none;
+          border: none;
+          cursor: pointer;
         }
-        .custom-calendar .react-calendar__navigation button {
+        .custom-calendar .react-calendar__navigation__arrow {
           color: white;
           font-weight: 600;
           font-size: 16px;
@@ -162,6 +167,7 @@ export default function DailyReport() {
           padding: 8px 12px;
           border-radius: 8px;
           transition: all 0.2s ease;
+          min-width: 40px;
         }
         .custom-calendar .react-calendar__navigation button:hover {
           background: rgba(255, 255, 255, 0.2);
@@ -230,7 +236,6 @@ export default function DailyReport() {
           <div className="bg-white rounded-2xl shadow-xl p-6 backdrop-blur-sm">
           {isClient && (
           <Calendar
-            locale="th-TH"
             onChange={async (value: Value) => {
               if (value instanceof Date) {
                 if (hasUnsavedChanges) {
@@ -281,6 +286,18 @@ export default function DailyReport() {
             }}
             value={date}
             className="w-full border-0 rounded-2xl shadow-lg bg-white custom-calendar"
+            locale="th-TH"
+            formatShortWeekday={(locale, date) => ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'][date.getDay()]}
+            navigationLabel={({ date, view }) => {
+              if (view === 'month') {
+                const thaiMonths = [
+                  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+                ];
+                return `${thaiMonths[date.getMonth()]} ${date.getFullYear()}`;
+              }
+              return '';
+            }}
             tileClassName={({ date: tileDate, view }) => {
               if (view !== 'month') return '';
 
@@ -338,7 +355,7 @@ export default function DailyReport() {
           {/* คำอธิบายสี */}
           <div className="mt-6 space-y-3 text-sm bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-100">
             <div className="flex items-center space-x-3">
-              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-orange-400 to-orange-500 shadow-md"></div>
+              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-orange-500 to-orange-600 shadow-md"></div>
               <span className="text-gray-700 font-medium">วันที่ปัจจุบัน</span>
             </div>
             <div className="flex items-center space-x-3">

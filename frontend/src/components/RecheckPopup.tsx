@@ -70,8 +70,23 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           margin-bottom: 0;
           padding: 12px;
           border: none;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
         }
-        .custom-calendar .react-calendar__navigation button {
+        .custom-calendar .react-calendar__navigation__label {
+          font-size: 16px;
+          font-weight: 700;
+          color: white;
+          flex-grow: 1;
+          text-align: left !important;
+          padding-left: 0;
+          margin: 0;
+          background: none;
+          border: none;
+          cursor: pointer;
+        }
+        .custom-calendar .react-calendar__navigation__arrow {
           color: white;
           font-weight: 600;
           border: none;
@@ -79,6 +94,7 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           padding: 6px 10px;
           border-radius: 6px;
           transition: all 0.2s ease;
+          min-width: 35px;
         }
         .custom-calendar .react-calendar__navigation button:hover {
           background: rgba(255, 255, 255, 0.2);
@@ -125,14 +141,21 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);
         }
         .custom-calendar .react-calendar__tile--active {
-          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+          background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
           color: white !important;
-          box-shadow: 0 4px 16px rgba(249, 115, 22, 0.4);
+          box-shadow: 0 4px 16px rgba(100, 116, 139, 0.4);
           font-weight: 600;
         }
         .custom-calendar .react-calendar__tile--now {
-          background: #f97316 !important;
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
           color: white !important;
+          font-weight: 600;
+          box-shadow: 0 4px 16px rgba(249, 115, 22, 0.4);
+        }
+        .custom-calendar .react-calendar__tile--active.react-calendar__tile--now {
+          background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
+          color: white !important;
+          box-shadow: 0 4px 16px rgba(100, 116, 139, 0.4);
           font-weight: 600;
         }
         .custom-calendar .react-calendar__month-view__days__day--neighboringMonth {
@@ -144,19 +167,46 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
         {/* Left side - Calendar */}
         <div className="w-96">
           <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl p-6 shadow-lg">
-          <Calendar
+                    <Calendar
             onChange={(value: Value) => setSelectedDate(value)}
             value={selectedDate}
             className="w-full border-0 rounded-xl shadow-md bg-white text-lg custom-calendar"
+            locale="th-TH"
+            formatShortWeekday={(locale, date) => ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'][date.getDay()]}
+            navigationLabel={({ date, view }) => {
+              if (view === 'month') {
+                const thaiMonths = [
+                  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+                ];
+                return `${thaiMonths[date.getMonth()]} ${date.getFullYear()}`;
+              }
+              return '';
+            }}
           />
           </div>
           <div className="mt-6 text-center bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-200">
             <p className="font-semibold text-lg mb-2 text-orange-800">วันที่เลือก:</p>
-            <p className="text-lg text-orange-700">{selectedDate instanceof Date ? selectedDate.toLocaleDateString('th-TH', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
-            }) : ''}</p>
+            <p className="text-lg text-orange-700">{selectedDate instanceof Date ? (() => {
+              const thaiMonths = [
+                'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+              ];
+              return `${selectedDate.getDate()} ${thaiMonths[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
+            })() : ''}</p>
+          </div>
+          
+          {/* กำกับสีในปฏิทิน */}
+          <div className="mt-4 space-y-3 text-sm bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-100">
+            <h4 className="font-semibold text-orange-800 mb-3">สีในปฏิทิน:</h4>
+            <div className="flex items-center space-x-3">
+              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-orange-500 to-orange-600 shadow-md"></div>
+              <span className="text-gray-700 font-medium">วันที่ปัจจุบัน</span>
+            </div>
+            <div className="flex items-center space-x-3">
+              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-slate-400 to-slate-500 shadow-md"></div>
+              <span className="text-gray-700 font-medium">วันที่เลือก</span>
+            </div>
           </div>
         </div>
 
