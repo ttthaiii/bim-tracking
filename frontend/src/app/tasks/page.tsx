@@ -668,9 +668,6 @@ export default function TaskAssignment() {
                       <td className="px-2 py-2">
                         <div className="flex items-center space-x-2">
                           <ProgressBar value={subtask.subTaskProgress} size="sm" />
-                          <span className="text-xs text-gray-500">
-                            {subtask.subTaskProgress}%
-                          </span>
                         </div>
                       </td>
                       <td className="px-2 py-2 text-center">
