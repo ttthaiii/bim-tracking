@@ -79,7 +79,7 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           font-weight: 700;
           color: white;
           flex-grow: 1;
-          text-align: left !important;
+          text-align: center !important;
           padding-left: 0;
           margin: 0;
           background: none;
@@ -95,6 +95,10 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           border-radius: 6px;
           transition: all 0.2s ease;
           min-width: 35px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
         }
         .custom-calendar .react-calendar__navigation button:hover {
           background: rgba(255, 255, 255, 0.2);
@@ -111,6 +115,8 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           font-size: 12px;
           text-transform: uppercase;
           letter-spacing: 0.5px;
+          text-align: center;
+          padding: 8px 4px;
         }
         .custom-calendar .react-calendar__tile {
           border: none;
