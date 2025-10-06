@@ -1,0 +1,89 @@
+/* General Calendar Styling */
+.custom-calendar {
+  border: 1px solid #f97316 !important; /* Orange border */
+  border-radius: 0.5rem !important;
+  background-color: white !important;
+  font-family: inherit;
+  width: 100%;
+}
+
+/* Navigation Bar */
+.custom-calendar .react-calendar__navigation {
+  background-color: #f97316 !important; /* Orange background */
+  color: white;
+  height: 44px;
+  margin-bottom: 0;
+  border-bottom: 1px solid #fb923c;
+}
+
+.custom-calendar .react-calendar__navigation button {
+  color: white !important;
+  min-width: 44px;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.custom-calendar .react-calendar__navigation button:hover {
+  background-color: #fb923c !important; /* Lighter orange for hover */
+}
+
+.custom-calendar .react-calendar__navigation button:disabled {
+  background-color: #fdba74 !important; /* Even lighter for disabled */
+  color: #fed7aa !important;
+}
+
+/* Weekday Headers */
+.custom-calendar .react-calendar__month-view__weekdays {
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.75rem; /* text-xs */
+  color: #111827; /* gray-900 - Darker text */
+  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+}
+
+.custom-calendar .react-calendar__month-view__weekdays__weekday abbr {
+  text-decoration: none;
+}
+
+/* Day Tiles */
+.custom-calendar .react-calendar__tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  padding: 2px;
+  background: none;
+  border: none;
+  border-radius: 50%; /* Make tiles circular */
+  color: #374151; /* gray-700 -- FIXED default text color */
+}
+
+.custom-calendar .react-calendar__tile:hover {
+  background-color: #f3f4f6; /* gray-100 */
+}
+
+/* Day from neighboring month */
+.custom-calendar .react-calendar__month-view__days__day--neighboringMonth {
+  color: #d1d5db !important; /* gray-300 -- FIXED for other months' days */
+}
+
+.custom-calendar .react-calendar__tile--now {
+  background: #f97316 !important; /* Orange for current day */
+  color: white !important;
+  font-weight: bold;
+}
+
+.custom-calendar .react-calendar__tile--active {
+  background: #4f46e5 !important; /* Indigo for active/selected day */
+  color: white !important;
+}
+
+/* Custom Tile Classes from component */
+.tile-has-data {
+  background-color: #fef08a !important; /* yellow-200 */
+  color: #854d0e !important; /* yellow-800 */
+}
+
+.tile-can-edit-past {
+    background-color: #d1d5db !important; /* gray-300 */
+}

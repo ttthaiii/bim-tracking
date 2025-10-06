@@ -7,6 +7,7 @@
   # Use https://search.nixos.org/packages to find packages
   packages = [
     pkgs.nodejs_20
+    pkgs.firebase-tools # เพิ่ม Firebase CLI เข้ามา
   ];
 
   # Sets environment variables in the workspace

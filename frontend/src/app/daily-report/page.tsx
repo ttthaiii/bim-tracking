@@ -1,545 +1,251 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useId, useMemo } from 'react';
 import Calendar from 'react-calendar';
-import 'react-calendar/dist/Calendar.css';
+import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
-import { getEmployeeTaskAssignments, TaskAssignment } from '@/services/taskAssignService';
-import { RecheckPopup } from '@/components/RecheckPopup';
-import { LeavePopup } from '@/components/LeavePopup';
-import { TimeSelector } from '@/components/TimeSelector';
-import PageLayout from '@/components/shared/PageLayout'; // Import PageLayout
-import { useAuth } from '@/context/AuthContext'; // Import useAuth hook
+import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee } from '@/services/taskAssignService';
+import PageLayout from '@/components/shared/PageLayout';
+import { useAuth } from '@/context/AuthContext';
+import { DailyReportEntry, Subtask } from '@/types/database';
+import { getProjects, Project } from '@/lib/projects';
+import { SubtaskAutocomplete } from '@/components/SubtaskAutocomplete'; // <-- IMPORT aUTOCPMPLETE
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
 
-const initialEmptyTask: TaskAssignment = {
-  id: `temp-${Date.now()}`,
-  relateDrawing: '',
-  employeeId: '',
-  assignDate: '',
-  timeType: 'normal', // Default timeType
-  normalWorkingHours: '', // New field
-  otWorkingHours: '',     // New field
-  progress: '0%',
-  note: '',
-  status: 'pending'
-};
+const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: string, baseId: string, index: number): DailyReportEntry => ({
+  id: `${baseId}-temp-${index}`,
+  employeeId, assignDate, subtaskId: '', normalWorkingHours: '0:0', otWorkingHours: '0:0', progress: '0%', 
+  note: '', status: 'pending', subTaskName: '', subTaskCategory: '', internalRev: '', 
+  subTaskScale: '', project: '', taskName: '', remark: '', item: '',
+});
+
+const hourOptions = Array.from({ length: 13 }, (_, i) => i);
+const minuteOptions = [0, 15, 30, 45];
 
 export default function DailyReport() {
-  const { appUser } = useAuth(); // Use the auth context to get logged-in user data
+  const { appUser } = useAuth();
+  const baseId = useId();
   const [date, setDate] = useState<Value>(new Date());
-  // Initialize workDate directly with the current date formatted
   const [workDate, setWorkDate] = useState(new Date().toISOString().split('T')[0]);
   const [employeeId, setEmployeeId] = useState('');
   const [employeeData, setEmployeeData] = useState<{ employeeId: string; fullName: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>([{
-    ...initialEmptyTask,
-    id: `temp-${Date.now()}` // Ensure unique ID for initial row
-  }]);
-  const [touchedRows, setTouchedRows] = useState<Set<string>>(new Set()); // Track touched rows by their ID
+  const [dailyReportEntries, setDailyReportEntries] = useState<DailyReportEntry[]>([]);
+  const [touchedRows, setTouchedRows] = useState<Set<string>>(new Set());
+  const [availableSubtasks, setAvailableSubtasks] = useState<Subtask[]>([]);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
 
-  // Effect to set employeeId from logged-in user and fetch data
-  useEffect(() => {
-    if (appUser && appUser.employeeId) {
-      setEmployeeId(appUser.employeeId);
-    }
-  }, [appUser]);
+  const selectedSubtaskIds = useMemo(() => {
+    const ids = new Set<string>();
+    dailyReportEntries.forEach(entry => {
+      if (entry.subtaskId) ids.add(entry.subtaskId);
+    });
+    return ids;
+  }, [dailyReportEntries]);
 
-  // Effect to trigger search when employeeId is set (either manually or from appUser)
-  useEffect(() => {
-    if (employeeId && !employeeData && !loading) { 
-      handleEmployeeSearch();
-    }
-  }, [employeeId]); 
-
-  useEffect(() => {
-    if (date instanceof Date) {
-      const selectedDate = date.toISOString().split('T')[0];
-      setWorkDate(selectedDate);
-    }
-  }, [date]);
-
-
-  const handleEmployeeSearch = async () => {
+  const fetchAllData = useCallback(async () => {
     if (!employeeId) return;
-    
     setLoading(true);
     setError('');
-    setTaskAssignments([]);
-    setTouchedRows(new Set()); // Reset touched rows on new search
-    
+    setTouchedRows(new Set());
     try {
-      const [employee, assignments] = await Promise.all([
+      const [employee, dailyEntries, projects, subtasks] = await Promise.all([
         getEmployeeByID(employeeId),
-        getEmployeeTaskAssignments(employeeId)
+        getEmployeeDailyReportEntries(employeeId),
+        getProjects(),
+        fetchAvailableSubtasksForEmployee(employeeId),
       ]);
       
+      setAllProjects(projects);
+      setAvailableSubtasks(subtasks);
+
       if (employee) {
         setEmployeeData(employee);
-        let fetchedAssignments = assignments;
-        if (fetchedAssignments.length === 0) {
-          // If no assignments, add one empty row
-          fetchedAssignments = [{ ...initialEmptyTask, id: `temp-${Date.now()}`, employeeId: employeeId, assignDate: workDate }];
-        }
-        setTaskAssignments(fetchedAssignments);
+        const entriesForDate = dailyEntries.filter(entry => entry.assignDate === workDate);
+        setDailyReportEntries(entriesForDate.length > 0 ? entriesForDate : [createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)]);
       } else {
         setError('ไม่พบข้อมูลพนักงาน');
         setEmployeeData(null);
-        setTaskAssignments([{ ...initialEmptyTask, id: `temp-${Date.now()}`, employeeId: employeeId, assignDate: workDate }]); // Always show one empty row
+        setDailyReportEntries([createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)]);
       }
-    } catch (err) {
-      setError('เกิดข้อผิดพลาดในการค้นหาข้อมูล');
-      setEmployeeData(null);
-      setTaskAssignments([{ ...initialEmptyTask, id: `temp-${Date.now()}`, employeeId: employeeId, assignDate: workDate }]); // Always show one empty row
-    } finally {
-      setLoading(false);
+    } catch (err) { console.error(err); setError('เกิดข้อผิดพลาด'); } 
+    finally { setLoading(false); }
+  }, [employeeId, workDate, baseId]);
+
+  useEffect(() => { if (appUser?.employeeId) setEmployeeId(appUser.employeeId); }, [appUser]);
+  useEffect(() => { fetchAllData(); }, [fetchAllData]);
+  useEffect(() => { if (date instanceof Date) setWorkDate(date.toISOString().split('T')[0]); }, [date]);
+
+  const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
+    setDailyReportEntries(entries => entries.map(entry => (entry.id === entryId ? { ...entry, ...updates } : entry)));
+  };
+
+  const handleRowFocus = (entryId: string, idx: number) => {
+    if (!touchedRows.has(entryId)) {
+      setTouchedRows(prev => new Set(prev).add(entryId));
+      if (idx === dailyReportEntries.length - 1) {
+        handleAddRow();
+      }
     }
   };
 
-  const handleUpdateTask = (taskId: string, updates: Partial<TaskAssignment>) => {
-    setTaskAssignments(tasks => 
-      tasks.map(task => 
-        task.id === taskId ? { ...task, ...updates } : task
-      )
-    );
+  const handleTimeChange = (entryId: string, type: 'normalWorkingHours' | 'otWorkingHours', part: 'h' | 'm', value: string) => {
+    const currentEntry = dailyReportEntries.find(e => e.id === entryId);
+    if (!currentEntry) return;
+    const currentTime = currentEntry[type] || '0:0';
+    let [h, m] = currentTime.split(':').map(Number);
+    if (part === 'h') h = Number(value);
+    if (part === 'm') m = Number(value);
+    handleUpdateEntry(entryId, { [type]: `${h}:${m}` });
   };
 
-  const handleDeleteTask = (taskId: string) => {
-    if (taskAssignments.length === 1) {
-      alert('ต้องมีอย่างน้อย 1 แถว');
-      return;
-    }
+  const handleDeleteEntry = (entryId: string) => {
+    if (dailyReportEntries.length <= 1) return alert('ต้องมีอย่างน้อย 1 แถว');
     if (window.confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-      setTaskAssignments(tasks => tasks.filter(task => task.id !== taskId));
+      setDailyReportEntries(entries => entries.filter(entry => entry.id !== entryId));
     }
   };
+  
+  const handleAddRow = () => {
+    setDailyReportEntries(prev => [...prev, createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, prev.length)]);
+  };
 
-  const [isRecheckOpen, setIsRecheckOpen] = useState(false);
-  const [showLeavePopup, setShowLeavePopup] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string>();
+  const handleRelateDrawingChange = (entryId: string, subtaskId: string | null) => {
+    const selectedSubtask = subtaskId ? availableSubtasks.find(sub => sub.id === subtaskId) : null;
+    const updates = selectedSubtask ? {
+      subtaskId: selectedSubtask.id,
+      subTaskName: selectedSubtask.subTaskName, subTaskCategory: selectedSubtask.subTaskCategory,
+      progress: `${selectedSubtask.subTaskProgress || 0}%`, note: selectedSubtask.remark,
+      internalRev: selectedSubtask.internalRev, subTaskScale: selectedSubtask.subTaskScale,
+      project: selectedSubtask.project, taskName: selectedSubtask.taskName, item: selectedSubtask.item,
+    } : { subtaskId: '', subTaskName: '', progress: '0%', note: '', item: '', status: 'pending' }; // Reset fields
+    handleUpdateEntry(entryId, updates);
+  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsRecheckOpen(true);
-  };
-
-  const handleConfirmSubmit = async () => {
-    try {
-      // TODO: Save to Firebase
-      console.log({ employeeId, employeeData, workDate, taskAssignments });
-      setIsRecheckOpen(false);
-      // Show success message or redirect
-    } catch (error) {
-      console.error('Error submitting data:', error);
-      // Show error message
-    }
-  };
-
-  const handleRowFocus = (rowId: string, idx: number) => {
-    if (!touchedRows.has(rowId)) {
-      setTouchedRows(prev => new Set(prev).add(rowId));
-      // If it's the last row, add a new empty row
-      if (idx === taskAssignments.length - 1) {
-        setTaskAssignments(prevTasks => [
-          ...prevTasks,
-          { ...initialEmptyTask, id: `temp-${Date.now()}`, employeeId: employeeId, assignDate: workDate }
-        ]);
-      }
-    }
+    console.log("Submitting data:", dailyReportEntries);
+    alert("Submit button clicked! Check the console for data.");
   };
 
   return (
-    <PageLayout> 
-      <div className="container-fluid mx-auto p-4 text-gray-900"> 
-        <div className="flex gap-4">
-          {/* Left side - Calendar */}
-          <div className="w-80">
-            <Calendar
-              onChange={(value: Value) => {
-                setDate(value);
-                const selectedDate = value instanceof Date ? value.toISOString().split('T')[0] : '';
-                setWorkDate(selectedDate); // Update workDate directly from Calendar onChange
-
-                // ถ้ามีข้อมูลในวันที่เลือก ให้แสดง RecheckPopup
-                const hasDataForDate = taskAssignments.some(
-                  task => task.assignDate === selectedDate
-                );
-                if (hasDataForDate) {
-                  setIsRecheckOpen(true);
-                }
-              }}
-              value={date}
-              className="w-full border rounded-lg shadow-lg bg-white custom-calendar"
-              tileClassName={({ date: tileDate, view }) => {
-                if (view !== 'month') return '';
-
-                // แปลง tileDate เป็น Date object และตั้งเวลาเป็น 00:00:00
-                const tileDateOnly = new Date(tileDate);
-                tileDateOnly.setHours(0, 0, 0, 0);
-
-                // วันที่ปัจจุบัน
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-
-                // คำนวณวันที่สามารถแก้ไขย้อนหลังได้ (3 วัน)
-                const threeDaysAgo = new Date(today);
-                threeDaysAgo.setDate(today.getDate() - 3);
-
-                // เช็คว่าเป็นวันที่มีการแก้ไขข้อมูลหรือไม่
-                const hasData = taskAssignments.some(task => {
-                  if (!task.assignDate) return false;
-                  const taskDate = new Date(task.assignDate);
-                  taskDate.setHours(0, 0, 0, 0);
-                  return taskDate.getTime() === tileDateOnly.getTime();
-                });
-
-                // ตรวจสอบเงื่อนไขและส่งคืน class ที่เหมาะสม
-                if (tileDateOnly.getTime() === today.getTime()) {
-                  return 'rounded-full bg-blue-200'; // วันที่ปัจจุบัน (สีฟ้า)
-                }
-                if (hasData) {
-                  return 'rounded-full bg-yellow-200'; // วันที่มีการแก้ไขข้อมูล (สีเหลือง)
-                }
-                if (tileDateOnly >= threeDaysAgo && tileDateOnly <= today) {
-                  return 'rounded-full bg-green-200'; // วันที่สามารถลงข้อมูลย้อนหลังได้ (สีเขียว)
-                }
-                
-                return '';
-              }}
-            />
-            {/* คำอธิบายสี */}
-            <div className="mt-4 space-y-2 text-sm text-gray-800"> 
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 rounded-full bg-blue-200"></div>
-                <span>วันที่ปัจจุบัน</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 rounded-full bg-yellow-200"></div>
-                <span>มีการแก้ไขข้อมูล</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-4 h-4 rounded-full bg-green-200"></div>
-                <span>วันที่สามารถลงข้อมูลย้อนหลังได้</span>
-              </div>
+    <PageLayout>
+      <div className="container-fluid mx-auto p-4 md:p-8 bg-gray-50 min-h-screen">
+        <div className="flex flex-col md:flex-row gap-6">
+          <div className="md:w-1/3 lg:w-1/4 max-w-sm">
+            <div className="bg-white rounded-lg shadow-md border border-gray-200">
+                <Calendar onChange={setDate} value={date} className="custom-calendar" locale="th-TH" />
+            </div>
+            <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
+              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-yellow-300 mr-2"></div><span>วันที่มีการลงข้อมูลแล้ว</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-gray-300 mr-2"></div><span>วันที่สามารถลงข้อมูลย้อนหลังได้</span></div>
             </div>
           </div>
 
-          {/* Right side - Form */}
           <div className="flex-1">
-            <div className="bg-white rounded-lg shadow-lg p-4">
-              <div className="flex justify-between mb-6">
-                <div className="w-1/2 pr-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">รหัสพนักงาน</label> 
-                  <div className="flex">
-                    <input
-                      type="text"
-                      value={employeeId}
-                      onChange={(e) => setEmployeeId(e.target.value)}
-                      className="w-full p-2 border rounded-md text-gray-800" 
-                      placeholder="XXXXXX"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleEmployeeSearch}
-                      className="ml-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-                      disabled={loading}
-                    >
-                      {loading ? 'กำลังค้นหา...' : 'ค้นหา'}
-                    </button>
+            <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
+                  <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">รหัสพนักงาน</label>
+                      <div className="flex">
+                          <input type="text" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className="w-full p-2 border border-gray-300 rounded-l-md text-sm text-gray-900 focus:ring-orange-500 focus:border-orange-500" placeholder="XXXXXX"/>
+                          <button type="button" onClick={fetchAllData} disabled={loading} className="p-2 bg-orange-500 text-white rounded-r-md hover:bg-orange-600 font-semibold text-sm disabled:bg-orange-300">{loading ? '...' : 'ค้นหา'}</button>
+                      </div>
                   </div>
-                  {error && <p className="mt-1 text-red-500 text-sm">{error}</p>}
-                  {employeeData && (
-                    <p className="mt-1 text-green-600 text-sm">
-                      ชื่อ-นามสกุล: {employeeData.fullName}
-                    </p>
-                  )}
-                </div>
-                <div className="w-1/2 pl-2">
-                  <label className="block text-sm font-medium text-gray-800 mb-1">วันที่ทำงาน</label> 
-                  <div className="relative">
-                    <input
-                      type="date"
-                      value={workDate}
-                      readOnly={true} 
-                      className="w-full p-2 border rounded-md pr-10 text-gray-800 bg-gray-100 cursor-not-allowed" 
-                    />
-                    <span className="absolute right-2 top-2">
-                      <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"> 
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                    </span>
+                  <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">วันที่ทำงาน</label>
+                      <input type="date" value={workDate} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed"/>
                   </div>
-                </div>
               </div>
 
-              {/* Table */}
+              {error && <p className="mb-4 text-red-500 text-sm">{error}</p>}
+              {employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
+
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-gray-900"> 
+                <table className="w-full border-collapse text-xs">
                   <thead>
-                    <tr className="bg-gray-100">
-                      <th className="border p-2 text-left w-12">No</th>
-                      <th className="border p-2 text-left w-1/4">Relate Drawing</th>
-                      <th className="border p-2 text-left w-32">เวลาปกติ</th> 
-                      <th className="border p-2 text-left w-32">เวลา OT</th> 
-                      <th className="border p-2 text-left w-40">Progress</th>
-                      <th className="border p-2 text-left w-1/4">Note</th>
-                      <th className="border p-2 text-left w-40">Upload File</th>
-                      <th className="border p-2 text-left w-16">Actions</th>
+                    <tr className="bg-orange-500 text-white">
+                      <th className="p-2 font-semibold text-left w-10">No</th>
+                      <th className="p-2 font-semibold text-left w-1/3">Relate Drawing</th>
+                      <th className="p-2 font-semibold text-left">เวลาทำงาน / Working Hours</th>
+                      <th className="p-2 font-semibold text-left">เวลาโอที / Overtime</th>
+                      <th className="p-2 font-semibold text-left">Progress</th>
+                      <th className="p-2 font-semibold text-left">Note</th>
+                      <th className="p-2 font-semibold text-left">Upload File</th>
+                      <th className="p-2 font-semibold text-center w-16">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {taskAssignments.map((assignment, index) => (
-                      <tr key={assignment.id} className={`${
-                        assignment.status === 'completed' ? 'bg-green-50' :
-                        assignment.status === 'in-progress' ? 'bg-yellow-50' : ''
-                      }`}>
-                        <td className="border p-2 text-gray-800">{index + 1}</td> 
-                        <td className="border p-2">
-                          <input
-                            type="text"
-                            value={assignment.timeType === 'leave' ? 'ลา' : assignment.relateDrawing}
-                            onFocus={() => handleRowFocus(assignment.id, index)} 
-                            onChange={(e) => handleUpdateTask(assignment.id, { relateDrawing: e.target.value })}
-                            className={`border rounded p-1 w-full text-gray-800 ${ 
-                              assignment.timeType === 'leave' ? 'bg-red-50 text-red-600' : ''
-                            }`}
-                            placeholder="ใส่ชื่องาน"
-                            readOnly={assignment.timeType === 'leave'}
-                          />
-                        </td>
-                        {/* เวลาปกติ column */}
-                        <td className="border p-2 text-gray-800">
-                          {assignment.timeType === 'normal' ? (
-                            <TimeSelector
-                              value={assignment.normalWorkingHours || ''} // Use normalWorkingHours
-                              onFocus={() => handleRowFocus(assignment.id, index)} 
-                              onChange={(value) => handleUpdateTask(assignment.id, { normalWorkingHours: value, timeType: 'normal' })}
-                              type={'normal'}
-                            />
-                          ) : assignment.timeType === 'leave' ? (
-                            <span className="text-red-500">-</span>
-                          ) : (
-                            <TimeSelector
-                              value={assignment.normalWorkingHours || ''} // Use normalWorkingHours
-                              onFocus={() => handleRowFocus(assignment.id, index)} 
-                              onChange={(value) => handleUpdateTask(assignment.id, { normalWorkingHours: value, timeType: 'normal' })}
-                              type={'normal'}
-                              disabled={true} // Disabled if not normal time
-                            />
-                          )}
-                        </td>
-                        {/* เวลา OT column */}
-                        <td className="border p-2 text-gray-800">
-                          {assignment.timeType === 'ot' ? (
-                            <TimeSelector
-                              value={assignment.otWorkingHours || ''} // Use otWorkingHours
-                              onFocus={() => handleRowFocus(assignment.id, index)} 
-                              onChange={(value) => handleUpdateTask(assignment.id, { otWorkingHours: value, timeType: 'ot' })}
-                              type={'ot'}
-                            />
-                          ) : assignment.timeType === 'leave' ? (
-                            <span className="text-red-500">-</span>
-                          ) : (
-                            <TimeSelector
-                              value={assignment.otWorkingHours || ''} // Use otWorkingHours
-                              onFocus={() => handleRowFocus(assignment.id, index)} 
-                              onChange={(value) => handleUpdateTask(assignment.id, { otWorkingHours: value, timeType: 'ot' })}
-                              type={'ot'}
-                              disabled={true} // Disabled if not OT time
-                            />
-                          )}
-                        </td>
-                        <td className="border p-2">
-                          <div className="flex space-x-2">
-                            <select
-                              value={assignment.status}
-                              onFocus={() => handleRowFocus(assignment.id, index)} 
-                              onChange={(e) => {
-                                const status = e.target.value as TaskAssignment['status'];
-                                handleUpdateTask(assignment.id, { status });
-                              }}
-                              className={`rounded p-1 flex-1 text-gray-800 ${ 
-                                assignment.status === 'completed' ? 'bg-green-100' :
-                                assignment.status === 'in-progress' ? 'bg-yellow-100' :
-                                'bg-gray-100'
-                              }`}
-                            >
-                              <option value="pending">รอดำเนินการ</option>
-                              <option value="in-progress">กำลังดำเนินการ</option>
-                              <option value="completed">เสร็จสมบูรณ์</option>
-                            </select>
-                            <input
-                              type="number"
-                              min="0"
-                              max="100"
-                              value={parseInt(assignment.progress) || 0}
-                              onFocus={() => handleRowFocus(assignment.id, index)} 
-                              onChange={(e) => {
-                                const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                                handleUpdateTask(assignment.id, { 
-                                  progress: `${value}%`,
-                                  status: value === 100 ? 'completed' : 
-                                          value === 0 ? 'pending' : 
-                                          'in-progress'
-                                });
-                              }}
-                              className="w-20 rounded p-1 border text-center text-gray-800" 
-                              placeholder="0-100"
-                            />
-                            <span className="flex items-center text-gray-800">%</span> 
-                          </div>
-                        </td>
-                        <td className="border p-2">
-                          <input
-                            type="text"
-                            value={assignment.note || ''}
-                            onFocus={() => handleRowFocus(assignment.id, index)} 
-                            onChange={(e) => handleUpdateTask(assignment.id, { note: e.target.value })}
-                            className="border rounded p-1 w-full text-gray-800" 
-                            placeholder="เพิ่มหมายเหตุ"
-                          />
-                        </td>
-                        <td className="border p-2">
-                          <div className="flex items-center justify-center">
-                            <input
-                              type="file"
-                              id={`file-${assignment.id}`}
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  // TODO: Implement file upload to Firebase Storage
-                                  console.log('Uploading file:', file);
-                                  // Show loading state
-                                  handleUpdateTask(assignment.id, { isUploading: true });
-                                  
-                                  // Simulate upload delay (remove this in production)
-                                  setTimeout(() => {
-                                    handleUpdateTask(assignment.id, { 
-                                      isUploading: false,
-                                      fileUrl: URL.createObjectURL(file),
-                                      fileName: file.name
-                                    });
-                                  }, 1000);
-                                }
-                              }}
-                            />
-                            {parseInt(assignment.progress) === 100 ? (
-                              assignment.isUploading ? (
-                                <div className="flex items-center space-x-2 text-gray-700"> 
-                                  <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                  </svg>
-                                  <span>กำลังอัพโหลด...</span>
-                                </div>
-                              ) : assignment.fileUrl ? (
-                                <div className="flex items-center space-x-2">
-                                  <a 
-                                    href={assignment.fileUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:text-blue-800 underline text-sm truncate max-w-[150px]"
-                                  >
-                                    {assignment.fileName}
-                                  </a>
-                                  <button
-                                    onClick={() => handleUpdateTask(assignment.id, { fileUrl: undefined, fileName: undefined })}
-                                    className="text-red-500 hover:text-red-700"
-                                    title="ลบไฟล์"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                  </button>
-                                </div>
-                              ) : (
-                                <label
-                                  htmlFor={`file-${assignment.id}`}
-                                  className="bg-blue-100 text-blue-600 px-3 py-1 rounded hover:bg-blue-200 cursor-pointer"
-                                >
-                                  Upload File
-                                </label>
-                              )
-                            ) : (
-                              <span className="text-gray-600">Progress ต้องถึง 100%</span> 
-                            )}
-                          </div>
-                        </td>
-                        <td className="border p-2">
-                          <div className="flex justify-center">
-                            <button 
-                              onClick={() => handleDeleteTask(assignment.id)}
-                              className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded"
-                              title="ลบ"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
+                    {dailyReportEntries.map((entry, index) => {
+                      // Options available for this specific row
+                      const availableOptions = availableSubtasks.filter(subtask => 
+                        !selectedSubtaskIds.has(subtask.id) || subtask.id === entry.subtaskId
+                      );
+                      const [normalH, normalM] = (entry.normalWorkingHours || '0:0').split(':');
+                      const [otH, otM] = (entry.otWorkingHours || '0:0').split(':');
+
+                      return (
+                        <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
+                          <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
+                          <td className="p-2 border-r border-yellow-200">
+                             <SubtaskAutocomplete
+                                entryId={entry.id}
+                                value={entry.subtaskId}
+                                options={availableOptions}
+                                allProjects={allProjects}
+                                onChange={handleRelateDrawingChange}
+                                onFocus={() => handleRowFocus(entry.id, index)}
+                              />
+                          </td>
+                          <td className="p-2 border-r border-yellow-200">
+                            <div className="flex items-center gap-1">
+                                <select value={normalH} onFocus={() => handleRowFocus(entry.id, index)} onChange={e => handleTimeChange(entry.id, 'normalWorkingHours', 'h', e.target.value)} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900">{hourOptions.map(h => <option key={h} value={h}>{h} ชั่วโมง</option>)}</select>
+                                <select value={normalM} onFocus={() => handleRowFocus(entry.id, index)} onChange={e => handleTimeChange(entry.id, 'normalWorkingHours', 'm', e.target.value)} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900">{minuteOptions.map(m => <option key={m} value={m}>{m} นาที</option>)}</select>
+                            </div>
+                          </td>
+                           <td className="p-2 border-r border-yellow-200">
+                            <div className="flex items-center gap-1">
+                                <select value={otH} onFocus={() => handleRowFocus(entry.id, index)} onChange={e => handleTimeChange(entry.id, 'otWorkingHours', 'h', e.target.value)} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900">{hourOptions.map(h => <option key={h} value={h}>{h} ชั่วโมง</option>)}</select>
+                                <select value={otM} onFocus={() => handleRowFocus(entry.id, index)} onChange={e => handleTimeChange(entry.id, 'otWorkingHours', 'm', e.target.value)} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900">{minuteOptions.map(m => <option key={m} value={m}>{m} นาที</option>)}</select>
+                            </div>
+                          </td>
+                          <td className="p-2 border-r border-yellow-200">
+                            <div className="flex items-center gap-1">
+                              <select value={entry.status} onFocus={() => handleRowFocus(entry.id, index)} onChange={(e) => handleUpdateEntry(entry.id, { status: e.target.value as DailyReportEntry['status'] })} className="w-full p-1 border border-gray-300 rounded-md bg-yellow-100 text-xs text-gray-900">
+                                <option value="pending">รอดำเนินการ</option>
+                                <option value="in-progress">กำลังดำเนินการ</option>
+                                <option value="completed">เสร็จสมบูรณ์</option>
+                              </select>
+                              <input type="number" min="0" max="100" value={parseInt(entry.progress) || 0} onFocus={() => handleRowFocus(entry.id, index)} onChange={(e) => handleUpdateEntry(entry.id, { progress: `${e.target.value}%` })} className="w-14 p-1 border border-gray-300 rounded-md text-center text-xs text-gray-900"/>
+                              <span className="text-gray-800">%</span>
+                            </div>
+                          </td>
+                          <td className="p-2 border-r border-yellow-200"><input type="text" value={entry.note || ''} onFocus={() => handleRowFocus(entry.id, index)} onChange={(e) => handleUpdateEntry(entry.id, { note: e.target.value })} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900" placeholder="เพิ่มหมายเหตุ"/></td>
+                          <td className="p-2 border-r border-yellow-200 text-center text-gray-500">Progress<br/>ต้องถึง 100%</td>
+                          <td className="p-2 text-center">
+                            <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100" title="ลบ">
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
-              <div className="mt-4 flex justify-end">
-                <button
-                  type="submit"
-                  className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
-                  onClick={handleSubmit}
-                >
-                  Submit
-                </button>
+              <div className="mt-4 flex justify-between items-center">
+                  <button type="button" onClick={handleAddRow} className="bg-orange-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-orange-600 text-sm">Add Row</button>
+                  <button type="submit" onClick={handleSubmit} className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-2 px-6 rounded-md hover:from-blue-700 hover:to-purple-700">Submit</button>
               </div>
             </div>
           </div>
         </div>
-        
-        <RecheckPopup 
-          isOpen={isRecheckOpen}
-          onClose={() => setIsRecheckOpen(false)}
-          onConfirm={handleConfirmSubmit}
-          taskAssignments={taskAssignments.filter(task => task.assignDate === workDate)}
-          workDate={workDate}
-          onEdit={() => {
-            // เมื่อกดปุ่ม Edit จะโหลดข้อมูลของวันที่เลือกมาแสดงในฟอร์ม
-            const dateData = taskAssignments.filter(task => task.assignDate === workDate);
-            if (dateData.length > 0) {
-              setTaskAssignments(dateData);
-            }
-          }}
-        />
-        
-        <LeavePopup
-          isOpen={showLeavePopup}
-          onClose={() => {
-            setShowLeavePopup(false);
-            if (currentTaskId) {
-              handleUpdateTask(currentTaskId, {
-                timeType: 'normal',
-                leaveData: undefined
-              });
-            }
-          }}
-          onSubmit={(leaveData) => {
-            if (currentTaskId) {
-              handleUpdateTask(currentTaskId, {
-                timeType: 'leave',
-                leaveData,
-                workingHours: leaveData.leaveHours
-              });
-              setShowLeavePopup(false);
-            }
-          }}
-        />
       </div>
     </PageLayout>
   );
