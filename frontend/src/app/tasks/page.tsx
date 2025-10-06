@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, setDoc, doc, Timestamp, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import Navbar from '@/components/shared/Navbar';
 import Select from '@/components/ui/Select';
@@ -51,7 +51,6 @@ interface ExistingSubtask {
 
 export default function TaskAssignment() {
   const { getCache, setCache, invalidateCache } = useFirestoreCache();
-  
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState('');
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -59,7 +58,7 @@ export default function TaskAssignment() {
   const [existingSubtasks, setExistingSubtasks] = useState<ExistingSubtask[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  
+
   const [rows, setRows] = useState<SubtaskRow[]>([
     {
       id: '1',
@@ -76,6 +75,49 @@ export default function TaskAssignment() {
       progress: 0
     }
   ]);
+
+  useEffect(() => {
+    const loadAllData = async () => {
+      try {
+        // 1. โหลด projects
+        const projectList = await getCachedProjects(getCache, setCache);
+        setProjects(projectList);
+
+        // 2. โหลด tasks ของทุก project
+        const allTasks: Record<string, TaskItem[]> = {};
+        await Promise.all(
+          projectList.map(async (project) => {
+            const projectTasks = await getCachedTasks(project.id, getCache, setCache);
+            allTasks[project.id] = projectTasks;
+          })
+        );
+
+        // 3. โหลด subtasks ของทุก project
+        const allSubtasks: Record<string, ExistingSubtask[]> = {};
+        await Promise.all(
+          projectList.map(async (project) => {
+            const projectSubtasks = await getCachedSubtasks(
+              project.id, 
+              (allTasks[project.id] || []).map(t => t.id),
+              getCache, 
+              setCache
+            );
+            allSubtasks[project.id] = projectSubtasks;
+          })
+        );
+
+        // เก็บข้อมูลทั้งหมดใน Cache
+        setCache('allProjectData', { projects: projectList, tasks: allTasks, subtasks: allSubtasks }, Infinity);
+
+      } catch (error) {
+        console.error('Error loading all data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadAllData();
+  }, []); // รันครั้งเดียวตอนโหลดหน้าแรก
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -176,16 +218,52 @@ export default function TaskAssignment() {
     return updatedRows;
   };
 
+  // แก้ไขฟังก์ชัน updateRow
   const updateRow = (id: string, field: keyof SubtaskRow, value: any) => {
     setRows(prevRows => {
-      const updatedRows = prevRows.map(row => {
-        if (row.id === id) {
-          return { ...row, [field]: value };
+      // 1. อัพเดทข้อมูลในแถวที่ต้องการ
+      let updatedRows = prevRows.map(row => {
+        if (row.id !== id) return row;
+        
+        const updatedRow = { ...row };
+        if (field === 'activity') {
+          updatedRow.activity = value;
+          updatedRow.relateWork = '';
+          updatedRow.relateDrawing = '';
+          updatedRow.relateDrawingName = '';
+        } else if (field === 'relateDrawing') {
+          const task = tasks.find(t => t.id === value);
+          updatedRow.relateDrawing = value;
+          updatedRow.relateDrawingName = task?.taskName || '';
+        } else {
+          updatedRow[field] = value;
         }
-        return row;
+        return updatedRow;
       });
 
-      return checkAndAddNewRow(updatedRows);
+      // 2. เช็คว่าต้องเพิ่มแถวใหม่หรือไม่
+      const lastRow = updatedRows[updatedRows.length - 1];
+      if (lastRow.relateDrawing && 
+          lastRow.relateWork && 
+          lastRow.workScale && 
+          lastRow.assignee) {
+        updatedRows = [...updatedRows, {
+          id: String(parseInt(lastRow.id) + 1),
+          subtaskId: '',
+          relateDrawing: '',
+          relateDrawingName: '',
+          activity: '',
+          relateWork: '',
+          item: '',
+          internalRev: null,
+          workScale: 'S',
+          assignee: '',
+          deadline: '',
+          progress: 0
+        }];
+      }
+
+      return updatedRows;
     });
   };
 
@@ -234,50 +312,79 @@ export default function TaskAssignment() {
     );
   };
 
+  // 2. เพิ่มฟังก์ชัน generateSubTaskNumber
+  const generateSubTaskNumber = async (taskId: string) => {
+    try {
+      // ดึง task number จาก task หลัก
+      const taskDoc = await getDoc(doc(db, 'tasks', taskId));
+      const taskNumber = taskDoc.data()?.taskNumber;
+
+      if (!taskNumber) return null;
+
+      // ดึง subtasks ทั้งหมดของ task นี้
+      const subtasksRef = collection(db, 'tasks', taskId, 'subtasks');
+      const subtasksSnapshot = await getDocs(subtasksRef);
+      
+      // หาเลขลำดับถัดไป
+      const currentSubtasks = subtasksSnapshot.docs.map(doc => doc.data().subTaskNumber);
+      let maxRunningNumber = 0;
+
+      currentSubtasks.forEach(number => {
+        if (!number) return;
+        const match = number.match(/-(\d{2})$/);
+        if (match) {
+          const num = parseInt(match[1]);
+          if (num > maxRunningNumber) {
+            maxRunningNumber = num;
+          }
+        }
+      });
+
+      // สร้างเลขใหม่
+      const nextRunningNumber = maxRunningNumber + 1;
+      const paddedNumber = nextRunningNumber.toString().padStart(2, '0');
+      
+      return `${taskNumber}-${paddedNumber}`;
+    } catch (error) {
+      console.error('Error generating subtask number:', error);
+      return null;
+    }
+  };
+
+  // ปรับปรุงฟังก์ชัน handleConfirmSave
   const handleConfirmSave = async () => {
     setIsSaving(true);
-    const validRows = getValidRows();
-
     try {
-      for (const row of validRows) {
-        const subtaskData = {
-          subTaskNumber: `${selectedProject}-${row.activity}-${Date.now()}`,
-          taskName: row.relateDrawingName,
-          subTaskName: row.relateWork,
-          subTaskCategory: row.relateWork,
+      const rowsToSave = rows.filter(row => 
+        row.relateDrawing && row.activity && row.relateWork && row.workScale && row.assignee
+      );
+
+      for (const row of rowsToSave) {
+        const subTaskNumber = await generateSubTaskNumber(row.relateDrawing);
+        
+        if (!subTaskNumber) {
+          console.error('Failed to generate subTaskNumber');
+          continue;
+        }
+
+        // ใช้ subTaskNumber เป็น Document ID
+        await setDoc(doc(db, 'tasks', row.relateDrawing, 'subtasks', subTaskNumber), {
+          subTaskNumber,
+          taskName: row.relateWork,
+          subTaskCategory: row.activity,
           item: row.item || '',
-          internalRev: String(row.internalRev),
+          internalRev: row.internalRev || '',
           subTaskScale: row.workScale,
           subTaskAssignee: row.assignee,
-          subTaskProgress: 0,
-          lastUpdate: Timestamp.now(),
-          startDate: null,
+          subTaskProgress: row.progress,
+          startDate: row.deadline ? new Date(row.deadline) : null,
           endDate: null,
-          mhOD: 0,
-          mhOT: 0,
-          remark: '',
-          project: selectedProject,
-          subTaskFiles: []
-        };
-
-        const subtasksCol = collection(db, 'tasks', row.relateDrawing, 'subtasks');
-        await addDoc(subtasksCol, subtaskData);
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        });
       }
 
-      alert('บันทึกข้อมูลสำเร็จ!');
-      
-      invalidateCache(`tasks_projectId:${selectedProject}`);
-      invalidateCache(`subtasks_projectId:${selectedProject}`);
-      
       setShowConfirmModal(false);
-      
-      const taskList = await getCachedTasks(selectedProject, getCache, setCache);
-      setTasks(taskList);
-      
-      const taskIds = taskList.map(t => t.id);
-      const allSubtasks = await getCachedSubtasks(selectedProject, taskIds, getCache, setCache);
-      setExistingSubtasks(allSubtasks);
-      
       setRows([{
         id: '1',
         subtaskId: '',
@@ -292,7 +399,7 @@ export default function TaskAssignment() {
         deadline: '',
         progress: 0
       }]);
-
+      alert('บันทึกข้อมูลสำเร็จ');
     } catch (error) {
       console.error('Error saving subtasks:', error);
       alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
@@ -303,6 +410,49 @@ export default function TaskAssignment() {
 
   const uniqueCategories = Array.from(new Set(tasks.map(t => t.taskCategory).filter(c => c)));
 
+  // ปรับปรุง handleProjectChange ให้ใช้ข้อมูลจาก Cache
+  const handleProjectChange = async (projectId: string) => {
+    setSelectedProject(projectId);
+    
+    if (!projectId) {
+      setTasks([]);
+      setExistingSubtasks([]);
+      return;
+    }
+
+    const cachedData = getCache('allProjectData');
+    if (cachedData) {
+      setTasks(cachedData.tasks[projectId] || []);
+      setExistingSubtasks(cachedData.subtasks[projectId] || []);
+    }
+  };
+
+  // เพิ่มฟังก์ชัน deleteRow ก่อน return
+  const deleteRow = (id: string) => {
+    setRows(prevRows => {
+      // ถ้าเหลือแถวเดียว ให้เคลียร์ข้อมูลแทนที่จะลบ
+      if (prevRows.length === 1) {
+        return [{
+          id: '1',
+          subtaskId: '',
+          relateDrawing: '',
+          relateDrawingName: '',
+          activity: '',
+          relateWork: '',
+          item: '',
+          internalRev: null,
+          workScale: 'S',
+          assignee: '',
+          deadline: '',
+          progress: 0
+        }];
+      }
+      // ลบแถวที่ต้องการ
+      return prevRows.filter(row => row.id !== id);
+    });
+  };
+
+  // แก้ไขส่วนของ return JSX ในส่วนของตาราง
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <Navbar />
@@ -324,185 +474,229 @@ export default function TaskAssignment() {
         </div>
 
         <div className="flex-1 bg-white rounded-lg shadow overflow-hidden mb-6">
-          <div className="h-full overflow-auto">
-            <table className="w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
-              <thead className="bg-orange-600 sticky top-0 z-10 shadow-sm">
-                <tr>
-                  <th className="w-[9%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Subtask ID</th>
-                  <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Activity</th>
-                  <th className="w-[12%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Drawing</th>
-                  <th className="w-[10%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Work</th>
-                  <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Item</th>
-                  <th className="w-[5%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Internal Rev.</th>
-                  <th className="w-[5%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Work Scale</th>
-                  <th className="w-[9%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Assignee</th>
-                  <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Deadline</th>
-                  <th className="w-[9%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Progress</th>
-                  <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Link File</th>
-                  <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Correct</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {rows.map((row) => (
-                  <tr key={`new-${row.id}`} className="hover:bg-gray-50 bg-blue-50">
-                    <td className="px-2 py-2 text-xs text-gray-900">
-                      <span className="text-blue-600 font-semibold">NEW</span>
-                    </td>
-                    <td className="px-2 py-2">
-                      <Select
-                        options={uniqueCategories.map(cat => ({ 
-                          value: cat,
-                          label: cat 
-                        }))}
-                        value={row.activity}
-                        onChange={(value) => {
-                          updateRow(row.id, 'activity', value);
-                          updateRow(row.id, 'relateWork', '');
-                        }}
-                        placeholder="Select"
-                        disabled={!selectedProject}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Select
-                        options={tasks
-                          .filter(t => !row.activity || t.taskCategory === row.activity)  // เพิ่มการ filter ตาม activity
-                          .map(t => ({ 
-                            value: t.id,
-                            label: t.taskName 
+          {loading ? (
+            <div className="h-full flex flex-col items-center justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-600 border-t-transparent" />
+              <div className="mt-4 text-sm text-gray-600">กำลังโหลดข้อมูล</div>
+            </div>
+          ) : (
+            <div className="h-full overflow-auto">
+              <table className="w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
+                <thead className="bg-orange-600 sticky top-0 z-10 shadow-sm">
+                  <tr>
+                    <th className="w-[9%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Subtask ID</th>
+                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Activity</th>
+                    <th className="w-[12%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Drawing</th>
+                    <th className="w-[10%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Work</th>
+                    <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Item</th>
+                    <th className="w-[5%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Internal Rev.</th>
+                    <th className="w-[5%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Work Scale</th>
+                    <th className="w-[9%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Assignee</th>
+                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Deadline</th>
+                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Progress</th>
+                    <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Link File</th>
+                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Correct</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {rows.map((row) => (
+                    <tr key={`new-${row.id}`} className="hover:bg-gray-50 bg-blue-50">
+                      <td className="px-2 py-2 text-xs text-gray-900">
+                        <span className="text-blue-600 font-semibold">NEW</span>
+                      </td>
+                      <td className="px-2 py-2">
+                        <Select
+                          options={uniqueCategories.map(cat => ({ 
+                            value: cat,
+                            label: cat 
                           }))}
-                        value={row.relateDrawing}
-                        onChange={(value) => {
-                          const task = tasks.find(t => t.id === value);
-                          updateRow(row.id, 'relateDrawing', value);
-                          updateRow(row.id, 'relateDrawingName', task?.taskName || '');
-                          updateRow(row.id, 'activity', task?.taskCategory || '');
-                        }}
-                        placeholder="Select"
-                        disabled={!selectedProject || !row.activity}  // เพิ่มเงื่อนไข disable ถ้ายังไม่เลือก activity
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <RelateWorkSelect
-                        activityId={row.activity}
-                        value={row.relateWork}
-                        onChange={(value) => updateRow(row.id, 'relateWork', value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <input
-                        type="text"
-                        value={row.item || ''}  // เพิ่ม || '' เพื่อให้เป็นค่าว่างถ้าไม่มีข้อมูล
-                        onChange={(e) => updateRow(row.id, 'item', e.target.value)}
-                        placeholder="Item"
-                        className="w-full px-1 py-1 border border-gray-300 rounded text-xs text-gray-900"  // เพิ่ม text-gray-900 สำหรับสีดำ
-                      />
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <input
-                        type="number"
-                        value={row.internalRev || ''}  // เพิ่ม || '' เพื่อให้เป็นค่าว่างถ้าไม่มีข้อมูล
-                        onChange={(e) => {
-                          const val = e.target.value ? parseInt(e.target.value) : '';  // ปรับการแปลงค่า
-                          updateRow(row.id, 'internalRev', val);
-                        }}
-                        className="w-full px-1 py-1 border border-gray-300 rounded text-center text-xs text-gray-900"  // เพิ่ม text-gray-900
-                        min="1"
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <Select
-                        options={[
-                          { value: 'S', label: 'S' },
-                          { value: 'M', label: 'M' },
-                          { value: 'L', label: 'L' }
-                        ]}
-                        value={row.workScale}
-                        onChange={(value) => updateRow(row.id, 'workScale', value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <AssigneeSelect
-                        value={row.assignee}
-                        onChange={(value) => updateRow(row.id, 'assignee', value)}
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <input
-                        type="text"
-                        value={row.deadline}
-                        onChange={(e) => updateRow(row.id, 'deadline', e.target.value)}
-                        placeholder="3 Days"
-                        className="w-full px-1 py-1 border border-gray-300 rounded text-xs"
-                      />
-                    </td>
-                    <td className="px-2 py-2">
-                      <ProgressBar value={row.progress} size="sm" />
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <Button variant="outline" size="sm" disabled>
-                        LINK
-                      </Button>
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <span className="text-xs text-gray-400">-</span>
-                    </td>
-                  </tr>
-                ))}
+                          value={row.activity}
+                          onChange={(value) => updateRow(row.id, 'activity', value)}
+                          placeholder="Select"
+                          disabled={!selectedProject}
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <Select
+                          options={tasks
+                            .filter(t => !row.activity || t.taskCategory === row.activity)  // เพิ่มการ filter ตาม activity
+                            .map(t => ({ 
+                              value: t.id,
+                              label: t.taskName 
+                            }))}
+                          value={row.relateDrawing}
+                          onChange={(value) => updateRow(row.id, 'relateDrawing', value)}
+                          placeholder="Select"
+                          disabled={!selectedProject || !row.activity}  // เพิ่มเงื่อนไข disable ถ้ายังไม่เลือก activity
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <RelateWorkSelect
+                          activityId={row.activity}
+                          value={row.relateWork}
+                          onChange={(value) => updateRow(row.id, 'relateWork', value)}
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <input
+                          type="text"
+                          value={row.item || ''}  // เพิ่ม || '' เพื่อให้เป็นค่าว่างถ้าไม่มีข้อมูล
+                          onChange={(e) => updateRow(row.id, 'item', e.target.value)}
+                          placeholder="Item"
+                          className="w-full px-1 py-1 border border-gray-300 rounded text-xs text-gray-900"  // เพิ่ม text-gray-900 สำหรับสีดำ
+                        />
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <input
+                          type="number"
+                          value={row.internalRev || ''}  // เพิ่ม || '' เพื่อให้เป็นค่าว่างถ้าไม่มีข้อมูล
+                          onChange={(e) => {
+                            const val = e.target.value ? parseInt(e.target.value) : '';  // ปรับการแปลงค่า
+                            updateRow(row.id, 'internalRev', val);
+                          }}
+                          className="w-full px-1 py-1 border border-gray-300 rounded text-center text-xs text-gray-900"  // เพิ่ม text-gray-900
+                          min="1"
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <Select
+                          options={[
+                            { value: 'S', label: 'S' },
+                            { value: 'M', label: 'M' },
+                            { value: 'L', label: 'L' }
+                          ]}
+                          value={row.workScale}
+                          onChange={(value) => updateRow(row.id, 'workScale', value)}
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <AssigneeSelect
+                          value={row.assignee}
+                          onChange={(value) => updateRow(row.id, 'assignee', value)}
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <input
+                          type="text"
+                          value={row.deadline}
+                          onChange={(e) => updateRow(row.id, 'deadline', e.target.value)}
+                          placeholder="3 Days"
+                          className="w-full px-1 py-1 border border-gray-300 rounded text-xs"
+                        />
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="flex items-center space-x-2">
+                          <ProgressBar value={row.progress} size="sm" />
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={row.progress}
+                            onChange={(e) => {
+                              const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                              updateRow(row.id, 'progress', value);
+                            }}
+                            className="w-16 px-1 py-1 border border-gray-300 rounded text-xs"
+                          />
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <Button variant="outline" size="sm" disabled>
+                          LINK
+                        </Button>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button 
+                          onClick={() => deleteRow(row.id)}
+                          className="p-1 text-gray-600 hover:text-red-600 transition-colors"
+                          title="ลบแถวนี้"
+                        >
+                          <svg 
+                            className="w-4 h-4" 
+                            fill="none" 
+                            stroke="currentColor" 
+                            viewBox="0 0 24 24"
+                          >
+                            <path 
+                              strokeLinecap="round" 
+                              strokeLinejoin="round" 
+                              strokeWidth={2} 
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" 
+                            />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
 
-                {existingSubtasks.map((subtask) => (
-                  <tr key={`existing-${subtask.id}`} className="hover:bg-gray-50">
-                    <td className="px-2 py-2 text-xs text-gray-900 truncate" title={subtask.subTaskNumber}>
-                      {subtask.subTaskNumber}
-                    </td>
-                    <td className="px-2 py-2 text-xs text-gray-500">-</td>
-                    <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.taskName}>
-                      {subtask.taskName}
-                    </td>
-                    <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.subTaskCategory}>
-                      {subtask.subTaskCategory}
-                    </td>
-                    <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.item}>
-                      {subtask.item || '-'}
-                    </td>
-                    <td className="px-2 py-2 text-xs text-gray-500 text-center">
-                      {subtask.internalRev}
-                    </td>
-                    <td className="px-2 py-2 text-xs text-gray-500 text-center">
-                      {subtask.subTaskScale}
-                    </td>
-                    <td className="px-2 py-2">
-                      {subtask.subTaskAssignee && (
-                        <Badge name={subtask.subTaskAssignee} size="sm" showFullName={false} />
-                      )}
-                    </td>
-                    <td className="px-2 py-2 text-xs text-gray-500">-</td>
-                    <td className="px-2 py-2">
-                      <ProgressBar value={subtask.subTaskProgress} size="sm" />
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      <Button variant="outline" size="sm">LINK</Button>
-                    </td>
-                    <td className="px-2 py-2">
-                      <div className="flex items-center justify-center space-x-1">
-                        <button onClick={() => alert(`Edit: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-blue-600">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                        </button>
-                        <span className="text-gray-300">/</span>
-                        <button onClick={() => alert(`Delete: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-red-600">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  {existingSubtasks.map((subtask) => (
+                    <tr key={`existing-${subtask.id}`} className="hover:bg-gray-50">
+                      <td className="px-2 py-2 text-xs text-gray-900 truncate" title={subtask.subTaskNumber}>
+                        {subtask.subTaskNumber}
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-500">-</td>
+                      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.taskName}>
+                        {subtask.taskName}
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.subTaskCategory}>
+                        {subtask.subTaskCategory}
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.item}>
+                        {subtask.item || '-'}
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-500 text-center">
+                        {subtask.internalRev ? subtask.internalRev : '-'}
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-500 text-center">
+                        {subtask.subTaskScale}
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="flex items-center space-x-2">
+                          {/* ไอคอนวงกลมแสดงตัวอักษรแรก */}
+                          <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center">
+                            <span className="text-xs font-medium text-white">
+                              {subtask.subTaskAssignee?.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          {/* แสดงชื่อเต็ม */}
+                          <span className="text-xs text-gray-900">
+                            {subtask.subTaskAssignee}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-xs text-gray-500">-</td>
+                      <td className="px-2 py-2">
+                        <div className="flex items-center space-x-2">
+                          <ProgressBar value={subtask.subTaskProgress} size="sm" />
+                          <span className="text-xs text-gray-500">
+                            {subtask.subTaskProgress}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <Button variant="outline" size="sm">LINK</Button>
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="flex items-center justify-center space-x-1">
+                          <button onClick={() => alert(`Edit: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-blue-600">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                          <span className="text-gray-300">/</span>
+                          <button onClick={() => alert(`Delete: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-red-600">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-center">

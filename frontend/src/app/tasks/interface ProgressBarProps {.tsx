@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface ProgressBarProps {
   value: number;
   size?: 'sm' | 'md' | 'lg';
@@ -11,7 +9,7 @@ export default function ProgressBar({ value, size = 'md' }: ProgressBarProps) {
   return (
     <div className={`w-full bg-gray-200 rounded-full ${height} relative`}>
       <div 
-        className={`bg-green-500 rounded-full ${height} transition-all duration-300`} // เปลี่ยนจาก bg-blue-500 เป็น bg-green-500
+        className={`bg-green-500 rounded-full ${height} transition-all duration-300`}
         style={{ width: `${value}%` }}
       >
         <span className="absolute inset-0 text-[10px] text-white flex items-center justify-center font-medium">
