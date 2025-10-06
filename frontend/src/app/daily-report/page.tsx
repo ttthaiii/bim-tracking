@@ -202,6 +202,7 @@ export default function DailyReport() {
           font-size: 13px;
           text-align: center;
           aspect-ratio: 1;
+          cursor: pointer;
         }
         .custom-calendar .react-calendar__month-view__days {
           display: grid !important;
@@ -210,15 +211,18 @@ export default function DailyReport() {
           padding: 12px;
         }
         .custom-calendar .react-calendar__tile:hover {
-          background: #fef3e2;
+          background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
           transform: scale(1.05);
-          box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);
+          box-shadow: 0 4px 12px rgba(100, 116, 139, 0.2);
+          transition: all 0.2s ease;
         }
         .custom-calendar .react-calendar__tile--active {
-          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+          background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
           color: white !important;
-          box-shadow: 0 4px 16px rgba(249, 115, 22, 0.4);
+          box-shadow: 0 4px 16px rgba(100, 116, 139, 0.4);
           font-weight: 600;
+          transform: scale(1.05);
+          transition: all 0.3s ease;
         }
         .custom-calendar .react-calendar__tile--now {
           background: #f97316 !important;

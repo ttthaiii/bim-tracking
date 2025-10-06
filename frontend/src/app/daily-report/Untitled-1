@@ -1,0 +1,8 @@
+// ดูข้อมูลที่มีอยู่
+const data = JSON.parse(localStorage.getItem('dailyReportData') || '{}');
+console.log('ข้อมูลปัจจุบัน:', data);
+
+// ดู employee ทั้งหมด
+Object.keys(data).forEach(date => {
+  console.log(`วันที่ ${date}: Employee ${data[date].employeeId}`);
+});
