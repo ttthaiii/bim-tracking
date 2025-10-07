@@ -654,7 +654,7 @@ const handleExport = async (options: any) => {
       const projectLead = project?.projectAssignee || 'N/A';
       
       // Filter rows by date range
-      let filteredRows = rows.filter(r => r.relateDrawing); // เอาแค่แถวที่มีข้อมูล
+      let filteredRows = rows.filter(r => r.relateDrawing && r.startDate && r.dueDate);
       
       if (options.startDate && options.endDate) {
         filteredRows = filteredRows.filter(r => {

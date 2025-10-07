@@ -4,9 +4,15 @@ interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (projectData: { name: string; code: string; leader: string }) => void;
+  onViewProjects: () => void;  // ← เพิ่ม prop นี้
 }
 
-const CreateProjectModal = ({ isOpen, onClose, onSubmit }: CreateProjectModalProps) => {
+const CreateProjectModal = ({ 
+  isOpen, 
+  onClose, 
+  onSubmit, 
+  onViewProjects  // ← เพิ่ม destructuring
+}: CreateProjectModalProps) => {
   const [projectData, setProjectData] = React.useState({
     name: '',
     code: '',
@@ -82,6 +88,7 @@ const CreateProjectModal = ({ isOpen, onClose, onSubmit }: CreateProjectModalPro
               </svg>
             </button>
           </div>
+          
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
               <label style={{
@@ -111,6 +118,7 @@ const CreateProjectModal = ({ isOpen, onClose, onSubmit }: CreateProjectModalPro
                 required
               />
             </div>
+            
             <div>
               <label style={{
                 display: 'block',
@@ -139,6 +147,7 @@ const CreateProjectModal = ({ isOpen, onClose, onSubmit }: CreateProjectModalPro
                 required
               />
             </div>
+            
             <div>
               <label style={{
                 display: 'block',
@@ -167,6 +176,7 @@ const CreateProjectModal = ({ isOpen, onClose, onSubmit }: CreateProjectModalPro
                 required
               />
             </div>
+            
             <div style={{ 
               display: 'flex', 
               justifyContent: 'flex-end', 
