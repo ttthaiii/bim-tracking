@@ -84,7 +84,19 @@ export default function TaskList({ projectId }: TaskListProps) {
                 </div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {task.dueDate?.toDate().toLocaleDateString()}
+                {(() => {
+                  if (!task.dueDate) return '';
+                  // Firestore Timestamp object
+                  if (typeof task.dueDate === 'object' && typeof task.dueDate.toDate === 'function') {
+                    return task.dueDate.toDate().toLocaleDateString();
+                  }
+                  // ISO string or Date
+                  const dateObj = typeof task.dueDate === 'string' ? new Date(task.dueDate) : task.dueDate;
+                  if (dateObj instanceof Date && !isNaN(dateObj.getTime())) {
+                    return dateObj.toLocaleDateString();
+                  }
+                  return '-';
+                })()}
               </td>
             </tr>
           ))}

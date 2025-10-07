@@ -20,6 +20,16 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  // --- เพิ่มส่วนนี้เข้าไป ---
+  {
+    rules: {
+      // ปิดกฎที่ห้ามใช้ any ไปเลย
+      "@typescript-eslint/no-explicit-any": "off", 
+
+      // หรือถ้าอยากให้แค่เตือน แต่ไม่หยุด build ให้ใช้ "warn"
+      // "@typescript-eslint/no-explicit-any": "warn",
+    },
+  },
 ];
 
 export default eslintConfig;

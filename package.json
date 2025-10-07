@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@types/recharts": "^1.8.29",
+    "dotenv": "^17.2.3",
+    "firebase-admin": "^13.5.0",
+    "recharts": "^3.2.1"
+  }
+}
