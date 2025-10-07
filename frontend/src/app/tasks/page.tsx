@@ -78,18 +78,50 @@ export default function TaskAssignment() {
 
   useEffect(() => {
     const loadAllData = async () => {
+      setLoading(true);
       try {
+        console.log('🔄 Starting to load all data...');
+        
+        // Check if data exists in cache first
+        const cachedData = getCache('allProjectData');
+        if (cachedData) {
+          console.log('📦 Found cached data, validating...');
+          // Validate cached data
+          if (
+            typeof cachedData === 'object' &&
+            cachedData !== null &&
+            'projects' in cachedData &&
+            'tasks' in cachedData &&
+            'subtasks' in cachedData &&
+            Array.isArray((cachedData as any).projects)
+          ) {
+            console.log('✅ Using cached data');
+            setProjects((cachedData as any).projects);
+            // Still keep loading for a moment to ensure UI consistency
+            await new Promise(resolve => setTimeout(resolve, 800));
+            setLoading(false);
+            return;
+          }
+          console.log('⚠️ Cached data invalid, loading fresh data...');
+        }
+        
+        console.log('🔄 Loading fresh data...');
         const projectList = await getCachedProjects(getCache, setCache);
+        console.log('✅ Projects loaded:', projectList.length);
         setProjects(projectList);
 
+        console.log('🔄 Loading tasks...');
         const allTasks: Record<string, TaskItem[]> = {};
         await Promise.all(
           projectList.map(async (project) => {
             const projectTasks = await getCachedTasks(project.id, getCache, setCache);
             allTasks[project.id] = projectTasks;
+            console.log(`✅ Tasks loaded for project: ${project.id}`);
           })
         );
+        console.log('✅ All tasks loaded successfully');
 
+        console.log('🔄 Loading subtasks...');
         const allSubtasks: Record<string, ExistingSubtask[]> = {};
         await Promise.all(
           projectList.map(async (project) => {
@@ -100,13 +132,27 @@ export default function TaskAssignment() {
               setCache
             );
             allSubtasks[project.id] = projectSubtasks;
+            console.log(`✅ Subtasks loaded for project: ${project.id}`);
           })
         );
+        console.log('✅ All subtasks loaded successfully');
 
-        setCache('allProjectData', { projects: projectList, tasks: allTasks, subtasks: allSubtasks }, Infinity);
+        console.log('🔄 Updating cache...');
+        await setCache('allProjectData', { 
+          projects: projectList, 
+          tasks: allTasks, 
+          subtasks: allSubtasks 
+        });
+        console.log('✅ Cache updated successfully');
+
+        // Add extra delay to ensure cache is fully written
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('🎉 All operations completed successfully');
 
       } catch (error) {
-        console.error('Error loading all data:', error);
+        console.error('❌ Error loading data:', error);
+        // Show error state for at least 2 seconds
+        await new Promise(resolve => setTimeout(resolve, 2000));
       } finally {
         setLoading(false);
       }
@@ -183,58 +229,48 @@ export default function TaskAssignment() {
     fetchProjectData();
   }, [selectedProject, getCache, setCache]);
 
-  // ✅ แก้ไขฟังก์ชัน updateRow พร้อม Debug Logs
-  const updateRow = (id: string, field: keyof SubtaskRow, value: any) => {
+  const updateRow = (id: string, field: keyof SubtaskRow, value: any): void => {
     console.log('🔄 updateRow called:', { id, field, value });
-    
-    setRows(prevRows => {
-      console.log('📊 Previous rows:', prevRows);
-      
-      let updatedRows = prevRows.map(row => {
-        if (row.id !== id) return row;
-        
-        const updatedRow = { ...row };
-        
-        if (field === 'activity') {
-          console.log('✅ Setting activity to:', value);
-          updatedRow.activity = value;
-          updatedRow.relateWork = '';
-          updatedRow.relateDrawing = '';
-          updatedRow.relateDrawingName = '';
-        } else if (field === 'relateDrawing') {
-          const task = tasks.find(t => t.id === value);
-          console.log('✅ Setting relateDrawing:', { value, taskName: task?.taskName });
-          updatedRow.relateDrawing = value;
-          updatedRow.relateDrawingName = task?.taskName || '';
-        } else {
-          updatedRow[field] = value;
-        }
-        
-        console.log('✅ Updated row:', updatedRow);
-        return updatedRow;
-      });
 
-      const lastRow = updatedRows[updatedRows.length - 1];
-      const shouldAddNewRow = 
-        lastRow.relateDrawing && 
-        lastRow.relateWork && 
-        lastRow.workScale && 
-        lastRow.assignee;
-      
-      console.log('🔍 Check add new row:', { 
-        shouldAddNewRow,
-        lastRow: {
-          relateDrawing: lastRow.relateDrawing,
-          relateWork: lastRow.relateWork,
-          workScale: lastRow.workScale,
-          assignee: lastRow.assignee
-        }
-      });
-      
-      if (shouldAddNewRow) {
-        console.log('➕ Adding new row');
-        updatedRows = [...updatedRows, {
-          id: String(parseInt(lastRow.id) + 1),
+    setRows((prevRows: SubtaskRow[]): SubtaskRow[] => {
+      // Only update if we find the row
+      const rowIndex = prevRows.findIndex(r => r.id === id);
+      if (rowIndex === -1) return prevRows;
+
+      // Create new array with updated row
+      const newRows = [...prevRows];
+      const updatedRow = { ...newRows[rowIndex] };
+
+      // Update the field
+      if (field === 'activity' && updatedRow.activity !== value) {
+        updatedRow.activity = value;
+        updatedRow.relateWork = '';
+        updatedRow.relateDrawing = '';
+        updatedRow.relateDrawingName = '';
+      } else if (field === 'relateDrawing') {
+        const task = tasks.find(t => t.id === value);
+        updatedRow.relateDrawing = value;
+        updatedRow.relateDrawingName = task?.taskName || '';
+      } else {
+        (updatedRow as any)[field] = value;
+      }
+
+      // Replace the old row with updated one
+      newRows[rowIndex] = updatedRow;
+
+      // Check if this is the last row and all required fields are filled
+      if (rowIndex === prevRows.length - 1 &&
+          updatedRow.activity &&
+          updatedRow.relateDrawing &&
+          updatedRow.relateWork &&
+          updatedRow.workScale &&
+          updatedRow.assignee) {
+        
+        console.log('✅ Adding new row after complete row');
+        
+        // Add new empty row
+        newRows.push({
+          id: String(parseInt(id) + 1),
           subtaskId: '',
           relateDrawing: '',
           relateDrawingName: '',
@@ -246,11 +282,10 @@ export default function TaskAssignment() {
           assignee: '',
           deadline: '',
           progress: 0
-        }];
+        });
       }
 
-      console.log('📊 Final rows:', updatedRows);
-      return updatedRows;
+      return newRows;
     });
   };
 
@@ -340,7 +375,10 @@ export default function TaskAssignment() {
         row.relateDrawing && row.activity && row.relateWork && row.workScale && row.assignee
       );
 
+      console.log('🔄 Rows to save:', rowsToSave);
+
       for (const row of rowsToSave) {
+        console.log('📝 Processing row:', row);
         const subTaskNumber = await generateSubTaskNumber(row.relateDrawing);
         
         if (!subTaskNumber) {
@@ -348,20 +386,34 @@ export default function TaskAssignment() {
           continue;
         }
 
-        await setDoc(doc(db, 'tasks', row.relateDrawing, 'subtasks', subTaskNumber), {
-          subTaskNumber,
-          taskName: row.relateWork,
-          subTaskCategory: row.activity,
-          item: row.item || '',
-          internalRev: row.internalRev || '',
-          subTaskScale: row.workScale,
-          subTaskAssignee: row.assignee,
-          subTaskProgress: row.progress,
-          startDate: row.deadline ? new Date(row.deadline) : null,
+        const docData = {
+          // ข้อมูลที่ต้องเก็บค่า
+          subTaskNumber,                        // generate อัตโนมัติ
+          projectId: selectedProject,           // เก็บเฉพาะ ID
+          taskName: row.relateDrawingName,     // จาก Relate Drawing
+          subTaskName: row.relateWork,         // จาก Relate Work
+          subTaskCategory: row.relateWork,     // จาก Relate Work
+          subTaskScale: row.workScale,         // จาก Work Scale
+          subTaskAssignee: row.assignee,       // จาก Assignee
+          item: row.item || null,              // จาก Item
+          internalRev: row.internalRev || null, // จาก Internal Rev.
+
+          // ข้อมูลที่ยังไม่ต้องเก็บค่า (set เป็น null)
           endDate: null,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
-        });
+          lastUpdate: null,
+          mhOD: null,
+          mhOT: null,
+          remark: null,
+          startDate: null,
+          subTaskFiles: null,
+          subTaskProgress: null,
+          wlFromscale: null,
+          wlRemaining: null
+        };
+
+        console.log('📄 Document data to save:', docData);
+        
+        await setDoc(doc(db, 'tasks', row.relateDrawing, 'subtasks', subTaskNumber), docData);
       }
 
       setShowConfirmModal(false);
@@ -411,9 +463,9 @@ export default function TaskAssignment() {
     }
 
     const cachedData = getCache('allProjectData');
-    if (cachedData) {
-      setTasks(cachedData.tasks[projectId] || []);
-      setExistingSubtasks(cachedData.subtasks[projectId] || []);
+    if (cachedData && typeof cachedData === 'object' && 'tasks' in cachedData && 'subtasks' in cachedData) {
+      setTasks((cachedData as any).tasks[projectId] || []);
+      setExistingSubtasks((cachedData as any).subtasks[projectId] || []);
     }
   };
 
@@ -462,15 +514,17 @@ export default function TaskAssignment() {
         <div className="flex-1 bg-white rounded-lg shadow overflow-hidden mb-6">
           {loading ? (
             <div className="h-full flex flex-col items-center justify-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-600 border-t-transparent" />
-              <div className="mt-4 text-sm text-gray-600">กำลังโหลดข้อมูล</div>
+              <div className="animate-spin rounded-full h-16 w-16 border-4 border-orange-600 border-t-transparent" />
+              <div className="mt-6 text-base font-medium text-gray-600">กำลังโหลดข้อมูล...</div>
+              <div className="mt-2 text-sm text-gray-500">กำลังเตรียมข้อมูลและ Cache</div>
+              <div className="mt-1 text-xs text-gray-400">โปรดรอสักครู่</div>
             </div>
           ) : (
             <div className="h-full overflow-auto">
               <table className="w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
                 <thead className="bg-orange-600 sticky top-0 z-10 shadow-sm">
                   <tr>
-                    <th className="w-[9%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Subtask ID</th>
+                    <th className="w-[15%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Subtask ID</th>
                     <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Activity</th>
                     <th className="w-[12%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Drawing</th>
                     <th className="w-[10%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Work</th>
@@ -618,7 +672,7 @@ export default function TaskAssignment() {
 
                   {existingSubtasks.map((subtask) => (
                     <tr key={`existing-${subtask.id}`} className="hover:bg-gray-50">
-                      <td className="px-2 py-2 text-xs text-gray-900 truncate" title={subtask.subTaskNumber}>
+                      <td className="px-2 py-2 text-xs text-gray-900 whitespace-normal break-words" title={subtask.subTaskNumber}>
                         {subtask.subTaskNumber}
                       </td>
                       <td className="px-2 py-2 text-xs text-gray-500">-</td>
