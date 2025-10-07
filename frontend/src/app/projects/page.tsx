@@ -1132,7 +1132,7 @@ return (
             >
               SAVE
             </button>
-<button
+            <button
             onClick={() => setShowAddRevModal(true)}
             style={{
               padding: "8px 16px",

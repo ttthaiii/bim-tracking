@@ -1,241 +1,200 @@
-import React, { useState } from 'react';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
-interface ExportModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onExport: (options: any) => void;
-  projects: any[];
-  currentProjectId: string;
+interface Task {
+  id: string;
+  relateDrawing: string;
+  activity: string;
+  startDate: string;
+  dueDate: string;
+  progress: number;
+  statusDwg: string;
 }
 
-const ExportModal = ({ isOpen, onClose, onExport, projects, currentProjectId }: ExportModalProps) => {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [selectedProject, setSelectedProject] = useState(currentProjectId);
-  const [exportType, setExportType] = useState<'simple' | 'gantt'>('simple');
-  
-  if (!isOpen) return null;
-  
-  const handleExport = () => {
-    onExport({
-      startDate,
-      endDate,
-      projectId: selectedProject,
-      exportType
-    });
-    onClose();
-  };
-  
-  return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 50,
-      backgroundColor: 'rgba(0, 0, 0, 0.3)',
-      backdropFilter: 'blur(4px)',
-    }}>
-      <div style={{
-        background: 'white',
-        borderRadius: '0.5rem',
-        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
-        width: '100%',
-        maxWidth: '32rem',
-        padding: '1.5rem',
-      }}>
-        <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '1rem' }}>
-          📊 Export to Excel
-        </h3>
-        
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {/* Export Type */}
-          <div>
-            <label style={{ fontSize: '0.875rem', fontWeight: 500, color: '#374151', marginBottom: '0.5rem', display: 'block' }}>
-              📊 Export Format
-            </label>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  value="simple"
-                  checked={exportType === 'simple'}
-                  onChange={() => setExportType('simple')}
-                />
-                <span style={{ fontSize: '0.875rem' }}>📋 Simple Table</span>
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  value="gantt"
-                  checked={exportType === 'gantt'}
-                  onChange={() => setExportType('gantt')}
-                />
-                <span style={{ fontSize: '0.875rem' }}>📊 Gantt Chart</span>
-              </label>
-            </div>
-          </div>
+export const exportGanttChart = async (
+  tasks: Task[],
+  projectName: string,
+  projectLead: string,
+  startDate: Date,
+  endDate: Date
+) => {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Gantt Chart');
 
-          {/* Date Range */}
-          <div>
-            <label style={{ fontSize: '0.875rem', fontWeight: 500, color: '#374151' }}>
-              📅 Date Range (Optional)
-            </label>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '0.5rem',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '0.375rem',
-                  fontSize: '0.875rem'
-                }}
-              />
-              <span style={{ display: 'flex', alignItems: 'center' }}>→</span>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                style={{
-                  flex: 1,
-                  padding: '0.5rem',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '0.375rem',
-                  fontSize: '0.875rem'
-                }}
-              />
-            </div>
-          </div>
-          
-          {/* Project Filter */}
-          <div>
-            <label style={{ fontSize: '0.875rem', fontWeight: 500, color: '#374151' }}>
-              🏢 Project
-            </label>
-            <select
-              value={selectedProject}
-              onChange={(e) => setSelectedProject(e.target.value)}
-              style={{
-                width: '100%',
-                marginTop: '0.5rem',
-                padding: '0.5rem',
-                border: '1px solid #e5e7eb',
-                borderRadius: '0.375rem',
-                fontSize: '0.875rem'
-              }}
-            >
-              <option value="all">All Projects</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-          
-          {/* Quick Presets */}
-          <div>
-            <label style={{ fontSize: '0.875rem', fontWeight: 500, color: '#374151', marginBottom: '0.5rem', display: 'block' }}>
-              ⚡ Quick Select
-            </label>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  const today = new Date();
-                  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-                  setStartDate(firstDay.toISOString().split('T')[0]);
-                  setEndDate(today.toISOString().split('T')[0]);
-                }}
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  fontSize: '0.75rem',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '0.25rem',
-                  cursor: 'pointer',
-                  background: 'white'
-                }}
-              >
-                This Month
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const today = new Date();
-                  const firstDay = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                  const lastDay = new Date(today.getFullYear(), today.getMonth(), 0);
-                  setStartDate(firstDay.toISOString().split('T')[0]);
-                  setEndDate(lastDay.toISOString().split('T')[0]);
-                }}
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  fontSize: '0.75rem',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '0.25rem',
-                  cursor: 'pointer',
-                  background: 'white'
-                }}
-              >
-                Last Month
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const today = new Date();
-                  const threeMonthsAgo = new Date(today.getFullYear(), today.getMonth() - 3, 1);
-                  setStartDate(threeMonthsAgo.toISOString().split('T')[0]);
-                  setEndDate(today.toISOString().split('T')[0]);
-                }}
-                style={{
-                  padding: '0.375rem 0.75rem',
-                  fontSize: '0.75rem',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '0.25rem',
-                  cursor: 'pointer',
-                  background: 'white'
-                }}
-              >
-                Last 3 Months
-              </button>
-            </div>
-          </div>
-        </div>
+  // ========== HEADER SECTION ==========
+  worksheet.mergeCells('A1:C1');
+  worksheet.getCell('A1').value = 'PROJECT TITLE';
+  worksheet.getCell('A1').font = { bold: true, size: 14 };
+  
+  worksheet.mergeCells('A2:C2');
+  worksheet.getCell('A2').value = projectName;
+  
+  worksheet.mergeCells('A3:C3');
+  worksheet.getCell('A3').value = `[Project Lead]: ${projectLead}`;
+
+  // Project info
+  worksheet.getCell('G1').value = 'Project Start:';
+  worksheet.getCell('H1').value = startDate.toLocaleDateString();
+  worksheet.getCell('G2').value = 'Display:';
+  worksheet.getCell('H2').value = 'Weekly';
+
+  // ========== COLUMN HEADERS ==========
+  const headerRow = 5;
+  const headers = [
+    'WBS',
+    'TASK DESCRIPTION',
+    'PROGRESS',
+    'PLAN START',
+    'PLAN END',
+    'PLAN DAYS',
+    'ACTUAL START',
+    'ACTUAL END',
+    'ACTUAL DAYS'
+  ];
+
+  headers.forEach((header, index) => {
+    const cell = worksheet.getCell(headerRow, index + 1);
+    cell.value = header;
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF4472C4' }
+    };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    };
+  });
+
+  // ========== GENERATE DATE COLUMNS ==========
+  const dateColumnStart = headers.length + 1;
+  const daysBetween = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+  const weeks = Math.ceil(daysBetween / 7);
+
+  // Week headers
+  let currentWeekStart = new Date(startDate);
+  for (let i = 0; i < weeks; i++) {
+    const weekCol = dateColumnStart + i;
+    const cell = worksheet.getCell(headerRow, weekCol);
+    
+    const weekEnd = new Date(currentWeekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    
+    cell.value = `${currentWeekStart.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} - ${weekEnd.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`;
+    cell.font = { bold: true, size: 9 };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE7E6E6' }
+    };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', textRotation: 90 };
+    
+    currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+  }
+
+  // Set column widths
+  worksheet.getColumn(1).width = 8;
+  worksheet.getColumn(2).width = 30;
+  worksheet.getColumn(3).width = 10;
+  worksheet.getColumn(4).width = 12;
+  worksheet.getColumn(5).width = 12;
+  worksheet.getColumn(6).width = 10;
+  worksheet.getColumn(7).width = 12;
+  worksheet.getColumn(8).width = 12;
+  worksheet.getColumn(9).width = 10;
+
+  for (let i = 0; i < weeks; i++) {
+    worksheet.getColumn(dateColumnStart + i).width = 3;
+  }
+
+  // ========== ADD TASK DATA ==========
+  let currentRow = headerRow + 1;
+
+  tasks.forEach((task, index) => {
+    const row = worksheet.getRow(currentRow);
+    
+    row.getCell(1).value = index + 1;
+    row.getCell(2).value = task.relateDrawing;
+    row.getCell(3).value = `${Math.round(task.progress * 100)}%`;
+    row.getCell(4).value = task.startDate;
+    row.getCell(5).value = task.dueDate;
+    
+    const planStart = new Date(task.startDate);
+    const planEnd = new Date(task.dueDate);
+    const planDays = Math.ceil((planEnd.getTime() - planStart.getTime()) / (1000 * 60 * 60 * 24));
+    row.getCell(6).value = planDays;
+
+    for (let col = 1; col <= headers.length; col++) {
+      row.getCell(col).border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
+    }
+
+    // ========== GANTT VISUALIZATION ==========
+    const taskStart = new Date(task.startDate);
+    const taskEnd = new Date(task.dueDate);
+    
+    let currentDate = new Date(startDate);
+    
+    for (let weekIndex = 0; weekIndex < weeks; weekIndex++) {
+      const weekStart = new Date(currentDate);
+      const weekEnd = new Date(currentDate);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      
+      const cell = row.getCell(dateColumnStart + weekIndex);
+      
+      if (taskStart <= weekEnd && taskEnd >= weekStart) {
+        const isComplete = task.progress >= 1;
+        const isInProgress = task.progress > 0 && task.progress < 1;
         
-        {/* Actions */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '0.5rem 1rem',
-              border: '1px solid #e5e7eb',
-              borderRadius: '0.375rem',
-              fontSize: '0.875rem',
-              cursor: 'pointer',
-              background: 'white'
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleExport}
-            style={{
-              padding: '0.5rem 1.5rem',
-              border: 'none',
-              borderRadius: '0.375rem',
-              fontSize: '0.875rem',
-              color: 'white',
-              background: '#10b981',
-              cursor: 'pointer'
-            }}
-          >
-            📥 Export
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+        if (isComplete) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF4472C4' }
+          };
+        } else if (isInProgress) {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'lightUp',
+            fgColor: { argb: 'FF4472C4' },
+            bgColor: { argb: 'FFFFFFFF' }
+          };
+        } else {
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFD9D9D9' }
+          };
+        }
+      }
+      
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE7E6E6' } },
+        left: { style: 'thin', color: { argb: 'FFE7E6E6' } },
+        bottom: { style: 'thin', color: { argb: 'FFE7E6E6' } },
+        right: { style: 'thin', color: { argb: 'FFE7E6E6' } }
+      };
+      
+      currentDate.setDate(currentDate.getDate() + 7);
+    }
+
+    currentRow++;
+  });
+
+  // ========== EXPORT ==========
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { 
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+  });
+  
+  const filename = `Gantt_${projectName}_${new Date().toISOString().split('T')[0]}.xlsx`;
+  saveAs(blob, filename);
 };
-
-export default ExportModal;
