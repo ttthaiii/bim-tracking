@@ -377,6 +377,10 @@ export default function TaskAssignment() {
 
       console.log('🔄 Rows to save:', rowsToSave);
 
+      const selectedProjectData = projects.find(p => p.id === selectedProject);
+      const projectName = selectedProjectData?.name || '';
+      console.log('📦 Project Name:', projectName);
+
       for (const row of rowsToSave) {
         console.log('📝 Processing row:', row);
         const subTaskNumber = await generateSubTaskNumber(row.relateDrawing);
@@ -390,6 +394,7 @@ export default function TaskAssignment() {
           // ข้อมูลที่ต้องเก็บค่า
           subTaskNumber,                        // generate อัตโนมัติ
           projectId: selectedProject,           // เก็บเฉพาะ ID
+          project: projectName,
           taskName: row.relateDrawingName,     // จาก Relate Drawing
           subTaskName: row.relateWork,         // จาก Relate Work
           subTaskCategory: row.relateWork,     // จาก Relate Work
@@ -454,8 +459,13 @@ export default function TaskAssignment() {
   }, [uniqueCategories]);
 
   const handleProjectChange = async (projectId: string) => {
+      // 🆕 เพิ่ม Debug Log
+    console.log('🔄 Project Changed:');
+    console.log('📌 New projectId:', projectId);
+    console.log('📌 Previous selectedProject:', selectedProject);
     setSelectedProject(projectId);
     
+     console.log('✅ State updated to:', projectId);
     if (!projectId) {
       setTasks([]);
       setExistingSubtasks([]);
@@ -505,7 +515,7 @@ export default function TaskAssignment() {
           <Select
             options={projects.map(p => ({ value: p.id, label: p.name }))}
             value={selectedProject}
-            onChange={setSelectedProject}
+            onChange={handleProjectChange}
             placeholder="Select Project"
             loading={loading}
           />
