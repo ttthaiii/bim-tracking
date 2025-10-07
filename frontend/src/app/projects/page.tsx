@@ -14,6 +14,8 @@ import SuccessModal from "@/components/modals/SuccessModal";
 import AddRevisionModal from "@/components/modals/AddRevisionModal";
 import DeleteConfirmModal from "@/components/modals/DeleteConfirmModal";
 import { deleteTask } from "@/services/firebase";
+import ExportModal from "@/components/modals/ExportModal";
+import { exportGanttChart } from "@/utils/exportGanttChart";
 
 
 interface TaskRow {
@@ -194,6 +196,7 @@ const ProjectsPage = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [showAddRevModal, setShowAddRevModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ idx: number; row: TaskRow } | null>(null);
   const [allTasksCache, setAllTasksCache] = useState<(Task & { id: string })[]>([]);
   const [cacheLoaded, setCacheLoaded] = useState(false);
@@ -640,6 +643,41 @@ const handleCancelEdit = (idx: number) => {
     newSet.delete(idx);
     return newSet;
   });
+};
+
+const handleExport = async (options: any) => {
+  try {
+    if (options.exportType === 'gantt') {
+      // Gantt Chart Export
+      const project = projects.find(p => p.id === (options.projectId === 'all' ? selectedProject : options.projectId));
+      const projectName = project?.name || 'All Projects';
+      const projectLead = project?.projectAssignee || 'N/A';
+      
+      // Filter rows by date range
+      let filteredRows = rows.filter(r => r.relateDrawing); // เอาแค่แถวที่มีข้อมูล
+      
+      if (options.startDate && options.endDate) {
+        filteredRows = filteredRows.filter(r => {
+          const rowDate = new Date(r.startDate);
+          const start = new Date(options.startDate);
+          const end = new Date(options.endDate);
+          return rowDate >= start && rowDate <= end;
+        });
+      }
+      
+      const start = options.startDate ? new Date(options.startDate) : new Date();
+      const end = options.endDate ? new Date(options.endDate) : new Date();
+      
+      await exportGanttChart(filteredRows as any, projectName, projectLead, start, end);
+      
+    } else {
+      // Simple Table Export (ถ้ามี function นี้แล้ว)
+      alert('Simple export coming soon!');
+    }
+  } catch (error) {
+    console.error('Export error:', error);
+    alert('เกิดข้อผิดพลาดในการ Export');
+  }
 };
 
 const handleSelectTaskForRevision = (task: any) => {
@@ -1094,9 +1132,9 @@ return (
             >
               SAVE
             </button>
-            <button
-              onClick={() => setShowAddRevModal(true)}
-              style={{
+<button
+            onClick={() => setShowAddRevModal(true)}
+            style={{
               padding: "8px 16px",
               background: "#4f46e5",
               border: "none",
@@ -1109,6 +1147,22 @@ return (
             }}
           >
             Add new Rev.
+          </button>
+          <button
+            onClick={() => setShowExportModal(true)}
+            style={{
+              padding: "8px 16px",
+              background: "#10b981",
+              border: "none",
+              borderRadius: "6px",
+              fontSize: "14px",
+              cursor: "pointer",
+              color: "white",
+              fontWeight: 500,
+              boxShadow: "0 1px 2px rgba(16, 185, 129, 0.1)"
+            }}
+          >
+            📊 Export
           </button>
         </div>
       </div>
@@ -1145,6 +1199,13 @@ return (
         setShowDeleteModal(false);
         setDeleteTarget(null);
       }}
+    />
+    <ExportModal
+      isOpen={showExportModal}
+      onClose={() => setShowExportModal(false)}
+      onExport={handleExport}
+      projects={projects}
+      currentProjectId={selectedProject}
     />
   </div>
 );
