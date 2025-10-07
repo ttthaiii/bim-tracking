@@ -22,52 +22,49 @@ export const aggregateSubtaskData = onDocumentWritten(
   async (event) => {
     logger.info("--- aggregateSubtaskData function triggered! ---");
 
-    const data = event.data?.after.data() || event.data?.before.data();
-    if (!data) {
-      logger.warn("No data in event. Exiting.");
-      return;
-    }
-    const subTaskNumber = data.subTaskNumber;
-    if (!subTaskNumber) {
-      logger.warn("Missing 'subTaskNumber'. Exiting.");
-      return;
-    }
-    logger.info(`Processing subTaskNumber: ${subTaskNumber}`);
-
-    const [reportsSnapshot, subtaskQuery] = await Promise.all([
-      db.collectionGroup("dailyReport").where("subTaskNumber", "==", subTaskNumber).get(),
-      db.collectionGroup("subtasks").where("subTaskNumber", "==", subTaskNumber).limit(1).get(),
+    const { taskId, subtaskId } = event.params;
+    const subtaskDocRef = db.doc(`tasks/${taskId}/subtasks/${subtaskId}`);
+    
+    const [subtaskDoc, reportsSnapshot] = await Promise.all([
+        subtaskDocRef.get(),
+        subtaskDocRef.collection("dailyReport").get()
     ]);
 
-    if (subtaskQuery.empty) {
-      logger.error(`Could not find a matching subtask with subTaskNumber: ${subTaskNumber}`);
+    if (!subtaskDoc.exists) {
+      logger.error(`Could not find parent subtask at path: ${subtaskDocRef.path}`);
       return;
     }
-    const subtaskDocRef = subtaskQuery.docs[0].ref;
-    const subtaskData = subtaskQuery.docs[0].data();
-    logger.info(`Found ${reportsSnapshot.size} dailyReport(s) for this subtask.`);
+    const subtaskData = subtaskDoc.data()!;
+    logger.info(`Found ${reportsSnapshot.size} dailyReport(s) for subtask ${subtaskId}.`);
 
     let allWorkEntries: any[] = [];
     reportsSnapshot.forEach(doc => {
         const reportData = doc.data();
-        const workingHours = reportData.workhours; // แก้ไขชื่อ field ให้ตรงกับรูปภาพของคุณ
-        const files = reportData.files;
+        const workhours = reportData.workhours; 
 
-        // --- จุดที่แก้ไขให้รองรับ Array ---
-        if (Array.isArray(workingHours)) {
-            workingHours.forEach((entry: any) => {
-                if (entry.timestamp) {
-                    allWorkEntries.push({ ...entry, timestamp: entry.timestamp.toDate(), parentFiles: files });
+        if (Array.isArray(workhours)) {
+            workhours.forEach((entry: any) => {
+                if (entry.timestamp && typeof entry.timestamp.toDate === 'function') {
+                    allWorkEntries.push({ ...entry, timestamp: entry.timestamp.toDate() });
+                } else {
+                    logger.warn("Found a work entry with invalid or missing timestamp:", entry);
                 }
             });
         }
-        // --- จบจุดที่แก้ไข ---
     });
     logger.info(`Found a total of ${allWorkEntries.length} work hour entries.`);
 
     if (allWorkEntries.length === 0) {
         logger.info("No work entries found. Resetting subtask values.");
-        await subtaskDocRef.update({ mhOD: 0, mhOT: 0, subTaskProgress: 0, startDate: null, endDate: null, lastUpdate: null, subTaskFiles: [], wlRemaining: getWlFromScale(subtaskData.subTaskScale) });
+        await subtaskDocRef.update({ 
+            mhOD: 0, 
+            mhOT: 0, 
+            subTaskProgress: 0, 
+            startDate: null, 
+            endDate: null, 
+            lastUpdate: null, 
+            wlRemaining: getWlFromScale(subtaskData.subTaskScale) 
+        });
         return;
     }
 
@@ -75,28 +72,41 @@ export const aggregateSubtaskData = onDocumentWritten(
 
     const firstEntry = allWorkEntries[0];
     const lastEntry = allWorkEntries[allWorkEntries.length - 1];
+    
     const startDate = firstEntry.timestamp;
     const lastUpdate = lastEntry.timestamp;
     const subTaskProgress = lastEntry.progress || 0;
-    const subTaskFiles = lastEntry.parentFiles || [];
+    
     const finalReportEntry = allWorkEntries.slice().reverse().find(e => e.progress === 100);
     const endDate = finalReportEntry ? finalReportEntry.timestamp : null;
+    
     const totals = allWorkEntries.reduce((acc, entry) => {
         acc.mhOD += entry.day || 0;
         acc.mhOT += entry.ot || 0;
         return acc;
     }, { mhOD: 0, mhOT: 0 });
+    
     const wlFromscale = getWlFromScale(subtaskData.subTaskScale);
     const wlRemaining = wlFromscale * (1 - (subTaskProgress / 100));
 
-    const updatePayload = { startDate, endDate, lastUpdate, subTaskFiles, mhOD: totals.mhOD, mhOT: totals.mhOT, subTaskProgress, wlFromscale, wlRemaining };
+    const updatePayload = { 
+        subTaskNumber: subtaskId, // <-- KEY CHANGE: Ensure subTaskNumber matches the document ID
+        startDate, 
+        endDate, 
+        lastUpdate, 
+        mhOD: totals.mhOD, 
+        mhOT: totals.mhOT, 
+        subTaskProgress, 
+        wlFromscale, 
+        wlRemaining 
+    };
     logger.info("Final payload to be updated:", updatePayload);
 
     try {
         await subtaskDocRef.update(updatePayload);
-        logger.info(`✅ Successfully updated subtask '${subTaskNumber}'!`);
+        logger.info(`✅ Successfully updated subtask '${subtaskId}'!`);
     } catch (error) {
-        logger.error(`❌ Error updating subtask '${subTaskNumber}':`, error);
+        logger.error(`❌ Error updating subtask '${subtaskId}':`, error);
     }
   }
 );
@@ -109,18 +119,14 @@ export const aggregateTaskData = onDocumentWritten(
   async (event) => {
     logger.info("--- aggregateTaskData function triggered! ---");
 
-    // 1. ดึง taskId จาก event parameter เพื่อหาว่า task ตัวไหนที่ต้องอัปเดต
     const taskId = event.params.taskId;
     logger.info(`Parent task ID to update: ${taskId}`);
 
-    // 2. อ้างอิงไปยัง collection ของ subtasks ทั้งหมดของ task นี้
     const subtasksCollectionRef = db.collection(`tasks/${taskId}/subtasks`);
 
-    // 3. ดึงข้อมูล subtasks ทั้งหมดออกมา
     const allSubtasksSnapshot = await subtasksCollectionRef.get();
     const allSubtasks = allSubtasksSnapshot.docs.map(doc => doc.data());
 
-    // 4. ถ้าไม่มี subtask เหลืออยู่เลย (เช่น ถูกลบไปหมด) ให้ reset ค่าที่ task หลัก
     if (allSubtasks.length === 0) {
       logger.info(`No subtasks found for task ${taskId}. Resetting task values.`);
       const taskRef = db.collection("tasks").doc(taskId);
@@ -131,14 +137,13 @@ export const aggregateTaskData = onDocumentWritten(
         totalMH: 0,
         startDate: null,
         endDate: null,
-        lastUpdate: admin.firestore.FieldValue.serverTimestamp(), // อัปเดตเวลาล่าสุด
+        lastUpdate: admin.firestore.FieldValue.serverTimestamp(),
       });
       return;
     }
 
     logger.info(`Found ${allSubtasks.length} subtasks. Starting calculation...`);
 
-    // 5. เริ่มทำการคำนวณค่าต่างๆ
     let subtaskCount = allSubtasks.length;
     let totalProgress = 0;
     let estWorkload = 0;
@@ -149,16 +154,13 @@ export const aggregateTaskData = onDocumentWritten(
     let allSubtasksAreDone = true;
 
     allSubtasks.forEach(subtask => {
-      // --- คำนวณผลรวม ---
       totalProgress += subtask.subTaskProgress || 0;
       estWorkload += subtask.wlFromscale || 0;
       totalMH += (subtask.mhOD || 0) + (subtask.mhOT || 0);
 
-      // --- เก็บค่าวันที่เพื่อหา min/max ---
       if (subtask.startDate?.toDate) startDates.push(subtask.startDate.toDate());
       if (subtask.lastUpdate?.toDate) lastUpdates.push(subtask.lastUpdate.toDate());
       
-      // --- ตรวจสอบเงื่อนไข endDate ---
       if (subtask.subTaskProgress < 100) {
         allSubtasksAreDone = false;
       }
@@ -167,17 +169,14 @@ export const aggregateTaskData = onDocumentWritten(
       }
     });
 
-    // 6. สรุปผลการคำนวณ
     const progress = totalProgress / subtaskCount;
     const startDate = startDates.length > 0 ? new Date(Math.min(...startDates.map(d => d.getTime()))) : null;
     const lastUpdate = lastUpdates.length > 0 ? new Date(Math.max(...lastUpdates.map(d => d.getTime()))) : null;
     
-    // endDate จะมีค่าก็ต่อเมื่อทุก subtask เสร็จ 100%
     const endDate = allSubtasksAreDone && endDates.length > 0 
       ? new Date(Math.max(...endDates.map(d => d.getTime()))) 
       : null;
 
-    // 7. เตรียมข้อมูลสำหรับอัปเดต
     const updatePayload = {
       subtaskCount,
       progress,
@@ -189,7 +188,6 @@ export const aggregateTaskData = onDocumentWritten(
     };
     logger.info("Final payload for parent task:", updatePayload);
 
-    // 8. อัปเดตข้อมูลที่เอกสาร task หลัก
     const taskRef = db.collection("tasks").doc(taskId);
     try {
       await taskRef.update(updatePayload);

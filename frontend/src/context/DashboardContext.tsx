@@ -11,6 +11,10 @@ interface DashboardContextType {
   setExcludedStatuses: Dispatch<SetStateAction<string[]>>;
   toggleStatus: (status: string) => void;
   selectOnlyStatus: (status: string) => void;
+  
+  // New state for unsaved changes
+  hasUnsavedChanges: boolean;
+  setHasUnsavedChanges: Dispatch<SetStateAction<boolean>>;
 }
 
 const DashboardContext = createContext<DashboardContextType>({
@@ -22,6 +26,8 @@ const DashboardContext = createContext<DashboardContextType>({
   setExcludedStatuses: () => {},
   toggleStatus: () => {},
   selectOnlyStatus: () => {},
+  hasUnsavedChanges: false,
+  setHasUnsavedChanges: () => {},
 });
 
 const ALL_STATUSES = ['เสร็จสิ้น', 'รออนุมัติจาก CM', 'รอตรวจสอบหน้างาน', 'รอแก้ไขแบบ BIM', 'กำลังดำเนินการ-BIM', 'วางแผนแล้ว-BIM', 'ยังไม่วางแผน-BIM'];
@@ -30,13 +36,12 @@ export const DashboardProvider = ({ children }: { children: ReactNode }) => {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
   const [excludedStatuses, setExcludedStatuses] = useState<string[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
 
-  // DEBUG: Log whenever excludedStatuses changes to see the final result
   useEffect(() => {
     console.log('[DashboardContext] Final state of excludedStatuses:', excludedStatuses);
   }, [excludedStatuses]);
 
-  // DEBUG: Refactored with logging and robust functional updates
   const toggleStatus = useCallback((status: string) => {
     console.log(`[DashboardContext] ACTION: toggleStatus for "${status}"`);
     setExcludedStatuses(prev => {
@@ -49,7 +54,6 @@ export const DashboardProvider = ({ children }: { children: ReactNode }) => {
     });
   }, []);
 
-  // DEBUG: Refactored with logging and robust functional updates
   const selectOnlyStatus = useCallback((status: string) => {
     console.log(`[DashboardContext] ACTION: selectOnlyStatus for "${status}"`);
     setExcludedStatuses(prev => {
@@ -76,6 +80,8 @@ export const DashboardProvider = ({ children }: { children: ReactNode }) => {
     setExcludedStatuses,
     toggleStatus,
     selectOnlyStatus,
+    hasUnsavedChanges,
+    setHasUnsavedChanges,
   };
 
   return (

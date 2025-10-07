@@ -63,6 +63,9 @@ export interface DailyReportEntry {
   note?: string;
   status: 'pending' | 'in-progress' | 'completed';
   
+  // New field for display
+  relateDrawing: string; // e.g., "Project Abbr - Subtask Name"
+
   // Fields copied from Subtask for convenience
   subTaskName: string;
   subTaskCategory: string;

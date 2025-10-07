@@ -1,30 +1,48 @@
+
 'use client';
 
-import { useState, useEffect, useCallback, useId, useMemo } from 'react';
+import { useState, useEffect, useCallback, useId, useMemo, useRef } from 'react';
 import Calendar from 'react-calendar';
 import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
-import { getEmployeeTaskAssignments, TaskAssignment } from '@/services/taskAssignService';
-import { RecheckPopup } from '@/components/RecheckPopup';
-import { LeavePopup } from '@/components/LeavePopup';
-import { TimeSelector } from '@/components/TimeSelector';
+import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries } from '@/services/taskAssignService';
+import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useDashboard } from '@/context/DashboardContext';
+import { DailyReportEntry, Subtask, Project } from '@/types/database';
+import { getProjects } from '@/lib/projects';
+import { SubtaskAutocomplete } from '@/components/SubtaskAutocomplete';
+import Select from '@/components/ui/Select';
+import { RecheckPopup } from '@/components/RecheckPopup';
+import isEqual from 'lodash.isequal';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
 
-const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: string, baseId: string, index: number): TaskAssignment => ({
+const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: string, baseId: string, index: number): DailyReportEntry => ({
   id: `${baseId}-temp-${index}`,
-  employeeId, assignDate, subtaskId: '', normalWorkingHours: '0:0', otWorkingHours: '0:0', progress: '0%', 
-  note: '', status: 'pending', subTaskName: '', subTaskCategory: '', internalRev: '', 
-  subTaskScale: '', project: '', taskName: '', remark: '', item: '',
+  employeeId, assignDate, subtaskId: '', subtaskPath: '', // Added subtaskPath
+  normalWorkingHours: '0:0', otWorkingHours: '0:0', progress: '0%',
+  note: '', status: 'pending', subTaskName: '', subTaskCategory: '', internalRev: '',
+  subTaskScale: '', project: '', taskName: '', remark: '', item: '', relateDrawing: '',
 });
 
-const hourOptions = Array.from({ length: 13 }, (_, i) => i);
-const minuteOptions = [0, 15, 30, 45];
+const hourOptions = Array.from({ length: 13 }, (_, i) => ({ value: i.toString(), label: `${i} ชั่วโมง` }));
+const minuteOptions = [0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} นาที` }));
+
+const generateRelateDrawingText = (subtask: Subtask, project?: Project | null): string => {
+  if (!subtask) return '';
+  let parts = [];
+  if (project) parts.push(project.abbr);
+  if (subtask.taskName) parts.push(subtask.taskName);
+  if (subtask.subTaskName) parts.push(subtask.subTaskName);
+  if (subtask.item) parts.push(subtask.item);
+  return parts.length > 0 ? `(${parts.join(' - ')})` : '';
+};
 
 export default function DailyReport() {
   const { appUser } = useAuth();
+  const { setHasUnsavedChanges } = useDashboard();
   const baseId = useId();
   const [date, setDate] = useState<Value>(new Date());
   const [workDate, setWorkDate] = useState(new Date().toISOString().split('T')[0]);
@@ -32,504 +50,388 @@ export default function DailyReport() {
   const [employeeData, setEmployeeData] = useState<{ employeeId: string; fullName: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [showConfirmation, setShowConfirmation] = useState(false);
-  const [pendingDate, setPendingDate] = useState<Date | null>(null);
-  const [isClient, setIsClient] = useState(false);
+  const [isReadOnly, setIsReadOnly] = useState(false);
   const [isRecheckOpen, setIsRecheckOpen] = useState(false);
-  const [showLeavePopup, setShowLeavePopup] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
 
+  const [reportDataCache, setReportDataCache] = useState<Record<string, DailyReportEntry[]>>({});
+  const [allDailyEntries, setAllDailyEntries] = useState<DailyReportEntry[]>([]);
+  const [dailyReportEntries, setDailyReportEntries] = useState<DailyReportEntry[]>([]);
 
-  const [taskAssignments, setTaskAssignments] = useState<TaskAssignment[]>([]);
-  const [dailyReportEntries, setDailyReportEntries] = useState<TaskAssignment[]>([]);
+  const [touchedRows, setTouchedRows] = useState<Set<string>>(new Set());
+  const [availableSubtasks, setAvailableSubtasks] = useState<Subtask[]>([]);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const prevWorkDateRef = useRef<string>(workDate);
 
-  const selectedSubtaskIds = useMemo(() => {
-    const ids = new Set<string>();
-    dailyReportEntries.forEach(entry => {
-      if (entry.subtaskId) ids.add(entry.subtaskId);
-    });
-    return ids;
-  }, [dailyReportEntries]);
+  useEffect(() => {
+    const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
+    const currentData = reportDataCache[workDate];
+    
+    const normalize = (entries: DailyReportEntry[] = []) => 
+      entries.map(({ id, relateDrawing, ...rest }) => ({ ...rest, id: id.startsWith('temp-') ? '' : id }));
 
-  const fetchAllData = useCallback(async () => {
-    if (!employeeId) return;
+    if (originalData.length === 0 && currentData && currentData.some(d => d.subtaskId)) {
+        setHasUnsavedChanges(true);
+    } else {
+        setHasUnsavedChanges(!isEqual(normalize(originalData), normalize(currentData)));
+    }
+  }, [reportDataCache, workDate, allDailyEntries, setHasUnsavedChanges]);
+
+  const fetchAllData = useCallback(async (eid: string) => {
     setLoading(true);
     setError('');
-    
     try {
-      const employee = await getEmployeeByID(employeeId);
-      const assignments = await getEmployeeTaskAssignments(employeeId);
+      const [employee, dailyEntries, projects, subtasks] = await Promise.all([
+        getEmployeeByID(eid),
+        getEmployeeDailyReportEntries(eid), // This fetches from the old location, which might be fine for now or needs changing
+        getProjects(),
+        fetchAvailableSubtasksForEmployee(eid),
+      ]);
       
-      if (employee) {
-        setEmployeeData(employee);
-        setTaskAssignments(assignments);
-      } else {
+      setAllProjects(projects);
+      setAvailableSubtasks(subtasks);
+      
+      const processedDailyEntries = dailyEntries.map(entry => {
+        const subtask = subtasks.find(s => s.id === entry.subtaskId);
+        const project = subtask ? projects.find(p => p.id === subtask.project) : null;
+        return {
+          ...entry,
+          subtaskPath: subtask?.path || '', // Make sure path is included
+          relateDrawing: subtask ? generateRelateDrawingText(subtask, project) : '',
+        };
+      });
+
+      setAllDailyEntries(processedDailyEntries);
+
+      if (employee) setEmployeeData(employee);
+      else {
         setError('ไม่พบข้อมูลพนักงาน');
         setEmployeeData(null);
-        setTaskAssignments([createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)]);
       }
-    } catch (err) { console.error(err); setError('เกิดข้อผิดพลาด'); } 
-    finally { setLoading(false); }
-  }, [employeeId, workDate, baseId]);
+    } catch (err) {
+      console.error('Error fetching daily report entries:', err);
+      setError('เกิดข้อผิดพลาดในการดึงข้อมูล');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  useEffect(() => { if (appUser?.employeeId) setEmployeeId(appUser.employeeId); }, [appUser]);
-  useEffect(() => { fetchAllData(); }, [fetchAllData]);
-  useEffect(() => { if (date instanceof Date) setWorkDate(date.toISOString().split('T')[0]); }, [date]);
+  useEffect(() => {
+    if (appUser?.employeeId && !employeeId) {
+      setEmployeeId(appUser.employeeId);
+      fetchAllData(appUser.employeeId);
+    }
+  }, [appUser, employeeId, fetchAllData]);
 
-  const handleUpdateTask = (taskId: string, updates: Partial<TaskAssignment>) => {
-    setTaskAssignments(tasks => 
-      tasks.map(task => 
-        task.id === taskId ? { ...task, ...updates } : task
-      )
-    );
+  useEffect(() => {
+    if (date instanceof Date) {
+      const selectedDateLocal = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const todayLocal = new Date();
+      todayLocal.setHours(0, 0, 0, 0);
+      const twoDaysAgoLocal = new Date(todayLocal);
+      twoDaysAgoLocal.setDate(todayLocal.getDate() - 2);
+
+      setIsReadOnly(selectedDateLocal < twoDaysAgoLocal);
+
+      const year = selectedDateLocal.getFullYear();
+      const month = String(selectedDateLocal.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDateLocal.getDate()).padStart(2, '0');
+      setWorkDate(`${year}-${month}-${day}`);
+    }
+  }, [date]);
+
+  useEffect(() => {
+    if (!employeeId || !workDate) return;
+
+    const previousDate = prevWorkDateRef.current;
+    if (previousDate && previousDate !== workDate) {
+      setReportDataCache(prevCache => ({
+        ...prevCache,
+        [previousDate]: dailyReportEntries,
+      }));
+    }
+
+    if (reportDataCache[workDate]) {
+      setDailyReportEntries(reportDataCache[workDate]);
+    } else {
+      const entriesFromBackend = allDailyEntries.filter(entry => entry.assignDate === workDate);
+      const entriesToShow = entriesFromBackend.length > 0
+        ? entriesFromBackend
+        : [createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)];
+      setDailyReportEntries(entriesToShow);
+      setReportDataCache(prevCache => ({ ...prevCache, [workDate]: entriesToShow }));
+    }
+
+    prevWorkDateRef.current = workDate;
+    setTouchedRows(new Set());
+  }, [workDate, employeeId, allDailyEntries, baseId]);
+
+  const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
+    setDailyReportEntries(currentEntries => {
+      const newEntries = currentEntries.map(entry => {
+        if (entry.id === entryId) {
+          const newEntry = { ...entry, ...updates };
+          const progress = parseInt(newEntry.progress);
+          if (progress === 100) newEntry.status = 'completed';
+          else if (progress > 0) newEntry.status = 'in-progress';
+          else newEntry.status = 'pending';
+          return newEntry;
+        }
+        return entry;
+      });
+      setReportDataCache(prevCache => ({ ...prevCache, [workDate]: newEntries }));
+      return newEntries;
+    });
   };
 
-  const handleDeleteTask = (taskId: string) => {
-    if (taskAssignments.length <= 1) return alert('ต้องมีอย่างน้อย 1 แถว');
+  const handleRowFocus = (entryId: string, idx: number) => {
+    if (!touchedRows.has(entryId)) {
+      setTouchedRows(prev => new Set(prev).add(entryId));
+      if (idx === dailyReportEntries.length - 1) handleAddRow();
+    }
+  };
+
+  const handleTimeChange = (entryId: string, type: 'normalWorkingHours' | 'otWorkingHours', part: 'h' | 'm', value: string) => {
+    const currentEntry = dailyReportEntries.find(e => e.id === entryId);
+    if (!currentEntry) return;
+    let [h, m] = (currentEntry[type] || '0:0').split(':').map(Number);
+    if (part === 'h') h = Number(value);
+    if (part === 'm') m = Number(value);
+    handleUpdateEntry(entryId, { [type]: `${h}:${m}` });
+  };
+
+  const handleDeleteEntry = (entryId: string) => {
+    if (dailyReportEntries.length <= 1) {
+      alert('ต้องมีอย่างน้อย 1 แถว');
+      return;
+    }
     if (window.confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-      setTaskAssignments(tasks => tasks.filter(task => task.id !== taskId));
+      setDailyReportEntries(currentEntries => {
+        const newEntries = currentEntries.filter(entry => entry.id !== entryId);
+        setReportDataCache(prevCache => ({ ...prevCache, [workDate]: newEntries }));
+        return newEntries;
+      });
     }
   };
   
   const handleAddRow = () => {
-    setTaskAssignments(prev => [...prev, createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, prev.length)]);
+    setDailyReportEntries(currentEntries => {
+      const newEntries = [...currentEntries, createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, currentEntries.length)];
+      setReportDataCache(prevCache => ({ ...prevCache, [workDate]: newEntries }));
+      return newEntries;
+    });
   };
 
-  const handleEmployeeSearch = () => {
-    fetchAllData();
-  };
+  const handleRelateDrawingChange = (entryId: string, subtaskId: string | null) => {
+    const selectedSubtask = subtaskId ? availableSubtasks.find(sub => sub.id === subtaskId) : null;
+    const project = selectedSubtask ? allProjects.find(p => p.id === selectedSubtask.project) : null;
 
-  const handleUpdateEntry = (entryId: string, updates: Partial<TaskAssignment>) => {
-    setDailyReportEntries(entries =>
-      entries.map(entry => (entry.id === entryId ? { ...entry, ...updates } : entry))
-    );
+    const updates = selectedSubtask ? {
+        subtaskId: selectedSubtask.id,
+        subtaskPath: selectedSubtask.path || '', // <-- CRITICAL: Store the subtask path
+        subTaskName: selectedSubtask.subTaskName,
+        subTaskCategory: selectedSubtask.subTaskCategory,
+        progress: `${selectedSubtask.subTaskProgress || 0}%`,
+        note: selectedSubtask.remark,
+        internalRev: selectedSubtask.internalRev,
+        subTaskScale: selectedSubtask.subTaskScale,
+        project: selectedSubtask.project,
+        taskName: selectedSubtask.taskName,
+        item: selectedSubtask.item,
+        status: 'pending',
+        relateDrawing: generateRelateDrawingText(selectedSubtask, project),
+    } : { 
+        subtaskId: '', subtaskPath: '', progress: '0%', note: '', item: '', status: 'pending', relateDrawing: '' 
+    };
+    handleUpdateEntry(entryId, updates);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!employeeId) {
+      setError('ไม่พบรหัสพนักงาน ไม่สามารถบันทึกได้');
+      return;
+    }
     setIsRecheckOpen(true);
   };
 
   const handleConfirmSubmit = async () => {
+    setIsRecheckOpen(false);
+    setLoading(true);
+    setError('');
     try {
-      // TODO: Save to Firebase
-      console.log({ employeeId, employeeData, workDate, taskAssignments });
-      setIsRecheckOpen(false);
-      // Show success message or redirect
-    } catch (error) {
-      console.error('Error submitting data:', error);
-      // Show error message
+      await saveDailyReportEntries(employeeId, dailyReportEntries);
+      alert('บันทึกข้อมูล Daily Report สำเร็จ!');
+      setHasUnsavedChanges(false);
+      
+      setReportDataCache(prevCache => {
+        const newCache = { ...prevCache };
+        delete newCache[workDate];
+        return newCache;
+      });
+
+      await fetchAllData(employeeId);
+
+    } catch (err) {
+      console.error('Error submitting daily report:', err);
+      setError('เกิดข้อผิดพลาดในการบันทึกข้อมูล Daily Report');
+      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล Daily Report');
+    } finally {
+      setLoading(false);
     }
+  };
+  
+  const tileClassName = ({ date, view }: { date: Date; view: string }) => {
+    if (view === 'month') {
+      const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+      const hasData = allDailyEntries.some(entry => {
+        const entryDate = new Date(entry.assignDate);
+        return new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate()).getTime() === normalizedDate;
+      });
+      if (hasData) return 'tile-has-data';
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const twoDaysAgo = new Date(today);
+      twoDaysAgo.setDate(today.getDate() - 2);
+
+      if (date < today && date >= twoDaysAgo) return 'tile-can-edit-past';
+    }
+    return '';
   };
 
   return (
-    <div className="container-fluid mx-auto p-4">
-      <div className="flex gap-4">
-        {/* Left side - Calendar */}
-        <div className="w-80">
-          <Calendar
-            onChange={(value: Value) => {
-              if (value instanceof Date) {
-                const selectedDate = value.toISOString().split('T')[0];
-                setDate(value);
-                setWorkDate(selectedDate);
-                
-                // ถ้ามีข้อมูลในวันที่เลือก ให้แสดง RecheckPopup
-                const hasDataForDate = taskAssignments.some(
-                  task => task.assignDate === selectedDate
-                );
-                if (hasDataForDate) {
-                  setIsRecheckOpen(true);
-                }
-              }
-            }}
-            value={date}
-            className="w-full border rounded-lg shadow-lg bg-white custom-calendar"
-            tileClassName={({ date: tileDate, view }) => {
-              if (view !== 'month') return '';
-
-              // แปลง tileDate เป็น Date object และตั้งเวลาเป็น 00:00:00
-              const tileDateOnly = new Date(tileDate);
-              tileDateOnly.setHours(0, 0, 0, 0);
-
-              // วันที่ปัจจุบัน
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-
-              // คำนวณวันที่สามารถแก้ไขย้อนหลังได้ (3 วัน)
-              const threeDaysAgo = new Date(today);
-              threeDaysAgo.setDate(today.getDate() - 3);
-
-              // เช็คว่าเป็นวันที่มีการแก้ไขข้อมูลหรือไม่
-              const hasData = taskAssignments.some(task => {
-                if (!task.assignDate) return false;
-                const taskDate = new Date(task.assignDate);
-                taskDate.setHours(0, 0, 0, 0);
-                return taskDate.getTime() === tileDateOnly.getTime();
-              });
-
-              // ตรวจสอบเงื่อนไขและส่งคืน class ที่เหมาะสม
-              if (tileDateOnly.getTime() === today.getTime()) {
-                return 'rounded-full bg-blue-200'; // วันที่ปัจจุบัน (สีฟ้า)
-              }
-              if (hasData) {
-                return 'rounded-full bg-yellow-200'; // วันที่มีการแก้ไขข้อมูล (สีเหลือง)
-              }
-              if (tileDateOnly >= threeDaysAgo && tileDateOnly <= today) {
-                return 'rounded-full bg-green-200'; // วันที่สามารถลงข้อมูลย้อนหลังได้ (สีเขียว)
-              }
-              
-              return '';
-            }}
-          />
-          {/* คำอธิบายสี */}
-          <div className="mt-4 space-y-2 text-sm">
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-blue-200"></div>
-              <span>วันที่ปัจจุบัน</span>
+    <PageLayout>
+      <div className="container-fluid mx-auto p-4 md:p-8 bg-gray-50 min-h-screen">
+        <div className="flex flex-col md:flex-row gap-6">
+          <div className="w-full md:w-[384px] md:flex-shrink-0">
+            <div className="bg-white rounded-lg shadow-md border border-gray-200">
+                <Calendar 
+                  onChange={setDate} 
+                  value={date} 
+                  className="custom-calendar" 
+                  locale="th-TH" 
+                  tileClassName={tileClassName}
+                />
             </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-yellow-200"></div>
-              <span>มีการแก้ไขข้อมูล</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-green-200"></div>
-              <span>วันที่สามารถลงข้อมูลย้อนหลังได้</span>
+            <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
+              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-yellow-300 mr-2"></div><span>วันที่มีการลงข้อมูลแล้ว</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-gray-300 mr-2"></div><span>วันที่สามารถลงข้อมูลย้อนหลังได้</span></div>
             </div>
           </div>
-        </div>
 
-        {/* Right side - Form */}
-        <div className="flex-1">
-          <div className="bg-white rounded-lg shadow-lg p-4">
-            <div className="flex justify-between mb-6">
-              <div className="w-1/2 pr-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">รหัสพนักงาน</label>
-                <div className="flex">
-                  <input
-                    type="text"
-                    value={employeeId}
-                    onChange={(e) => setEmployeeId(e.target.value)}
-                    className="w-full p-2 border rounded-md"
-                    placeholder="XXXXXX"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleEmployeeSearch}
-                    className="ml-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-                    disabled={loading}
-                  >
-                    {loading ? 'กำลังค้นหา...' : 'ค้นหา'}
-                  </button>
-                </div>
-                {error && <p className="mt-1 text-red-500 text-sm">{error}</p>}
-                {employeeData && (
-                  <p className="mt-1 text-green-600 text-sm">
-                    ชื่อ-นามสกุล: {employeeData.fullName}
-                  </p>
-                )}
+          <div className="flex-1">
+            <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[80vh]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
+                  <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">รหัสพนักงาน</label>
+                      <input type="text" value={employeeId} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed" placeholder="กำลังโหลด..."/>
+                  </div>
+                  <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">วันที่ทำงาน</label>
+                      <input type="date" value={workDate} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed"/>
+                  </div>
               </div>
-              <div className="w-1/2 pl-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">วันที่ทำงาน</label>
-                <div className="relative">
-                  <input
-                    type="date"
-                    value={workDate}
-                    onChange={(e) => setWorkDate(e.target.value)}
-                    className="w-full p-2 border rounded-md pr-10"
-                  />
-                  <span className="absolute right-2 top-2">
-                    <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </span>
-                </div>
-              </div>
-            </div>
 
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border p-2 text-left w-12">No</th>
-                    <th className="border p-2 text-left w-1/4">Relate Drawing</th>
-                    <th className="border p-2 text-left w-32">Time</th>
-                    <th className="border p-2 text-left w-32">Working hours</th>
-                    <th className="border p-2 text-left w-40">Progress</th>
-                    <th className="border p-2 text-left w-1/4">Note</th>
-                    <th className="border p-2 text-left w-40">Upload File</th>
-                    <th className="border p-2 text-left w-16">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {taskAssignments.map((assignment, index) => (
-                    <tr key={assignment.id} className={`${
-                      assignment.status === 'completed' ? 'bg-green-50' :
-                      assignment.status === 'in-progress' ? 'bg-yellow-50' : ''
-                    }`}>
-                      <td className="border p-2">{index + 1}</td>
-                      <td className="border p-2">
-                        <input
-                          type="text"
-                          value={assignment.timeType === 'leave' ? 'ลา' : assignment.relateDrawing}
-                          onChange={(e) => handleUpdateTask(assignment.id, { relateDrawing: e.target.value })}
-                          className={`border rounded p-1 w-full ${
-                            assignment.timeType === 'leave' ? 'bg-red-50 text-red-600' : ''
-                          }`}
-                          placeholder="ใส่ชื่องาน"
-                          readOnly={assignment.timeType === 'leave'}
-                        />
-                      </td>
-                      <td className="border p-2">
-                        <select
-                          value={assignment.timeType || 'normal'}
-                          onChange={(e) => {
-                            const newTimeType = e.target.value as TaskAssignment['timeType'];
-                            if (newTimeType === 'leave') {
-                              handleUpdateTask(assignment.id, {
-                                timeType: newTimeType,
-                                relateDrawing: 'ลา',
-                                workingHours: '-'
-                              });
-                              setCurrentTaskId(assignment.id);
-                              setShowLeavePopup(true);
-                            } else {
-                              handleUpdateTask(assignment.id, { 
-                                timeType: newTimeType,
-                                workingHours: '',
-                                leaveData: undefined,
-                                relateDrawing: ''
-                              });
-                            }
-                          }}
-                          className={`rounded p-1 w-full ${
-                            assignment.timeType === 'ot' ? 'bg-blue-50 text-blue-600' :
-                            assignment.timeType === 'leave' ? 'bg-red-50 text-red-600' :
-                            'bg-green-50 text-green-600'
-                          }`}
-                        >
-                          <option value="normal">เวลาปกติ</option>
-                          <option value="ot">เวลาโอที</option>
-                          <option value="leave">ลา</option>
-                        </select>
-                      </td>
-                      <td className="border p-2">
-                        {assignment.timeType !== 'leave' ? (
-                          <TimeSelector
-                            value={assignment.workingHours || ''}
-                            onChange={(value) => handleUpdateTask(assignment.id, { workingHours: value })}
-                            type={assignment.timeType === 'ot' ? 'ot' : 'normal'}
-                          />
-                        ) : (
-                          <span className="text-red-500">-</span>
-                        )}
-                      </td>
-                      <td className="border p-2">
-                        <div className="flex space-x-2">
-                          <select
-                            value={assignment.status}
-                            onChange={(e) => {
-                              const status = e.target.value as TaskAssignment['status'];
-                              handleUpdateTask(assignment.id, { status });
-                            }}
-                            className={`rounded p-1 flex-1 ${
-                              assignment.status === 'completed' ? 'bg-green-100' :
-                              assignment.status === 'in-progress' ? 'bg-yellow-100' :
-                              'bg-gray-100'
-                            }`}
-                          >
-                            <option value="pending">รอดำเนินการ</option>
-                            <option value="in-progress">กำลังดำเนินการ</option>
-                            <option value="completed">เสร็จสมบูรณ์</option>
-                          </select>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={parseInt(assignment.progress) || 0}
-                            onChange={(e) => {
-                              const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                              handleUpdateTask(assignment.id, { 
-                                progress: `${value}%`,
-                                status: value === 100 ? 'completed' : 
-                                        value === 0 ? 'pending' : 
-                                        'in-progress'
-                              });
-                            }}
-                            className="w-20 rounded p-1 border text-center"
-                            placeholder="0-100"
-                          />
-                          <span className="flex items-center">%</span>
-                        </div>
-                      </td>
-                      <td className="border p-2">
-                        <input
-                          type="text"
-                          value={assignment.note || ''}
-                          onChange={(e) => handleUpdateTask(assignment.id, { note: e.target.value })}
-                          className="border rounded p-1 w-full"
-                          placeholder="เพิ่มหมายเหตุ"
-                        />
-                      </td>
-                      <td className="border p-2">
-                        <div className="flex items-center justify-center">
-                          <input
-                            type="file"
-                            id={`file-${assignment.id}`}
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                // TODO: Implement file upload to Firebase Storage
-                                console.log('Uploading file:', file);
-                                // Show loading state
-                                handleUpdateTask(assignment.id, { isUploading: true });
-                                
-                                // Simulate upload delay (remove this in production)
-                                setTimeout(() => {
-                                  handleUpdateTask(assignment.id, { 
-                                    isUploading: false,
-                                    fileUrl: URL.createObjectURL(file),
-                                    fileName: file.name
-                                  });
-                                }, 1000);
-                              }
-                            }}
-                          />
-                          {parseInt(assignment.progress) === 100 ? (
-                            assignment.isUploading ? (
-                              <div className="flex items-center space-x-2 text-gray-500">
-                                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <span>กำลังอัพโหลด...</span>
-                              </div>
-                            ) : assignment.fileUrl ? (
-                              <div className="flex items-center space-x-2">
-                                <a 
-                                  href={assignment.fileUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:text-blue-800 underline text-sm truncate max-w-[150px]"
-                                >
-                                  {assignment.fileName}
-                                </a>
-                                <button
-                                  onClick={() => handleUpdateTask(assignment.id, { fileUrl: undefined, fileName: undefined })}
-                                  className="text-red-500 hover:text-red-700"
-                                  title="ลบไฟล์"
-                                >
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                </button>
-                              </div>
-                            ) : (
-                              <label
-                                htmlFor={`file-${assignment.id}`}
-                                className="bg-blue-100 text-blue-600 px-3 py-1 rounded hover:bg-blue-200 cursor-pointer"
-                              >
-                                Upload File
-                              </label>
-                            )
-                          ) : (
-                            <span className="text-gray-400">Progress ต้องถึง 100%</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="border p-2">
-                        <div className="flex justify-center">
-                          <button 
-                            onClick={() => handleDeleteTask(assignment.id)}
-                            className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded"
-                            title="ลบ"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
+              {loading && <p>Loading...</p>}
+              {error && <p className="mb-4 text-red-500 text-sm">{error}</p>}
+              {employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-orange-500 text-white">
+                      <th className="p-2 font-semibold text-left w-10">No</th>
+                      <th className="p-2 font-semibold text-left w-1/3">Relate Drawing</th>
+                      <th className="p-2 font-semibold text-left">เวลาทำงาน / Working Hours</th>
+                      <th className="p-2 font-semibold text-left">เวลาโอที / Overtime</th>
+                      <th className="p-2 font-semibold text-left">Progress</th>
+                      <th className="p-2 font-semibold text-left">Note</th>
+                      <th className="p-2 font-semibold text-left">Upload File</th>
+                      <th className="p-2 font-semibold text-center w-16">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {dailyReportEntries.map((entry, index) => (
+                        <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
+                          <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
+                          <td className="p-2 border-r border-yellow-200">
+                             <SubtaskAutocomplete
+                                entryId={entry.id}
+                                value={entry.subtaskId}
+                                options={availableSubtasks}
+                                allProjects={allProjects}
+                                onChange={handleRelateDrawingChange}
+                                onFocus={() => handleRowFocus(entry.id, index)}
+                                disabled={isReadOnly}
+                              />
+                          </td>
+                          <td className="p-2 border-r border-yellow-200">
+                            <div className="flex items-center gap-1">
+                                <Select 
+                                  value={String((entry.normalWorkingHours || '0:0').split(':')[0])} 
+                                  onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} 
+                                  options={hourOptions} 
+                                  disabled={isReadOnly} 
+                                />
+                                <Select 
+                                  value={String((entry.normalWorkingHours || '0:0').split(':')[1])} 
+                                  onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'm', value)} 
+                                  options={minuteOptions} 
+                                  disabled={isReadOnly} 
+                                />
+                            </div>
+                          </td>
+                           <td className="p-2 border-r border-yellow-200">
+                            <div className="flex items-center gap-1">
+                                <Select 
+                                  value={String((entry.otWorkingHours || '0:0').split(':')[0])} 
+                                  onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} 
+                                  options={hourOptions} 
+                                  disabled={isReadOnly}
+                                />
+                                <Select 
+                                  value={String((entry.otWorkingHours || '0:0').split(':')[1])} 
+                                  onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} 
+                                  options={minuteOptions} 
+                                  disabled={isReadOnly}
+                                />
+                            </div>
+                          </td>
+                          <td className="p-2 border-r border-yellow-200">
+                            <div className="flex items-center gap-1">
+                              <input type="number" min="0" max="100" value={parseInt(entry.progress, 10) || 0} onChange={(e) => handleUpdateEntry(entry.id, { progress: `${e.target.value}%` })} className="w-14 p-1 border border-gray-300 rounded-md text-center text-xs text-gray-900" disabled={isReadOnly}/>
+                              <span className="text-gray-800">%</span>
+                            </div>
+                          </td>
+                          <td className="p-2 border-r border-yellow-200"><input type="text" value={entry.note || ''} onChange={(e) => handleUpdateEntry(entry.id, { note: e.target.value })} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900" placeholder="เพิ่มหมายเหตุ" disabled={isReadOnly}/></td>
+                          <td className="p-2 border-r border-yellow-200 text-center text-gray-500">Progress<br/>ต้องถึง 100%</td>
+                          <td className="p-2 text-center">
+                            <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100" title="ลบ" disabled={isReadOnly}>
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
 
-            <div className="mt-4 flex justify-between">
-              <button
-                type="button"
-                className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600"
-                onClick={() => {
-                  const newTask: TaskAssignment = {
-                    id: `temp-${Date.now()}`, // temporary ID until saved to Firebase
-                    relateDrawing: '',
-                    employeeId: employeeId || '',
-                    assignDate: new Date().toISOString().split('T')[0],
-                    time: '',
-                    workingHours: '',
-                    progress: '0%',
-                    note: '',
-                    status: 'pending'
-                  };
-                  setTaskAssignments([...taskAssignments, newTask]);
-                }}
-                disabled={!employeeId}
-              >
-                Add Row
-              </button>
-              <button
-                type="submit"
-                className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
-                onClick={handleSubmit}
-              >
-                Submit
-              </button>
+              <div className="mt-4 flex justify-between items-center">
+                  <button type="button" onClick={handleAddRow} className="bg-orange-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-orange-600 text-sm" disabled={isReadOnly}>Add Row</button>
+                  <button type="button" onClick={handleSubmit} className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-2 px-6 rounded-md hover:from-blue-700 hover:to-purple-700" disabled={isReadOnly}>Submit</button>
+              </div>
             </div>
           </div>
         </div>
       </div>
-      
       <RecheckPopup 
         isOpen={isRecheckOpen}
         onClose={() => setIsRecheckOpen(false)}
         onConfirm={handleConfirmSubmit}
-        taskAssignments={taskAssignments.filter(task => task.assignDate === workDate)}
+        dailyReportEntries={dailyReportEntries}
         workDate={workDate}
-        onEdit={() => {
-          // เมื่อกดปุ่ม Edit จะโหลดข้อมูลของวันที่เลือกมาแสดงในฟอร์ม
-          const dateData = taskAssignments.filter(task => task.assignDate === workDate);
-          if (dateData.length > 0) {
-            setTaskAssignments(dateData);
-          }
-        }}
       />
-      
-      <LeavePopup
-        isOpen={showLeavePopup}
-        onClose={() => {
-          setShowLeavePopup(false);
-          if (currentTaskId) {
-            handleUpdateTask(currentTaskId, {
-              timeType: 'normal',
-              leaveData: undefined
-            });
-          }
-        }}
-        onSubmit={(leaveData) => {
-          if (currentTaskId) {
-            handleUpdateTask(currentTaskId, {
-              timeType: 'leave',
-              leaveData,
-              workingHours: leaveData.leaveHours
-            });
-            setShowLeavePopup(false);
-          }
-        }}
-      />
-    </div>
+    </PageLayout>
   );
 }

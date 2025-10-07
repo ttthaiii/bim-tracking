@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TaskAssignment } from '@/services/taskAssignService';
+import { DailyReportEntry } from '@/types/database';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 
@@ -10,7 +10,7 @@ interface RecheckPopupProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: () => void;
-  taskAssignments: TaskAssignment[];
+  dailyReportEntries: DailyReportEntry[];
   workDate: string;
   onEdit?: () => void;
 }
@@ -19,7 +19,7 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   isOpen,
   onClose,
   onConfirm,
-  taskAssignments,
+  dailyReportEntries,
   workDate,
   onEdit
 }) => {
@@ -39,14 +39,14 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
 
   // คำนวณชั่วโมงรวม
   const calculateTotalHours = () => {
-    return taskAssignments.reduce((total, task) => {
+    return dailyReportEntries.reduce((total, task) => {
       let sum = 0;
-      if (task.workingHours && task.workingHours !== '-') {
-        const [hours, minutes] = task.workingHours.split(':').map(Number);
+      if (task.normalWorkingHours && task.normalWorkingHours !== '-') {
+        const [hours, minutes] = task.normalWorkingHours.split(':').map(Number);
         sum += hours + (minutes / 60);
       }
-      if (task.overtimeHours && task.overtimeHours !== '-') {
-        const [hours, minutes] = task.overtimeHours.split(':').map(Number);
+      if (task.otWorkingHours && task.otWorkingHours !== '-') {
+        const [hours, minutes] = task.otWorkingHours.split(':').map(Number);
         sum += hours + (minutes / 60);
       }
       return total + sum;
@@ -233,15 +233,15 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {taskAssignments.map((task, index) => (
+                {dailyReportEntries.map((task, index) => (
                   <tr key={task.id} className="hover:bg-gradient-to-r hover:from-orange-50 hover:to-amber-50 transition-all duration-200">
-                    <td className="border border-orange-200 p-4 text-center text-lg">{index + 1}</td>
-                    <td className="border border-orange-200 p-4 text-lg">{task.relateDrawing}</td>
-                    <td className="border border-orange-200 p-4 text-center text-lg">
-                      {task.workingHours || '-'}
+                    <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">{index + 1}</td>
+                    <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.relateDrawing}</td>
+                    <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">
+                      {task.normalWorkingHours || '-'}
                     </td>
-                    <td className="border border-orange-200 p-4 text-center text-lg">
-                      {task.overtimeHours || '-'}
+                    <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">
+                      {task.otWorkingHours || '-'}
                     </td>
                     <td className="border border-orange-200 p-4">
                       <div className={`text-center rounded-full py-2 px-3 text-lg font-medium shadow-sm ${
@@ -254,24 +254,24 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
                         {task.progress}
                       </div>
                     </td>
-                    <td className="border border-orange-200 p-4 text-lg">{task.note || '-'}</td>
+                    <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.note || '-'}</td>
                   </tr>
                 ))}
                 <tr className="bg-gradient-to-r from-orange-100 to-amber-100 font-semibold border-t-2 border-orange-300">
                   <td colSpan={2} className="border border-orange-200 p-4 text-right text-lg text-orange-800">รวมชั่วโมงทั้งหมด:</td>
                   <td className="border border-orange-200 p-4 text-center text-lg text-orange-800">
-                    {taskAssignments.reduce((total, task) => {
-                      if (task.workingHours && task.workingHours !== '-') {
-                        const [hours, minutes] = task.workingHours.split(':').map(Number);
+                    {dailyReportEntries.reduce((total, task) => {
+                      if (task.normalWorkingHours && task.normalWorkingHours !== '-') {
+                        const [hours, minutes] = task.normalWorkingHours.split(':').map(Number);
                         return total + hours + (minutes / 60);
                       }
                       return total;
                     }, 0).toFixed(2)} ชั่วโมง
                   </td>
                   <td className="border border-orange-200 p-4 text-center text-lg text-orange-800">
-                    {taskAssignments.reduce((total, task) => {
-                      if (task.overtimeHours && task.overtimeHours !== '-') {
-                        const [hours, minutes] = task.overtimeHours.split(':').map(Number);
+                    {dailyReportEntries.reduce((total, task) => {
+                      if (task.otWorkingHours && task.otWorkingHours !== '-') {
+                        const [hours, minutes] = task.otWorkingHours.split(':').map(Number);
                         return total + hours + (minutes / 60);
                       }
                       return total;
@@ -305,4 +305,4 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
     </div>
     </>
   );
-};
+}
