@@ -27,24 +27,22 @@ export default function Select({
   return (
     <div className={`relative ${className}`}>
       <select
-        value={value}
+        value={value || ''} // เพิ่ม || '' เพื่อป้องกัน undefined
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled || loading}
         className={`
           w-full px-3 py-2 
           bg-white border border-gray-300 rounded-md 
-          text-sm text-gray-900
+          text-sm ${value ? 'text-gray-900' : 'text-gray-500'}
           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
           disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed
           appearance-none
           ${className}
         `}
       >
-        <option value="" disabled>
-          {loading ? 'Loading...' : placeholder}
-        </option>
-        {options.map((option, index) => (
-          <option key={`${option.value}-${index}`} value={option.value}>
+        <option value="">{loading ? 'Loading...' : placeholder}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, setDoc, doc, Timestamp, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import Navbar from '@/components/shared/Navbar';
@@ -27,8 +27,8 @@ interface SubtaskRow {
   relateDrawingName: string;
   activity: string;
   relateWork: string;
-  item: string | null;  // เพิ่ม | null
-  internalRev: number | null;  // เพิ่ม | null
+  item: string | null;
+  internalRev: number | null;
   workScale: string;
   assignee: string;
   deadline: string;
@@ -68,7 +68,7 @@ export default function TaskAssignment() {
       activity: '',
       relateWork: '',
       item: '',
-      internalRev: null, // เปลี่ยนจาก 1 เป็น null
+      internalRev: null,
       workScale: 'S',
       assignee: '',
       deadline: '',
@@ -79,11 +79,9 @@ export default function TaskAssignment() {
   useEffect(() => {
     const loadAllData = async () => {
       try {
-        // 1. โหลด projects
         const projectList = await getCachedProjects(getCache, setCache);
         setProjects(projectList);
 
-        // 2. โหลด tasks ของทุก project
         const allTasks: Record<string, TaskItem[]> = {};
         await Promise.all(
           projectList.map(async (project) => {
@@ -92,7 +90,6 @@ export default function TaskAssignment() {
           })
         );
 
-        // 3. โหลด subtasks ของทุก project
         const allSubtasks: Record<string, ExistingSubtask[]> = {};
         await Promise.all(
           projectList.map(async (project) => {
@@ -106,7 +103,6 @@ export default function TaskAssignment() {
           })
         );
 
-        // เก็บข้อมูลทั้งหมดใน Cache
         setCache('allProjectData', { projects: projectList, tasks: allTasks, subtasks: allSubtasks }, Infinity);
 
       } catch (error) {
@@ -117,7 +113,7 @@ export default function TaskAssignment() {
     };
 
     loadAllData();
-  }, []); // รันครั้งเดียวตอนโหลดหน้าแรก
+  }, []);
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -147,7 +143,7 @@ export default function TaskAssignment() {
           activity: '',
           relateWork: '',
           item: '',
-          internalRev: null, // เปลี่ยนจาก 1 เป็น null
+          internalRev: null,
           workScale: 'S',
           assignee: '',
           deadline: '',
@@ -172,7 +168,7 @@ export default function TaskAssignment() {
           activity: '',
           relateWork: '',
           item: '',
-          internalRev: null, // เปลี่ยนจาก 1 เป็น null
+          internalRev: null,
           workScale: 'S',
           assignee: '',
           deadline: '',
@@ -187,66 +183,56 @@ export default function TaskAssignment() {
     fetchProjectData();
   }, [selectedProject, getCache, setCache]);
 
-  const checkAndAddNewRow = (updatedRows: SubtaskRow[]) => {
-    const lastRow = updatedRows[updatedRows.length - 1];
-    
-    const hasRequiredFields = 
-      lastRow.relateDrawing !== '' &&
-      lastRow.relateWork !== '' &&
-      lastRow.workScale !== '' &&
-      lastRow.assignee !== '';
-
-    if (hasRequiredFields) {
-      const newId = String(parseInt(lastRow.id) + 1);
-      const newRow: SubtaskRow = {
-        id: newId,
-        subtaskId: '',
-        relateDrawing: '',
-        relateDrawingName: '',
-        activity: '',
-        relateWork: '',
-        item: '',
-        internalRev: null, // เปลี่ยนจาก 1 เป็น null
-        workScale: 'S',
-        assignee: '',
-        deadline: '',
-        progress: 0
-      };
-      return [...updatedRows, newRow];
-    }
-
-    return updatedRows;
-  };
-
-  // แก้ไขฟังก์ชัน updateRow
+  // ✅ แก้ไขฟังก์ชัน updateRow พร้อม Debug Logs
   const updateRow = (id: string, field: keyof SubtaskRow, value: any) => {
+    console.log('🔄 updateRow called:', { id, field, value });
+    
     setRows(prevRows => {
-      // 1. อัพเดทข้อมูลในแถวที่ต้องการ
+      console.log('📊 Previous rows:', prevRows);
+      
       let updatedRows = prevRows.map(row => {
         if (row.id !== id) return row;
         
         const updatedRow = { ...row };
+        
         if (field === 'activity') {
+          console.log('✅ Setting activity to:', value);
           updatedRow.activity = value;
           updatedRow.relateWork = '';
           updatedRow.relateDrawing = '';
           updatedRow.relateDrawingName = '';
         } else if (field === 'relateDrawing') {
           const task = tasks.find(t => t.id === value);
+          console.log('✅ Setting relateDrawing:', { value, taskName: task?.taskName });
           updatedRow.relateDrawing = value;
           updatedRow.relateDrawingName = task?.taskName || '';
         } else {
           updatedRow[field] = value;
         }
+        
+        console.log('✅ Updated row:', updatedRow);
         return updatedRow;
       });
 
-      // 2. เช็คว่าต้องเพิ่มแถวใหม่หรือไม่
       const lastRow = updatedRows[updatedRows.length - 1];
-      if (lastRow.relateDrawing && 
-          lastRow.relateWork && 
-          lastRow.workScale && 
-          lastRow.assignee) {
+      const shouldAddNewRow = 
+        lastRow.relateDrawing && 
+        lastRow.relateWork && 
+        lastRow.workScale && 
+        lastRow.assignee;
+      
+      console.log('🔍 Check add new row:', { 
+        shouldAddNewRow,
+        lastRow: {
+          relateDrawing: lastRow.relateDrawing,
+          relateWork: lastRow.relateWork,
+          workScale: lastRow.workScale,
+          assignee: lastRow.assignee
+        }
+      });
+      
+      if (shouldAddNewRow) {
+        console.log('➕ Adding new row');
         updatedRows = [...updatedRows, {
           id: String(parseInt(lastRow.id) + 1),
           subtaskId: '',
@@ -263,6 +249,7 @@ export default function TaskAssignment() {
         }];
       }
 
+      console.log('📊 Final rows:', updatedRows);
       return updatedRows;
     });
   };
@@ -312,20 +299,16 @@ export default function TaskAssignment() {
     );
   };
 
-  // 2. เพิ่มฟังก์ชัน generateSubTaskNumber
   const generateSubTaskNumber = async (taskId: string) => {
     try {
-      // ดึง task number จาก task หลัก
       const taskDoc = await getDoc(doc(db, 'tasks', taskId));
       const taskNumber = taskDoc.data()?.taskNumber;
 
       if (!taskNumber) return null;
 
-      // ดึง subtasks ทั้งหมดของ task นี้
       const subtasksRef = collection(db, 'tasks', taskId, 'subtasks');
       const subtasksSnapshot = await getDocs(subtasksRef);
       
-      // หาเลขลำดับถัดไป
       const currentSubtasks = subtasksSnapshot.docs.map(doc => doc.data().subTaskNumber);
       let maxRunningNumber = 0;
 
@@ -340,7 +323,6 @@ export default function TaskAssignment() {
         }
       });
 
-      // สร้างเลขใหม่
       const nextRunningNumber = maxRunningNumber + 1;
       const paddedNumber = nextRunningNumber.toString().padStart(2, '0');
       
@@ -351,7 +333,6 @@ export default function TaskAssignment() {
     }
   };
 
-  // ปรับปรุงฟังก์ชัน handleConfirmSave
   const handleConfirmSave = async () => {
     setIsSaving(true);
     try {
@@ -367,7 +348,6 @@ export default function TaskAssignment() {
           continue;
         }
 
-        // ใช้ subTaskNumber เป็น Document ID
         await setDoc(doc(db, 'tasks', row.relateDrawing, 'subtasks', subTaskNumber), {
           subTaskNumber,
           taskName: row.relateWork,
@@ -393,7 +373,7 @@ export default function TaskAssignment() {
         activity: '',
         relateWork: '',
         item: '',
-        internalRev: null, // เปลี่ยนจาก 1 เป็น null
+        internalRev: null,
         workScale: 'S',
         assignee: '',
         deadline: '',
@@ -408,9 +388,19 @@ export default function TaskAssignment() {
     }
   };
 
-  const uniqueCategories = Array.from(new Set(tasks.map(t => t.taskCategory).filter(c => c)));
+  // ✅ Memoize uniqueCategories
+  const uniqueCategories = useMemo(() => {
+    return Array.from(new Set(tasks.map(t => t.taskCategory).filter(c => c)));
+  }, [tasks]);
 
-  // ปรับปรุง handleProjectChange ให้ใช้ข้อมูลจาก Cache
+  // ✅ Memoize categoryOptions
+  const categoryOptions = useMemo(() => {
+    return uniqueCategories.map(cat => ({ 
+      value: cat,
+      label: cat 
+    }));
+  }, [uniqueCategories]);
+
   const handleProjectChange = async (projectId: string) => {
     setSelectedProject(projectId);
     
@@ -427,10 +417,8 @@ export default function TaskAssignment() {
     }
   };
 
-  // เพิ่มฟังก์ชัน deleteRow ก่อน return
   const deleteRow = (id: string) => {
     setRows(prevRows => {
-      // ถ้าเหลือแถวเดียว ให้เคลียร์ข้อมูลแทนที่จะลบ
       if (prevRows.length === 1) {
         return [{
           id: '1',
@@ -447,12 +435,10 @@ export default function TaskAssignment() {
           progress: 0
         }];
       }
-      // ลบแถวที่ต้องการ
       return prevRows.filter(row => row.id !== id);
     });
   };
 
-  // แก้ไขส่วนของ return JSX ในส่วนของตาราง
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <Navbar />
@@ -506,12 +492,13 @@ export default function TaskAssignment() {
                       </td>
                       <td className="px-2 py-2">
                         <Select
-                          options={uniqueCategories.map(cat => ({ 
-                            value: cat,
-                            label: cat 
-                          }))}
+                          key={`activity-${row.id}-${row.activity}`}
+                          options={categoryOptions}
                           value={row.activity}
-                          onChange={(value) => updateRow(row.id, 'activity', value)}
+                          onChange={(value) => {
+                            console.log('🎯 Activity onChange:', value);
+                            updateRow(row.id, 'activity', value);
+                          }}
                           placeholder="Select"
                           disabled={!selectedProject}
                         />
@@ -519,7 +506,7 @@ export default function TaskAssignment() {
                       <td className="px-2 py-2">
                         <Select
                           options={tasks
-                            .filter(t => !row.activity || t.taskCategory === row.activity)  // เพิ่มการ filter ตาม activity
+                            .filter(t => !row.activity || t.taskCategory === row.activity)
                             .map(t => ({ 
                               value: t.id,
                               label: t.taskName 
@@ -527,7 +514,7 @@ export default function TaskAssignment() {
                           value={row.relateDrawing}
                           onChange={(value) => updateRow(row.id, 'relateDrawing', value)}
                           placeholder="Select"
-                          disabled={!selectedProject || !row.activity}  // เพิ่มเงื่อนไข disable ถ้ายังไม่เลือก activity
+                          disabled={!selectedProject || !row.activity}
                         />
                       </td>
                       <td className="px-2 py-2">
@@ -540,21 +527,21 @@ export default function TaskAssignment() {
                       <td className="px-2 py-2">
                         <input
                           type="text"
-                          value={row.item || ''}  // เพิ่ม || '' เพื่อให้เป็นค่าว่างถ้าไม่มีข้อมูล
+                          value={row.item || ''}
                           onChange={(e) => updateRow(row.id, 'item', e.target.value)}
                           placeholder="Item"
-                          className="w-full px-1 py-1 border border-gray-300 rounded text-xs text-gray-900"  // เพิ่ม text-gray-900 สำหรับสีดำ
+                          className="w-full px-1 py-1 border border-gray-300 rounded text-xs text-gray-900"
                         />
                       </td>
                       <td className="px-2 py-2 text-center">
                         <input
                           type="number"
-                          value={row.internalRev || ''}  // เพิ่ม || '' เพื่อให้เป็นค่าว่างถ้าไม่มีข้อมูล
+                          value={row.internalRev || ''}
                           onChange={(e) => {
-                            const val = e.target.value ? parseInt(e.target.value) : '';  // ปรับการแปลงค่า
+                            const val = e.target.value ? parseInt(e.target.value) : '';
                             updateRow(row.id, 'internalRev', val);
                           }}
-                          className="w-full px-1 py-1 border border-gray-300 rounded text-center text-xs text-gray-900"  // เพิ่ม text-gray-900
+                          className="w-full px-1 py-1 border border-gray-300 rounded text-center text-xs text-gray-900"
                           min="1"
                         />
                       </td>
@@ -652,13 +639,11 @@ export default function TaskAssignment() {
                       </td>
                       <td className="px-2 py-2">
                         <div className="flex items-center space-x-2">
-                          {/* ไอคอนวงกลมแสดงตัวอักษรแรก */}
                           <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center">
                             <span className="text-xs font-medium text-white">
                               {subtask.subTaskAssignee?.charAt(0).toUpperCase()}
                             </span>
                           </div>
-                          {/* แสดงชื่อเต็ม */}
                           <span className="text-xs text-gray-900">
                             {subtask.subTaskAssignee}
                           </span>
