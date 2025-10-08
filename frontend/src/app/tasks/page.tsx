@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
 import ProgressBar from '@/components/ui/ProgressBar';
 import Modal from '@/components/ui/Modal';
+import SuccessModal from '@/components/ui/SuccessModal';
 import RelateWorkSelect from './components/RelateWorkSelect';
 import AssigneeSelect from './components/AssigneeSelect';
 import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
@@ -58,7 +59,9 @@ export default function TaskAssignment() {
   const [existingSubtasks, setExistingSubtasks] = useState<ExistingSubtask[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successNewCount, setSuccessNewCount] = useState(0);
+  const [successUpdateCount, setSuccessUpdateCount] = useState(0);
   const [rows, setRows] = useState<SubtaskRow[]>([
     {
       id: '1',
@@ -230,47 +233,98 @@ export default function TaskAssignment() {
   }, [selectedProject, getCache, setCache]);
 
   const updateRow = (id: string, field: keyof SubtaskRow, value: any): void => {
-    console.log('🔄 updateRow called:', { id, field, value });
+  console.log('🔄 updateRow called:', { id, field, value });
 
-    setRows((prevRows: SubtaskRow[]): SubtaskRow[] => {
-      // Only update if we find the row
-      const rowIndex = prevRows.findIndex(r => r.id === id);
-      if (rowIndex === -1) return prevRows;
+  setRows((prevRows: SubtaskRow[]): SubtaskRow[] => {
+    const rowIndex = prevRows.findIndex(r => r.id === id);
+    if (rowIndex === -1) {
+      console.warn('⚠️ Row not found:', id);
+      return prevRows;
+    }
 
-      // Create new array with updated row
-      const newRows = [...prevRows];
-      const updatedRow = { ...newRows[rowIndex] };
+    const currentRow = prevRows[rowIndex];
 
-      // Update the field
-      if (field === 'activity' && updatedRow.activity !== value) {
-        updatedRow.activity = value;
-        updatedRow.relateWork = '';
-        updatedRow.relateDrawing = '';
-        updatedRow.relateDrawingName = '';
-      } else if (field === 'relateDrawing') {
-        const task = tasks.find(t => t.id === value);
-        updatedRow.relateDrawing = value;
-        updatedRow.relateDrawingName = task?.taskName || '';
-      } else {
-        (updatedRow as any)[field] = value;
+    if ((currentRow as any)[field] === value) {
+      console.log('⏭️ Skip update - value unchanged');
+      return prevRows;
+    }
+    // 🆕 Guard: ถ้าค่าเดิมเท่ากับค่าใหม่ → skip
+    if ((currentRow as any)[field] === value) {
+      console.log('⏭️ Skip update - value unchanged');
+      return prevRows;
+    }
+
+    const newRows = [...prevRows];
+    const updatedRow = { ...currentRow };
+
+    // Update the field
+    if (field === 'activity') {
+      console.log('📝 Activity changed from', updatedRow.activity, 'to', value);
+      updatedRow.activity = value;
+      
+      // รีเซ็ตเฉพาะเมื่อเปลี่ยนค่าจริงๆ
+      updatedRow.relateWork = '';
+      updatedRow.relateDrawing = '';
+      updatedRow.relateDrawingName = '';
+      updatedRow.assignee = '';
+      
+    } else if (field === 'relateDrawing') {
+      const task = tasks.find(t => t.id === value);
+      updatedRow.relateDrawing = value;
+      updatedRow.relateDrawingName = task?.taskName || '';
+      
+      console.log('📝 Relate Drawing changed:', {
+        taskId: value,
+        taskName: task?.taskName
+      });
+      
+      // เช็คเงื่อนไขพิเศษ
+      const selectedProjectData = projects.find(p => p.id === selectedProject);
+      const projectName = selectedProjectData?.name || '';
+      
+      if (
+        projectName === "Bim room" &&
+        updatedRow.activity === "ลางาน" &&
+        (task?.taskName || '') === "ลางาน"
+      ) {
+        console.log('🎯 Special Leave Case - Auto-fill assignee as "all"');
+        updatedRow.assignee = 'all';
       }
+      
+    } else {
+      (updatedRow as any)[field] = value;
+    }
 
-      // Replace the old row with updated one
-      newRows[rowIndex] = updatedRow;
+    newRows[rowIndex] = updatedRow;
 
-      // Check if this is the last row and all required fields are filled
-      if (rowIndex === prevRows.length - 1 &&
-          updatedRow.activity &&
-          updatedRow.relateDrawing &&
-          updatedRow.relateWork &&
-          updatedRow.workScale &&
-          updatedRow.assignee) {
+    console.log('✅ Updated row:', {
+      id: updatedRow.id,
+      activity: updatedRow.activity,
+      relateDrawing: updatedRow.relateDrawingName,
+      relateWork: updatedRow.relateWork,
+      assignee: updatedRow.assignee
+    });
+
+    // เช็คว่าควรเพิ่มแถวใหม่หรือไม่
+    const isLastRow = rowIndex === prevRows.length - 1;
+    const hasBasicFields = 
+      updatedRow.activity &&
+      updatedRow.relateDrawing &&
+      updatedRow.relateWork &&
+      updatedRow.workScale;
+    const hasAssignee = updatedRow.assignee || isSpecialLeaveCase(updatedRow);
+    const isRowComplete = hasBasicFields && hasAssignee;
+    
+    if (isLastRow && isRowComplete) {
+      const hasEmptyRow = newRows.some(row => 
+        !row.activity && !row.relateDrawing && !row.relateWork
+      );
+      
+      if (!hasEmptyRow) {
+        console.log('➕ Adding new empty row');
         
-        console.log('✅ Adding new row after complete row');
-        
-        // Add new empty row
         newRows.push({
-          id: String(parseInt(id) + 1),
+          id: String(Date.now()),
           subtaskId: '',
           relateDrawing: '',
           relateDrawingName: '',
@@ -284,10 +338,11 @@ export default function TaskAssignment() {
           progress: 0
         });
       }
+    }
 
-      return newRows;
-    });
-  };
+    return newRows;
+  });
+};
 
   const validateRows = (): { valid: boolean; message?: string } => {
     const filledRows = rows.filter(row => 
@@ -312,12 +367,17 @@ export default function TaskAssignment() {
         return { valid: false, message: 'กรุณาเลือก Work Scale' };
       }
       if (!row.assignee) {
+      // เช็คว่าเป็นกรณีพิเศษหรือไม่
+      const isSpecial = isSpecialLeaveCase(row);
+      if (!isSpecial) {
         return { valid: false, message: 'กรุณาเลือก Assignee' };
       }
+    }
     }
 
     return { valid: true };
   };
+  
 
   const handleShowConfirmation = () => {
     const validation = validateRows();
@@ -329,10 +389,15 @@ export default function TaskAssignment() {
   };
 
   const getValidRows = () => {
-    return rows.filter(row => 
-      row.activity && row.relateDrawing && row.relateWork && row.workScale && row.assignee
-    );
-  };
+  return rows.filter(row => {
+    const hasBasicFields = row.activity && row.relateDrawing && row.relateWork && row.workScale;
+    
+    // 🆕 กรณีพิเศษ: ถ้า assignee = "all" ก็ถือว่า valid
+    const hasAssignee = row.assignee || isSpecialLeaveCase(row);
+    
+    return hasBasicFields && hasAssignee;
+  });
+};
 
   const generateSubTaskNumber = async (taskId: string) => {
     try {
@@ -389,6 +454,9 @@ export default function TaskAssignment() {
           console.error('Failed to generate subTaskNumber');
           continue;
         }
+        
+        // 🆕 เพิ่มบรรทัดนี้ก่อน docData
+        const finalAssignee = isSpecialLeaveCase(row) ? 'all' : row.assignee;
 
         const docData = {
           // ข้อมูลที่ต้องเก็บค่า
@@ -399,7 +467,7 @@ export default function TaskAssignment() {
           subTaskName: row.relateWork,         // จาก Relate Work
           subTaskCategory: row.relateWork,     // จาก Relate Work
           subTaskScale: row.workScale,         // จาก Work Scale
-          subTaskAssignee: row.assignee,       // จาก Assignee
+          subTaskAssignee: finalAssignee,       // จาก Assignee
           item: row.item || null,              // จาก Item
           internalRev: row.internalRev || null, // จาก Internal Rev.
 
@@ -420,6 +488,9 @@ export default function TaskAssignment() {
         
         await setDoc(doc(db, 'tasks', row.relateDrawing, 'subtasks', subTaskNumber), docData);
       }
+            // 🆕 เก็บจำนวนรายการที่บันทึก
+      const newItemsCount = rowsToSave.length;
+      const updateItemsCount = 0; // อนาคตจะนับจากการแก้ไข existing subtasks
 
       setShowConfirmModal(false);
       setRows([{
@@ -436,7 +507,10 @@ export default function TaskAssignment() {
         deadline: '',
         progress: 0
       }]);
-      alert('บันทึกข้อมูลสำเร็จ');
+      // 🆕 แสดง Success Modal
+      setSuccessNewCount(newItemsCount);
+      setSuccessUpdateCount(updateItemsCount);
+      setShowSuccessModal(true);
     } catch (error) {
       console.error('Error saving subtasks:', error);
       alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
@@ -444,6 +518,13 @@ export default function TaskAssignment() {
       setIsSaving(false);
     }
   };
+    // 🆕 เพิ่ม function ใหม่ตรงนี้
+      const handleCloseSuccessModal = () => {
+        setShowSuccessModal(false);
+        setSuccessNewCount(0);
+        setSuccessUpdateCount(0);
+  };
+  
 
   // ✅ Memoize uniqueCategories
   const uniqueCategories = useMemo(() => {
@@ -501,6 +582,17 @@ export default function TaskAssignment() {
     });
   };
 
+    // 🆕 เพิ่มตรงนี้ (บรรทัด 503)
+  const isSpecialLeaveCase = (row: SubtaskRow): boolean => {
+    const selectedProjectData = projects.find(p => p.id === selectedProject);
+    const projectName = selectedProjectData?.name || '';
+    
+    return (
+      projectName === "Bim room" &&
+      row.activity === "ลางาน" &&
+      row.relateDrawingName === "ลางาน"
+    );
+  };
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <Navbar />
@@ -620,12 +712,18 @@ export default function TaskAssignment() {
                           onChange={(value) => updateRow(row.id, 'workScale', value)}
                         />
                       </td>
-                      <td className="px-2 py-2">
-                        <AssigneeSelect
-                          value={row.assignee}
-                          onChange={(value) => updateRow(row.id, 'assignee', value)}
-                        />
-                      </td>
+                       <td className="px-2 py-2">
+  {isSpecialLeaveCase(row) ? (
+    <div className="px-3 py-2 bg-gray-100 border border-gray-300 rounded text-sm text-gray-900">
+      all
+    </div>
+  ) : (
+    <AssigneeSelect
+      value={row.assignee}
+      onChange={(value) => updateRow(row.id, 'assignee', value)}
+    />
+  )}
+</td>
                       <td className="px-2 py-2">
                         <input
                           type="text"
@@ -820,6 +918,12 @@ export default function TaskAssignment() {
           </div>
         </div>
       </Modal>
+            <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={handleCloseSuccessModal}
+        newCount={successNewCount}
+        updateCount={successUpdateCount}
+      />
     </div>
   );
 }

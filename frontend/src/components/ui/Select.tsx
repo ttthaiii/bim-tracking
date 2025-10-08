@@ -15,7 +15,7 @@ interface SelectProps {
   className?: string;
 }
 
-export default function Select({
+function Select({
   options,
   value,
   onChange,
@@ -24,11 +24,19 @@ export default function Select({
   loading = false,
   className = ''
 }: SelectProps) {
+  // 🆕 เพิ่ม guard เพื่อป้องกัน double call
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newValue = e.target.value;
+    if (newValue !== value) {  // ⬅️ เช็คก่อนเรียก onChange
+      onChange(newValue);
+    }
+  };
+
   return (
     <div className={`relative ${className}`}>
       <select
-        value={value || ''} // เพิ่ม || '' เพื่อป้องกัน undefined
-        onChange={(e) => onChange(e.target.value)}
+        value={value || ''}
+        onChange={handleChange}  // ⬅️ ใช้ handleChange แทน
         disabled={disabled || loading}
         className={`
           w-full px-3 py-2 
@@ -66,3 +74,13 @@ export default function Select({
     </div>
   );
 }
+
+// 🆕 ใช้ React.memo เพื่อป้องกัน unnecessary re-render
+export default React.memo(Select, (prevProps, nextProps) => {
+  return (
+    prevProps.value === nextProps.value &&
+    prevProps.disabled === nextProps.disabled &&
+    prevProps.loading === nextProps.loading &&
+    prevProps.options.length === nextProps.options.length
+  );
+});

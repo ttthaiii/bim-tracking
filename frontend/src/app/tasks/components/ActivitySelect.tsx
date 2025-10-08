@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Select, { SelectOption } from '@/components/ui/Select';
 import { getActivities } from '@/lib/relateWorks';
 
@@ -34,11 +34,18 @@ export default function ActivitySelect({
     fetchActivities();
   }, []);
 
+  // Memoized onChange handler
+  const handleChange = useCallback((newValue: string) => {
+    if (newValue !== value) {
+      onChange(newValue);
+    }
+  }, [value, onChange]);
+
   return (
     <Select
       options={activities}
       value={value}
-      onChange={onChange}
+      onChange={handleChange}
       placeholder="Select Activity"
       disabled={disabled}
       loading={loading}

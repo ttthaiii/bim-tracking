@@ -1,6 +1,11 @@
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 
+// 🆕 เพิ่ม Rate Limiting
+let cacheCallCount = 0;
+const MAX_CACHE_CALLS_PER_SECOND = 20;
+let lastResetTime = Date.now();
+
 export const generateCacheKey = (collectionName: string, filters?: Record<string, any>): string => {
   if (!filters) return collectionName;
   const filterStr = Object.entries(filters)
@@ -16,8 +21,22 @@ export async function cachedQuery<T>(
   setCache: <T>(key: string, data: T) => void,
   queryFn: () => Promise<T>
 ): Promise<T> {
+  // 🆕 Rate Limiting
+  const now = Date.now();
+  if (now - lastResetTime > 1000) {
+    cacheCallCount = 0;
+    lastResetTime = now;
+  }
+  
+  cacheCallCount++;
+  
+  if (cacheCallCount > MAX_CACHE_CALLS_PER_SECOND) {
+    console.warn(`⚠️ Cache call rate limit reached (${cacheCallCount} calls/sec)`);
+  }
+
   const cached = getCache<T>(cacheKey);
   if (cached !== null) {
+    console.log(`✅ Cache HIT: ${cacheKey}`); // 🆕 เพิ่ม log
     return cached;
   }
 
