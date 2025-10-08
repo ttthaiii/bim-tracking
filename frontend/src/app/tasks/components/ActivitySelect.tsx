@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Select, { SelectOption } from '@/components/ui/Select';
-import { getActivities } from '@/lib/relateWorks';
+import { getActivities } from '../../../lib/relateWorks';
 
 interface ActivitySelectProps {
   value: string;
