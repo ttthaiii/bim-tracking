@@ -16,6 +16,7 @@ import DeleteConfirmModal from "@/components/modals/DeleteConfirmModal";
 import { deleteTask } from "@/services/firebase";
 import ExportModal from "@/components/modals/ExportModal";
 import { exportGanttChart } from "@/utils/exportGanttChart";
+import ImportExcelModal from '@/components/modals/ImportExcelModal';
 
 
 interface TaskRow {
@@ -203,6 +204,8 @@ const ProjectsPage = () => {
   const [filterActivity, setFilterActivity] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [highlightedRow, setHighlightedRow] = useState<number | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  
 
 useEffect(() => {
   const loadActivities = async () => {
@@ -648,35 +651,91 @@ const handleCancelEdit = (idx: number) => {
 const handleExport = async (options: any) => {
   try {
     if (options.exportType === 'gantt') {
-      // Gantt Chart Export
       const project = projects.find(p => p.id === (options.projectId === 'all' ? selectedProject : options.projectId));
       const projectName = project?.name || 'All Projects';
       const projectLead = project?.projectAssignee || 'N/A';
       
-      // Filter rows by date range
-      let filteredRows = rows.filter(r => r.relateDrawing && r.startDate && r.dueDate);
+      // ✅ แก้ไขส่วนนี้
+      // กรองเฉพาะแถวที่มีข้อมูลครบ
+      let filteredRows = rows.filter(r => 
+        r.relateDrawing && 
+        r.relateDrawing.trim() !== '' && 
+        r.startDate && 
+        r.dueDate
+      );
+
+      console.log('🔍 Debug Export:', {
+        totalRows: rows.length,
+        filteredRows: filteredRows.length,
+        sampleRow: filteredRows[0]
+      });
+
+      // ถ้าไม่มีข้อมูลเลย แจ้งเตือน
+      if (filteredRows.length === 0) {
+        alert('❌ ไม่มีข้อมูลที่จะ Export\n\nกรุณาตรวจสอบว่ามีงานที่มีวันเริ่มและวันสิ้นสุดครบถ้วน');
+        return;
+      }
+
+      // กรองตาม Date Range (ถ้ามี)
+      let start: Date, end: Date;
       
       if (options.startDate && options.endDate) {
+        start = new Date(options.startDate);
+        end = new Date(options.endDate);
+        
+        const beforeFilter = filteredRows.length;
         filteredRows = filteredRows.filter(r => {
-          const rowDate = new Date(r.startDate);
-          const start = new Date(options.startDate);
-          const end = new Date(options.endDate);
-          return rowDate >= start && rowDate <= end;
+          const taskStart = new Date(r.startDate);
+          const taskEnd = new Date(r.dueDate);
+          return taskStart <= end && taskEnd >= start;
         });
+        
+        console.log(`📅 Date filter: ${beforeFilter} → ${filteredRows.length} tasks`);
+        
+        if (filteredRows.length === 0) {
+          alert(`❌ ไม่มีงานในช่วง ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`);
+          return;
+        }
+      } else {
+        // ถ้าไม่มี Date Range ให้หาช่วงจาก Tasks
+        const dates = filteredRows.flatMap(r => [
+          new Date(r.startDate).getTime(),
+          new Date(r.dueDate).getTime()
+        ]);
+        start = new Date(Math.min(...dates));
+        end = new Date(Math.max(...dates));
       }
+
+      console.log('✅ Exporting:', {
+        tasks: filteredRows.length,
+        dateRange: `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`
+      });
+
+      // Export
+      await exportGanttChart(
+        filteredRows.map(r => ({
+          id: r.id,
+          relateDrawing: r.relateDrawing,
+          activity: r.activity,
+          startDate: r.startDate,
+          dueDate: r.dueDate,
+          progress: r.progress || 0,
+          statusDwg: r.statusDwg || ''
+        })),
+        projectName,
+        projectLead,
+        start,
+        end
+      );
       
-      const start = options.startDate ? new Date(options.startDate) : new Date();
-      const end = options.endDate ? new Date(options.endDate) : new Date();
-      
-      await exportGanttChart(filteredRows as any, projectName, projectLead, start, end);
+      alert(`✅ Export สำเร็จ! (${filteredRows.length} tasks)`);
       
     } else {
-      // Simple Table Export (ถ้ามี function นี้แล้ว)
       alert('Simple export coming soon!');
     }
   } catch (error) {
-    console.error('Export error:', error);
-    alert('เกิดข้อผิดพลาดในการ Export');
+    console.error('❌ Export error:', error);
+    alert('เกิดข้อผิดพลาดในการ Export:\n' + (error instanceof Error ? error.message : String(error)));
   }
 };
 
@@ -1148,6 +1207,24 @@ return (
           >
             Add new Rev.
           </button>
+          
+ <button
+    onClick={() => setShowImportModal(true)}
+    style={{
+      padding: "8px 16px",
+      background: "#059669",
+      border: "none",
+      borderRadius: "6px",
+      fontSize: "14px",
+      cursor: "pointer",
+      color: "white",
+      fontWeight: 500,
+      boxShadow: "0 1px 2px rgba(5, 150, 105, 0.1)"
+    }}
+  >
+    📥 Import Excel
+  </button>          
+
           <button
             onClick={() => setShowExportModal(true)}
             style={{
@@ -1207,6 +1284,16 @@ return (
       projects={projects}
       currentProjectId={selectedProject}
     />
+    <ImportExcelModal
+  isOpen={showImportModal}
+  onClose={() => setShowImportModal(false)}
+  projectName={projects.find(p => p.id === selectedProject)?.name || 'Project'}
+  activities={activities.map(a => a.activityName)}
+  onImport={(tasks) => {
+    console.log('Imported tasks:', tasks);
+    setShowImportModal(false);
+  }}
+/>
   </div>
 );
 };

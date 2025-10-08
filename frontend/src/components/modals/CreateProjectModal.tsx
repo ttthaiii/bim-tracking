@@ -4,14 +4,14 @@ interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (projectData: { name: string; code: string; leader: string }) => void;
-  onViewProjects: () => void;  // ← เพิ่ม prop นี้
+  onViewProjects: () => void;
 }
 
 const CreateProjectModal = ({ 
   isOpen, 
   onClose, 
   onSubmit, 
-  onViewProjects  // ← เพิ่ม destructuring
+  onViewProjects
 }: CreateProjectModalProps) => {
   const [projectData, setProjectData] = React.useState({
     name: '',
@@ -177,46 +177,100 @@ const CreateProjectModal = ({
               />
             </div>
             
+            {/* ✅ ส่วนที่เพิ่มใหม่ - ปุ่มดูโครงการทั้งหมด */}
             <div style={{ 
               display: 'flex', 
-              justifyContent: 'flex-end', 
+              flexDirection: 'column',
               gap: '0.75rem',
               marginTop: '1.5rem'
             }}>
+              {/* ปุ่มดูโครงการทั้งหมด */}
               <button
                 type="button"
-                onClick={onClose}
+                onClick={onViewProjects}
                 style={{
-                  padding: '0.5rem 1rem',
-                  border: 'none',
+                  width: '100%',
+                  padding: '0.625rem 1rem',
+                  border: '1px solid #e5e7eb',
                   borderRadius: '0.375rem',
                   fontSize: '0.875rem',
                   fontWeight: 500,
-                  color: '#6b7280',
+                  color: '#3b82f6',
                   cursor: 'pointer',
-                  backgroundColor: 'transparent',
+                  backgroundColor: '#fff',
                   transition: 'all 0.2s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f3f4f6';
+                  e.currentTarget.style.borderColor = '#3b82f6';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#fff';
+                  e.currentTarget.style.borderColor = '#e5e7eb';
                 }}
               >
-                Cancel
+                <svg 
+                  width="16" 
+                  height="16" 
+                  fill="none" 
+                  viewBox="0 0 24 24" 
+                  stroke="currentColor"
+                >
+                  <path 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round" 
+                    strokeWidth={2} 
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" 
+                  />
+                </svg>
+                ดูโครงการทั้งหมด
               </button>
-              <button
-                type="submit"
-                style={{
-                  padding: '0.5rem 1.5rem',
-                  border: 'none',
-                  borderRadius: '0.375rem',
-                  fontSize: '0.875rem',
-                  fontWeight: 500,
-                  color: 'white',
-                  backgroundColor: '#3b82f6',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
-                }}
-              >
-                Save
-              </button>
+
+              {/* ปุ่ม Cancel & Save */}
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'flex-end', 
+                gap: '0.75rem'
+              }}>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    border: 'none',
+                    borderRadius: '0.375rem',
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    color: '#6b7280',
+                    cursor: 'pointer',
+                    backgroundColor: 'transparent',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '0.5rem 1.5rem',
+                    border: 'none',
+                    borderRadius: '0.375rem',
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    color: 'white',
+                    backgroundColor: '#3b82f6',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                  }}
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </form>
         </div>
