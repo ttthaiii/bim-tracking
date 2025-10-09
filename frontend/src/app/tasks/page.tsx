@@ -79,106 +79,24 @@ export default function TaskAssignment() {
     }
   ]);
 
+// ✅ โค้ดใหม่ - เรียบง่าย ไม่โหลดทุก Project
   useEffect(() => {
-    const loadAllData = async () => {
-      setLoading(true);
-      try {
-        console.log('🔄 Starting to load all data...');
-        
-        // Check if data exists in cache first
-        const cachedData = getCache('allProjectData');
-        if (cachedData) {
-          console.log('📦 Found cached data, validating...');
-          // Validate cached data
-          if (
-            typeof cachedData === 'object' &&
-            cachedData !== null &&
-            'projects' in cachedData &&
-            'tasks' in cachedData &&
-            'subtasks' in cachedData &&
-            Array.isArray((cachedData as any).projects)
-          ) {
-            console.log('✅ Using cached data');
-            setProjects((cachedData as any).projects);
-            // Still keep loading for a moment to ensure UI consistency
-            await new Promise(resolve => setTimeout(resolve, 800));
-            setLoading(false);
-            return;
-          }
-          console.log('⚠️ Cached data invalid, loading fresh data...');
-        }
-        
-        console.log('🔄 Loading fresh data...');
-        const projectList = await getCachedProjects(getCache, setCache);
-        console.log('✅ Projects loaded:', projectList.length);
-        setProjects(projectList);
-
-        console.log('🔄 Loading tasks...');
-        const allTasks: Record<string, TaskItem[]> = {};
-        await Promise.all(
-          projectList.map(async (project) => {
-            const projectTasks = await getCachedTasks(project.id, getCache, setCache);
-            allTasks[project.id] = projectTasks;
-            console.log(`✅ Tasks loaded for project: ${project.id}`);
-          })
-        );
-        console.log('✅ All tasks loaded successfully');
-
-        console.log('🔄 Loading subtasks...');
-        const allSubtasks: Record<string, ExistingSubtask[]> = {};
-        await Promise.all(
-          projectList.map(async (project) => {
-            const projectSubtasks = await getCachedSubtasks(
-              project.id, 
-              (allTasks[project.id] || []).map(t => t.id),
-              getCache, 
-              setCache
-            );
-            allSubtasks[project.id] = projectSubtasks;
-            console.log(`✅ Subtasks loaded for project: ${project.id}`);
-          })
-        );
-        console.log('✅ All subtasks loaded successfully');
-
-        console.log('🔄 Updating cache...');
-        await setCache('allProjectData', { 
-          projects: projectList, 
-          tasks: allTasks, 
-          subtasks: allSubtasks 
-        });
-        console.log('✅ Cache updated successfully');
-
-        // Add extra delay to ensure cache is fully written
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('🎉 All operations completed successfully');
-
-      } catch (error) {
-        console.error('❌ Error loading data:', error);
-        // Show error state for at least 2 seconds
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadAllData();
-  }, []);
-
-  useEffect(() => {
-    const fetchProjects = async () => {
+    const loadProjects = async () => {
       setLoading(true);
       try {
         const projectList = await getCachedProjects(getCache, setCache);
         setProjects(projectList);
       } catch (error) {
-        console.error('Error fetching projects:', error);
+        console.error('Error loading projects:', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchProjects();
-  }, [getCache, setCache]);
 
+    loadProjects();
+  }, []); // ⬅️ Empty deps = ทำงานครั้งเดียวตอน mount
+
+// ✅ โค้ดใหม่ - แก้ dependencies
   useEffect(() => {
     const fetchProjectData = async () => {
       if (!selectedProject) {
@@ -209,6 +127,7 @@ export default function TaskAssignment() {
         const allSubtasks = await getCachedSubtasks(selectedProject, taskIds, getCache, setCache);
         setExistingSubtasks(allSubtasks);
 
+        // ✅ Reset rows เฉพาะเมื่อเปลี่ยน Project
         setRows([{
           id: '1',
           subtaskId: '',
@@ -230,7 +149,7 @@ export default function TaskAssignment() {
     };
 
     fetchProjectData();
-  }, [selectedProject, getCache, setCache]);
+  }, [selectedProject]); // ⬅️ ✅ แก้เป็น [selectedProject] เท่านั้น!
 
   const updateRow = (id: string, field: keyof SubtaskRow, value: any): void => {
   console.log('🔄 updateRow called:', { id, field, value });
@@ -492,6 +411,11 @@ export default function TaskAssignment() {
       const newItemsCount = rowsToSave.length;
       const updateItemsCount = 0; // อนาคตจะนับจากการแก้ไข existing subtasks
 
+      // ✅ โค้ดใหม่ - เพิ่ม Cache Invalidation
+      // ✅ Invalidate Cache หลังบันทึกสำเร็จ
+      const cacheKey = `subtasks_projectId:${selectedProject}`;
+      invalidateCache(cacheKey);
+      
       setShowConfirmModal(false);
       setRows([{
         id: '1',
@@ -507,16 +431,27 @@ export default function TaskAssignment() {
         deadline: '',
         progress: 0
       }]);
-      // 🆕 แสดง Success Modal
+      
       setSuccessNewCount(newItemsCount);
       setSuccessUpdateCount(updateItemsCount);
       setShowSuccessModal(true);
+      
+      // ✅ Reload ข้อมูล Subtasks ใหม่
+      const taskIds = tasks.map(t => t.id);
+      const updatedSubtasks = await getCachedSubtasks(
+        selectedProject, 
+        taskIds, 
+        getCache, 
+        setCache
+      );
+      setExistingSubtasks(updatedSubtasks);
+      
     } catch (error) {
       console.error('Error saving subtasks:', error);
       alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     } finally {
       setIsSaving(false);
-    }
+    } 
   };
     // 🆕 เพิ่ม function ใหม่ตรงนี้
       const handleCloseSuccessModal = () => {
@@ -539,25 +474,10 @@ export default function TaskAssignment() {
     }));
   }, [uniqueCategories]);
 
-  const handleProjectChange = async (projectId: string) => {
-      // 🆕 เพิ่ม Debug Log
-    console.log('🔄 Project Changed:');
-    console.log('📌 New projectId:', projectId);
-    console.log('📌 Previous selectedProject:', selectedProject);
+// ✅ โค้ดใหม่ - เรียบง่าย
+  const handleProjectChange = (projectId: string) => {
     setSelectedProject(projectId);
-    
-     console.log('✅ State updated to:', projectId);
-    if (!projectId) {
-      setTasks([]);
-      setExistingSubtasks([]);
-      return;
-    }
-
-    const cachedData = getCache('allProjectData');
-    if (cachedData && typeof cachedData === 'object' && 'tasks' in cachedData && 'subtasks' in cachedData) {
-      setTasks((cachedData as any).tasks[projectId] || []);
-      setExistingSubtasks((cachedData as any).subtasks[projectId] || []);
-    }
+    // ✅ ไม่ต้องทำอะไรเพิ่ม - ให้ useEffect จัดการ
   };
 
   const deleteRow = (id: string) => {

@@ -1,17 +1,21 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useCallback, useRef, useMemo, ReactNode } from 'react';
 
+// ✅ โค้ดใหม่
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
+  ttl?: number; // Time to live in milliseconds (optional)
 }
 
+// ✅ โค้ดใหม่
 interface FirestoreCacheContextType {
   getCache: <T>(key: string) => T | null;
-  setCache: <T>(key: string, data: T) => void;
+  setCache: <T>(key: string, data: T, ttl?: number) => void;
   invalidateCache: (key?: string) => void;
   invalidateAll: () => void;
+  hasCache: (key: string) => boolean;
 }
 
 const FirestoreCacheContext = createContext<FirestoreCacheContextType | undefined>(undefined);
@@ -20,54 +24,74 @@ interface FirestoreCacheProviderProps {
   children: ReactNode;
 }
 
+// ✅ โค้ดใหม่
 export function FirestoreCacheProvider({ children }: FirestoreCacheProviderProps) {
-  const [cache, setCache] = useState<Map<string, CacheEntry<any>>>(new Map());
+  // ✅ ใช้ useRef แทน useState เพื่อป้องกัน Re-render
+  const cacheRef = useRef<Map<string, CacheEntry<any>>>(new Map());
 
+// ✅ โค้ดใหม่
   const getCache = useCallback(<T,>(key: string): T | null => {
-    const entry = cache.get(key);
-    if (!entry) return null;
+    const entry = cacheRef.current.get(key);
     
+    if (!entry) {
+      return null;
+    }
+
+    // ✅ ตรวจสอบ TTL (ถ้ามี)
+    if (entry.ttl && Date.now() - entry.timestamp > entry.ttl) {
+      console.log(`🗑️ Cache EXPIRED: ${key}`);
+      cacheRef.current.delete(key);
+      return null;
+    }
+
     console.log(`✅ Cache HIT: ${key}`);
     return entry.data as T;
-  }, [cache]);
+  }, []); // ⬅️ Empty deps = Never recreate
 
-  const setCacheData = useCallback(<T,>(key: string, data: T) => {
-    console.log(`💾 Cache SET: ${key}`);
-    setCache(prev => {
-      const newCache = new Map(prev);
-      newCache.set(key, {
-        data,
-        timestamp: Date.now()
-      });
-      return newCache;
+// ✅ โค้ดใหม่
+  const setCache = useCallback(<T,>(key: string, data: T, ttl?: number) => {
+    console.log(`💾 Cache SET: ${key}${ttl ? ` (TTL: ${ttl}ms)` : ''}`);
+    cacheRef.current.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl
     });
   }, []);
 
+// ✅ โค้ดใหม่
   const invalidateCache = useCallback((key?: string) => {
     if (key) {
       console.log(`🗑️ Cache INVALIDATE: ${key}`);
-      setCache(prev => {
-        const newCache = new Map(prev);
-        newCache.delete(key);
-        return newCache;
-      });
+      cacheRef.current.delete(key);
     }
   }, []);
 
+// ✅ โค้ดใหม่
   const invalidateAll = useCallback(() => {
     console.log('🗑️ Cache INVALIDATE ALL');
-    setCache(new Map());
+    cacheRef.current.clear();
   }, []);
 
+  // ✅ เพิ่มใหม่
+  const hasCache = useCallback((key: string): boolean => {
+    return cacheRef.current.has(key);
+  }, []);
+
+// ✅ โค้ดใหม่
+  // ✅ ใช้ useMemo เพื่อให้ value object stable
+  const value = useMemo(
+    () => ({
+      getCache,
+      setCache,
+      invalidateCache,
+      invalidateAll,
+      hasCache
+    }),
+    [getCache, setCache, invalidateCache, invalidateAll, hasCache]
+  );
+
   return (
-    <FirestoreCacheContext.Provider
-      value={{
-        getCache,
-        setCache: setCacheData,
-        invalidateCache,
-        invalidateAll
-      }}
-    >
+    <FirestoreCacheContext.Provider value={value}>
       {children}
     </FirestoreCacheContext.Provider>
   );
