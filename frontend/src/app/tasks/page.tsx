@@ -14,11 +14,13 @@ import RelateWorkSelect from './components/RelateWorkSelect';
 import AssigneeSelect from './components/AssigneeSelect';
 import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
 import { getCachedProjects, getCachedTasks, getCachedSubtasks } from '@/services/cachedFirestoreService';
+import { calculateDeadlineStatus } from '@/utils/deadlineCalculator'; // ⬅️ เพิ่มบรรทัดนี้
 
 interface TaskItem {
   id: string;
   taskName: string;
   taskCategory: string;
+  dueDate?: any;
 }
 
 interface SubtaskRow {
@@ -36,6 +38,7 @@ interface SubtaskRow {
   progress: number;
 }
 
+// ✅ โค้ดใหม่
 interface ExistingSubtask {
   id: string;
   subTaskNumber: string;
@@ -48,6 +51,11 @@ interface ExistingSubtask {
   subTaskProgress: number;
   startDate: any;
   endDate: any;
+  deadlineStatus?: { // ⬅️ เพิ่มนี้
+    text: string;
+    bgColor: string;
+    isOverdue: boolean;
+  };
 }
 
 export default function TaskAssignment() {
@@ -96,7 +104,7 @@ export default function TaskAssignment() {
     loadProjects();
   }, []); // ⬅️ Empty deps = ทำงานครั้งเดียวตอน mount
 
-// ✅ โค้ดใหม่ - แก้ dependencies
+// ✅ โค้ดใหม่
   useEffect(() => {
     const fetchProjectData = async () => {
       if (!selectedProject) {
@@ -120,14 +128,55 @@ export default function TaskAssignment() {
       }
 
       try {
-        const taskList = await getCachedTasks(selectedProject, getCache, setCache);
+        // ✅ 1. โหลด Tasks (พร้อม dueDate)
+        const tasksCol = collection(db, 'tasks');
+        const tasksSnapshot = await getDocs(tasksCol);
+        const taskList = tasksSnapshot.docs
+          .filter(doc => doc.data().projectId === selectedProject)
+          .map(doc => ({
+            id: doc.id,
+            taskName: doc.data().taskName || '',
+            taskCategory: doc.data().taskCategory || '',
+            dueDate: doc.data().dueDate || null // ⬅️ เพิ่ม dueDate
+          }));
+        
         setTasks(taskList);
 
+        // ✅ 2. โหลด Subtasks
         const taskIds = taskList.map(t => t.id);
         const allSubtasks = await getCachedSubtasks(selectedProject, taskIds, getCache, setCache);
-        setExistingSubtasks(allSubtasks);
 
-        // ✅ Reset rows เฉพาะเมื่อเปลี่ยน Project
+        // ✅ 3. คำนวณ Deadline Status สำหรับแต่ละ Subtask
+        const subtasksWithDeadline = allSubtasks.map(subtask => {
+          // หา Task ที่ taskName ตรงกัน
+          const task = taskList.find(t => t.taskName === subtask.taskName);
+          
+          if (!task || !task.dueDate) {
+            return {
+              ...subtask,
+              deadlineStatus: {
+                text: '-',
+                bgColor: '',
+                isOverdue: false
+              }
+            };
+          }
+
+          // คำนวณ Deadline Status
+          const deadlineStatus = calculateDeadlineStatus(
+            subtask.subTaskProgress,
+            task.dueDate,
+            subtask.endDate
+          );
+
+          return {
+            ...subtask,
+            deadlineStatus
+          };
+        });
+
+        setExistingSubtasks(subtasksWithDeadline);
+
         setRows([{
           id: '1',
           subtaskId: '',
@@ -149,7 +198,7 @@ export default function TaskAssignment() {
     };
 
     fetchProjectData();
-  }, [selectedProject]); // ⬅️ ✅ แก้เป็น [selectedProject] เท่านั้น!
+  }, [selectedProject]);
 
   const updateRow = (id: string, field: keyof SubtaskRow, value: any): void => {
   console.log('🔄 updateRow called:', { id, field, value });
@@ -513,6 +562,34 @@ export default function TaskAssignment() {
       row.relateDrawingName === "ลางาน"
     );
   };
+
+  // 🆕 Function สำหรับคำนวณ Deadline Status ของ Existing Subtasks
+  const calculateSubtaskDeadlines = (
+    subtasks: ExistingSubtask[],
+    tasksList: TaskItem[]
+  ): ExistingSubtask[] => {
+    return subtasks.map(subtask => {
+      // หา Task ที่ taskName ตรงกับ subtask.taskName
+      const task = tasksList.find(t => t.taskName === subtask.taskName);
+      
+      if (!task) {
+        // ถ้าหาไม่เจอ Task → แสดง "-"
+        return {
+          ...subtask,
+          deadlineStatus: {
+            text: '-',
+            bgColor: '',
+            isOverdue: false
+          }
+        };
+      }
+
+      // ดึง dueDate จาก Task (ต้องดึงจาก Firestore ด้วย)
+      // สำหรับตอนนี้เราจะดึงใน useEffect แทน
+      return subtask;
+    });
+  };
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       <Navbar />
@@ -698,65 +775,87 @@ export default function TaskAssignment() {
                     </tr>
                   ))}
 
-                  {existingSubtasks.map((subtask) => (
-                    <tr key={`existing-${subtask.id}`} className="hover:bg-gray-50">
-                      <td className="px-2 py-2 text-xs text-gray-900 whitespace-normal break-words" title={subtask.subTaskNumber}>
-                        {subtask.subTaskNumber}
-                      </td>
-                      <td className="px-2 py-2 text-xs text-gray-500">-</td>
-                      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.taskName}>
-                        {subtask.taskName}
-                      </td>
-                      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.subTaskCategory}>
-                        {subtask.subTaskCategory}
-                      </td>
-                      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.item}>
-                        {subtask.item || '-'}
-                      </td>
-                      <td className="px-2 py-2 text-xs text-gray-500 text-center">
-                        {subtask.internalRev ? subtask.internalRev : '-'}
-                      </td>
-                      <td className="px-2 py-2 text-xs text-gray-500 text-center">
-                        {subtask.subTaskScale}
-                      </td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center">
-                            <span className="text-xs font-medium text-white">
-                              {subtask.subTaskAssignee?.charAt(0).toUpperCase()}
-                            </span>
-                          </div>
-                          <span className="text-xs text-gray-900">
-                            {subtask.subTaskAssignee}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-2 py-2 text-xs text-gray-500">-</td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center space-x-2">
-                          <ProgressBar value={subtask.subTaskProgress} size="sm" />
-                        </div>
-                      </td>
-                      <td className="px-2 py-2 text-center">
-                        <Button variant="outline" size="sm">LINK</Button>
-                      </td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center justify-center space-x-1">
-                          <button onClick={() => alert(`Edit: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-blue-600">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                            </svg>
-                          </button>
-                          <span className="text-gray-300">/</span>
-                          <button onClick={() => alert(`Delete: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-red-600">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  
+{existingSubtasks.map((subtask) => {
+  // ✅ ดึง deadlineStatus (ถ้ามี)
+  const deadlineStatus = subtask.deadlineStatus || {
+    text: '-',
+    bgColor: '',
+    isOverdue: false
+  };
+
+  return (
+    <tr 
+      key={`existing-${subtask.id}`} 
+      className={`hover:bg-gray-50 ${deadlineStatus.bgColor}`}
+    >
+      <td className="px-2 py-2 text-xs text-gray-900 whitespace-normal break-words" title={subtask.subTaskNumber}>
+        {subtask.subTaskNumber}
+      </td>
+      <td className="px-2 py-2 text-xs text-gray-500">-</td>
+      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.taskName}>
+        {subtask.taskName}
+      </td>
+      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.subTaskCategory}>
+        {subtask.subTaskCategory}
+      </td>
+      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.item}>
+        {subtask.item || '-'}
+      </td>
+      <td className="px-2 py-2 text-xs text-gray-500 text-center">
+        {subtask.internalRev ? subtask.internalRev : '-'}
+      </td>
+      <td className="px-2 py-2 text-xs text-gray-500 text-center">
+        {subtask.subTaskScale}
+      </td>
+      <td className="px-2 py-2">
+        <div className="flex items-center space-x-2">
+          <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center">
+            <span className="text-xs font-medium text-white">
+              {subtask.subTaskAssignee?.charAt(0).toUpperCase()}
+            </span>
+          </div>
+          <span className="text-xs text-gray-900">
+            {subtask.subTaskAssignee}
+          </span>
+        </div>
+      </td>
+      {/* ✅ แก้คอลัมน์ DEADLINE - แสดงค่าจริง */}
+      <td className="px-2 py-2 text-xs">
+        <span className={`font-medium ${
+          deadlineStatus.isOverdue ? 'text-red-600' : 
+          deadlineStatus.bgColor === 'bg-yellow-50' ? 'text-yellow-700' : 
+          'text-gray-700'
+        }`}>
+          {deadlineStatus.text}
+        </span>
+      </td>
+      <td className="px-2 py-2">
+        <div className="flex items-center space-x-2">
+          <ProgressBar value={subtask.subTaskProgress} size="sm" />
+        </div>
+      </td>
+      <td className="px-2 py-2 text-center">
+        <Button variant="outline" size="sm">LINK</Button>
+      </td>
+      <td className="px-2 py-2">
+        <div className="flex items-center justify-center space-x-1">
+          <button onClick={() => alert(`Edit: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-blue-600">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+          <span className="text-gray-300">/</span>
+          <button onClick={() => alert(`Delete: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-red-600">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+})}
                 </tbody>
               </table>
             </div>
