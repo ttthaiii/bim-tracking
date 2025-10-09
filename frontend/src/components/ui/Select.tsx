@@ -10,7 +10,7 @@ interface SelectProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  disabled?: boolean;
+  disabled?: boolean | 0 | 1 | "" | null | undefined;
   loading?: boolean;
   className?: string;
 }
@@ -29,7 +29,7 @@ export default function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        disabled={disabled || loading}
+        disabled={Boolean(disabled || loading)}
         className={`
           w-full px-3 py-2 
           bg-white border border-gray-300 rounded-md 

@@ -251,7 +251,14 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
                           ? 'bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 border border-amber-300'
                           : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800 border border-gray-300'
                       }`}>
-                        {task.progress}
+                        {task.oldProgress && task.oldProgress !== task.progress ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-sm text-gray-500 line-through">{task.oldProgress}%</span>
+                            <span className="text-green-600">{task.progress}%</span>
+                          </div>
+                        ) : (
+                          `${task.progress}%`
+                        )}
                       </div>
                     </td>
                     <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.note || '-'}</td>

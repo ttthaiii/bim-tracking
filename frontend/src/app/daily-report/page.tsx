@@ -8,7 +8,8 @@ import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveD
 import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useDashboard } from '@/context/DashboardContext';
-import { DailyReportEntry, Subtask, Project } from '@/types/database';
+import { DailyReportEntry, Subtask } from '@/types/database';
+import type { Project } from '@/lib/projects';
 import { getProjects } from '@/lib/projects';
 import { SubtaskAutocomplete } from '@/components/SubtaskAutocomplete';
 import Select from '@/components/ui/Select';
@@ -24,7 +25,7 @@ const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: stri
   id: `${baseId}-temp-${index}`,
   employeeId, assignDate, subtaskId: '', subtaskPath: '',
   normalWorkingHours: '0:0', otWorkingHours: '0:0', progress: '0%',
-  note: '', status: 'pending', subTaskName: '', subTaskCategory: '', internalRev: '',
+  note: '', status: 'pending', subTaskName: 'N/A', subTaskCategory: '', internalRev: '',
   subTaskScale: '', project: '', taskName: '', remark: '', item: '', relateDrawing: '',
   isLeaveTask: false,
   initialProgress: 0,
@@ -64,6 +65,7 @@ export default function DailyReport() {
   const [dailyReportEntries, setDailyReportEntries] = useState<DailyReportEntry[]>([]);
   
   const [touchedRows, setTouchedRows] = useState<Set<string>>(new Set());
+  const [editableRows, setEditableRows] = useState<Set<string>>(new Set());
   const [availableSubtasks, setAvailableSubtasks] = useState<Subtask[]>([]);
   const [filteredSubtasks, setFilteredSubtasks] = useState<Subtask[]>([]);
   const [allProjects, setAllProjects] = useState<Project[]>([]);
@@ -189,40 +191,55 @@ export default function DailyReport() {
   useEffect(() => {
     if (!employeeId || !workDate) return;
 
-    const entriesForDate = allDailyEntries.filter(entry => entry.assignDate === workDate);
+    const entriesForDate = allDailyEntries.filter((entry: DailyReportEntry) => entry.assignDate === workDate);
 
     if (entriesForDate.length === 0) {
-        setDailyReportEntries([createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)]);
+        const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
+        setDailyReportEntries([{
+            ...initialEntry,
+            isExistingData: false,
+            logTimestamp: Timestamp.now() // Add logTimestamp
+        }]);
+        setEditableRows(new Set()); // เคลียร์ editableRows เพราะเป็นข้อมูลใหม่ แก้ไขได้เลย
         return;
-    }
+    }    
 
     // 1. Find the absolute latest timestamp in milliseconds
-    const latestTimestampMillis = Math.max(...entriesForDate.map(entry => entry.logTimestamp?.toMillis() || 0));
+    const latestTimestampMillis = Math.max(...entriesForDate.map((entry: DailyReportEntry) => entry.logTimestamp?.toMillis() || 0));
 
     // 2. Round this latest timestamp down to the nearest second
     const latestTimestampSecond = Math.floor(latestTimestampMillis / 1000) * 1000;
 
     // 3. Filter for all entries that fall within the same second as the latest entry
-    const latestSubmissionEntries = entriesForDate.filter(entry => {
+    const latestSubmissionEntries = entriesForDate.filter((entry: DailyReportEntry) => {
         const entryTimestampSecond = Math.floor((entry.logTimestamp?.toMillis() || 0) / 1000) * 1000;
         return entryTimestampSecond === latestTimestampSecond;
     });
 
     // 4. Set the entries to show, and importantly, set initialProgress from the entry's actual progress
-    const entriesToShow = latestSubmissionEntries.length > 0
-      ? latestSubmissionEntries.map(entry => ({
+    const entriesToShow = latestSubmissionEntries.map((entry: DailyReportEntry) => {
+        // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
+        const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
+        const isLeaveTask = subtask ? 
+          (subtask.taskName?.includes('ลา') || subtask.subTaskName?.includes('ลา')) : 
+          (entry.taskName?.includes('ลา') || entry.subTaskName?.includes('ลา'));
+
+        return {
           ...entry,
-          initialProgress: parseInt(entry.progress.replace('%', ''), 10) || 0, // Set initialProgress from its own progress
-        }))
-      : [createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)];
+          isLeaveTask,
+          initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
+          progress: isLeaveTask ? '0%' : entry.progress,
+          isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
+        };
+    });
     
     setDailyReportEntries(entriesToShow);
-
-  }, [workDate, allDailyEntries, employeeId, baseId]);
+    setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
+  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
-    setDailyReportEntries(currentEntries => {
-      const newEntries = currentEntries.map(entry => {
+    setDailyReportEntries((currentEntries: DailyReportEntry[]) => {
+      const newEntries = currentEntries.map((entry: DailyReportEntry) => {
         if (entry.id === entryId) {
           const newEntry = { ...entry, ...updates };
           const progress = parseInt(newEntry.progress);
@@ -238,10 +255,24 @@ export default function DailyReport() {
   };
 
   const handleRowFocus = (entryId: string, idx: number) => {
-    if (!touchedRows.has(entryId)) {
-      setTouchedRows(prev => new Set(prev).add(entryId));
-      if (idx === dailyReportEntries.length - 1) handleAddRow();
+    if (idx === dailyReportEntries.length - 1) {
+      handleAddRow();
     }
+    if (!touchedRows.has(entryId)) {
+      setTouchedRows((prev: Set<string>) => new Set(prev).add(entryId));
+    }
+  };
+
+  const toggleRowEdit = (entryId: string) => {
+    setEditableRows((prev: Set<string>) => {
+      const newSet = new Set(prev);
+      if (newSet.has(entryId)) {
+        newSet.delete(entryId);
+      } else {
+        newSet.add(entryId);
+      }
+      return newSet;
+    });
   };
 
   const handleTimeChange = (entryId: string, type: 'normalWorkingHours' | 'otWorkingHours', part: 'h' | 'm', value: string) => {
@@ -254,8 +285,22 @@ export default function DailyReport() {
   };
 
   const handleDeleteEntry = (entryId: string) => {
-    // This needs to be adapted to handle deleting from the correct place
-    console.warn("Delete functionality needs review for the new data structure.", entryId);
+    // Don't allow deletion if there's only one row
+    if (dailyReportEntries.length <= 1) {
+      return;
+    }
+
+    setDailyReportEntries(currentEntries => {
+      const newEntries = currentEntries.filter(entry => entry.id !== entryId);
+      // If all entries are deleted, add one empty row
+      if (newEntries.length === 0) {
+        return [createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)];
+      }
+      return newEntries;
+    });
+
+    // Update unsaved changes state
+    setHasUnsavedChanges(true);
   };
   
   const handleAddRow = () => {
@@ -272,6 +317,12 @@ export default function DailyReport() {
     const entry = dailyReportEntries.find(e => e.id === entryId);
     if (!entry) return;
 
+    // ถ้าเป็นงานลา ให้ progress เป็น 0 เสมอ
+    if (entry.isLeaveTask) {
+      handleUpdateEntry(entryId, { progress: '0', progressError: '' });
+      return;
+    }
+
     const newProgress = parseInt(newProgressValue, 10);
     const initialProgress = entry.initialProgress || 0;
   
@@ -286,6 +337,12 @@ export default function DailyReport() {
   const handleProgressValidation = (entryId: string) => {
     const entry = dailyReportEntries.find(e => e.id === entryId);
     if (!entry) return;
+
+    // ถ้าเป็นงานลา ให้ progress เป็น 0 เสมอ
+    if (entry.isLeaveTask) {
+      handleUpdateEntry(entryId, { progress: '0%', progressError: '' });
+      return;
+    }
 
     const currentProgress = parseInt(entry.progress, 10);
     const initialProgress = entry.initialProgress || 0;
@@ -327,13 +384,20 @@ export default function DailyReport() {
         status: 'pending',
         isLeaveTask: isLeave,
         otWorkingHours: isLeave ? '0:0' : '0:0',
-        // This initialProgress is for the newly selected subtask, not to prevent decreasing existing daily report entry progress.
         initialProgress: isLeave ? 0 : newSubtaskInitialProgress,
         progressError: '',
     } : { 
         subtaskId: '', subtaskPath: '', progress: '0%', note: '', item: '', status: 'pending', relateDrawing: '', isLeaveTask: false, initialProgress: 0, progressError: '',
     };
     handleUpdateEntry(entryId, updates);
+
+    // ถ้ามีการเลือก Task และเป็นแถวสุดท้าย ให้เพิ่มแถวใหม่อัตโนมัติ
+    if (selectedSubtask) {
+      const currentIndex = dailyReportEntries.findIndex(entry => entry.id === entryId);
+      if (currentIndex === dailyReportEntries.length - 1) {
+        handleAddRow();
+      }
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -350,13 +414,21 @@ export default function DailyReport() {
       return;
     }
 
-    // Prepare data for RecheckPopup
+    // Prepare data for RecheckPopup with old progress info
     const entriesForRecheck = validEntries.map(entry => {
       const fullTaskName = generateRelateDrawingText(entry, allProjects);
+      // หา progress เดิมจาก allDailyEntries
+      const existingEntry = allDailyEntries.find(e => 
+        e.assignDate === workDate && 
+        e.subtaskId === entry.subtaskId
+      );
+      const oldProgress = existingEntry?.progress || '0%';
+      
       return {
         ...entry,
-        relateDrawing: fullTaskName, // Format Relate Drawing
-        progress: `${entry.progress}`, // Ensure progress is a string with '%' if it's already in that format, otherwise format it
+        relateDrawing: fullTaskName,
+        progress: `${entry.progress}`,
+        oldProgress, // เพิ่ม progress เดิม
       };
     });
 
@@ -429,9 +501,9 @@ export default function DailyReport() {
   return (
     <PageLayout>
       <div className="container-fluid mx-auto p-4 md:p-8 bg-gray-50 min-h-screen">
-        {/* Main Flex Container */}
+        {/* Main Content */}
         <div className="flex flex-col md:flex-row gap-6">
-          {/* Calendar and Legends */}
+          {/* Calendar and Legend Section */}
           <div className="w-full md:w-[384px] md:flex-shrink-0">
             <div className="bg-white rounded-lg shadow-md border border-gray-200">
               <Calendar onChange={setDate} value={date} className="custom-calendar" locale="th-TH" tileClassName={tileClassName} />
@@ -447,6 +519,7 @@ export default function DailyReport() {
           {/* Form Section */}
           <div className="flex-1">
             <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[80vh]">
+              {/* Header Info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">รหัสพนักงาน</label>
@@ -458,32 +531,36 @@ export default function DailyReport() {
                 </div>
               </div>
 
+              {/* Status Messages */}
               {loading && <p>Loading...</p>}
-              {error && <p className="mb-4 text-red-500 text-sm">โค้ดผิดพลาด</p>}{employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
+              {error && <p className="mb-4 text-red-500 text-sm">โค้ดผิดพลาด</p>}
+              {employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
 
-              <div className="overflow-x-auto min-h-[20rem]">
-                <table className="w-full border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-orange-500 text-white">
-                      <th className="p-2 font-semibold text-left w-10">No</th>
-                      <th className="p-2 font-semibold text-left w-1/3">Relate Drawing</th>
-                      <th className="p-2 font-semibold text-left">เวลาทำงาน / Working Hours</th>
-                      <th className="p-2 font-semibold text-left">เวลาโอที / Overtime</th>
-                      <th className="p-2 font-semibold text-left">Progress</th>
-                      <th className="p-2 font-semibold text-left">Note</th>
-                      <th className="p-2 font-semibold text-left">Upload File</th>
-                      <th className="p-2 font-semibold text-center w-24">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dailyReportEntries.map((entry, index) => {
-                      const relevantFile = uploadedFiles.find(file => file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate);
-                      const fullTaskName = generateRelateDrawingText(entry, allProjects);
-                      return (
-                        <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
-                          <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
-                          <td className="p-2 border-r border-yellow-200">
-                             <SubtaskAutocomplete
+              {/* Table Section */}
+              <div className="flex flex-col h-[calc(100vh-300px)]">
+                <div className="flex-grow overflow-x-auto overflow-y-auto">
+                  <table className="w-full border-collapse text-xs">
+                    <thead className="sticky top-0 bg-orange-500">
+                      <tr className="text-white">
+                        <th className="p-2 font-semibold text-left w-10">No</th>
+                        <th className="p-2 font-semibold text-left w-1/3">Relate Drawing</th>
+                        <th className="p-2 font-semibold text-left">เวลาทำงาน / Working Hours</th>
+                        <th className="p-2 font-semibold text-left">เวลาโอที / Overtime</th>
+                        <th className="p-2 font-semibold text-left">Progress</th>
+                        <th className="p-2 font-semibold text-left">Note</th>
+                        <th className="p-2 font-semibold text-left">Upload File</th>
+                        <th className="p-2 font-semibold text-center w-24">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dailyReportEntries.map((entry, index) => {
+                        const relevantFile = uploadedFiles.find(file => file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate);
+                        const fullTaskName = generateRelateDrawingText(entry, allProjects);
+                        return (
+                          <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
+                            <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
+                            <td className="p-2 border-r border-yellow-200">
+                              <SubtaskAutocomplete
                                 entryId={entry.id}
                                 value={entry.subtaskId}
                                 options={filteredSubtasks}
@@ -492,67 +569,165 @@ export default function DailyReport() {
                                 onFocus={() => handleRowFocus(entry.id, index)}
                                 isDisabled={isReadOnly && !isFutureDate}
                               />
-                          </td>
-                          <td className="p-2 border-r border-yellow-200">
-                            <div className="flex items-center gap-1">
-                                <Select value={String((entry.normalWorkingHours || '0:0').split(':')[0])} onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} options={hourOptions} disabled={isReadOnly} />
-                                <Select value={String((entry.normalWorkingHours || '0:0').split(':')[1])} onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'm', value)} options={minuteOptions} disabled={isReadOnly} />
-                            </div>
-                          </td>
-                           <td className="p-2 border-r border-yellow-200">
-                            <div className="flex items-center gap-1">
-                                <Select value={String((entry.otWorkingHours || '0:0').split(':')[0])} onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} options={hourOptions} disabled={isReadOnly || entry.isLeaveTask} />
-                                <Select value={String((entry.otWorkingHours || '0:0').split(':')[1])} onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} options={minuteOptions} disabled={isReadOnly || entry.isLeaveTask} />
-                            </div>
-                          </td>
-                          <td className="p-2 border-r border-yellow-200">
-                            <div title={entry.progressError || `Progress ต้องไม่น้อยกว่า ${entry.initialProgress || 0}%`}>
+                            </td>
+                            <td className="p-2 border-r border-yellow-200">
                               <div className="flex items-center gap-1">
-                                <input type="number" value={entry.progress.replace('%', '')} onChange={(e) => handleProgressInput(entry.id, e.target.value)} onBlur={() => handleProgressValidation(entry.id)} className="w-14 p-1 border border-gray-300 rounded-md text-center text-xs text-gray-900" disabled={isReadOnly || entry.isLeaveTask || isFutureDate} />
-                                <span className="text-gray-800">%</span>
+                                <Select 
+                                  value={String((entry.normalWorkingHours || '0:0').split(':')[0])} 
+                                  onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} 
+                                  options={hourOptions} 
+                                  disabled={isReadOnly || (entry.isExistingData && !editableRows.has(entry.id))} 
+                                />
+                                <Select 
+                                  value={String((entry.normalWorkingHours || '0:0').split(':')[1])} 
+                                  onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'm', value)} 
+                                  options={minuteOptions} 
+                                  disabled={Boolean(isReadOnly || (entry.subtaskId && !editableRows.has(entry.id)))} 
+                                />
                               </div>
-                            </div>
-                          </td>
-                          <td className="p-2 border-r border-yellow-200"><input type="text" value={entry.note || ''} onChange={(e) => handleUpdateEntry(entry.id, { note: e.target.value })} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900" placeholder="เพิ่มหมายเหตุ" disabled={isReadOnly || isFutureDate}/></td>
-                          <td className="p-2 border-r border-yellow-200 text-center">
-                            {relevantFile ? (
-                              <a href={relevantFile.fileURL} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 font-semibold">
-                                Download
-                              </a>
-                            ) : (
-                              <span className="text-gray-500">ยังไม่มีไฟล์</span>
-                            )}
-                          </td>
-                          <td className="p-2 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              {/* Removed individual history button from here */}
-                              <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100" title="ลบ" disabled={isReadOnly}>
-                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            </td>
+                            <td className="p-2 border-r border-yellow-200">
+                              <div className="flex items-center gap-1">
+                                <Select 
+                                  value={String((entry.otWorkingHours || '0:0').split(':')[0])} 
+                                  onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} 
+                                  options={hourOptions} 
+                                  disabled={isReadOnly || entry.isLeaveTask || (entry.subtaskId && !editableRows.has(entry.id))} 
+                                />
+                                <Select 
+                                  value={String((entry.otWorkingHours || '0:0').split(':')[1])} 
+                                  onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} 
+                                  options={minuteOptions} 
+                                  disabled={isReadOnly || entry.isLeaveTask || (entry.subtaskId && !editableRows.has(entry.id))} 
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2 border-r border-yellow-200">
+                              <div title={entry.progressError || `Progress ต้องไม่น้อยกว่า ${entry.initialProgress || 0}%`}>
+                                <div className="flex items-center gap-1">
+                                  <input 
+                                    type="number" 
+                                    value={entry.progress.replace('%', '')} 
+                                    onChange={(e) => handleProgressInput(entry.id, e.target.value)} 
+                                    onBlur={() => handleProgressValidation(entry.id)} 
+                                    className={`w-14 p-1 border rounded-md text-center text-xs ${
+                                      entry.isExistingData && !editableRows.has(entry.id)
+                                        ? 'bg-gray-100 border-gray-200 text-gray-700'
+                                        : 'border-gray-300 text-gray-900'
+                                    }`}
+                                    disabled={Boolean(isReadOnly || entry.isLeaveTask || isFutureDate || (entry.subtaskId && !editableRows.has(entry.id)))} 
+                                  />
+                                  <span className="text-gray-800">%</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-2 border-r border-yellow-200">
+                              <input 
+                                type="text" 
+                                value={entry.note || ''} 
+                                onChange={(e) => handleUpdateEntry(entry.id, { note: e.target.value })} 
+                                className={`w-full p-1 border rounded-md text-xs ${
+                                  !editableRows.has(entry.id)
+                                    ? 'bg-gray-100 border-gray-200 text-gray-700'
+                                    : 'border-gray-300 text-gray-900'
+                                }`}
+                                placeholder="เพิ่มหมายเหตุ" 
+                                disabled={isReadOnly || isFutureDate || !editableRows.has(entry.id)}
+                              />
+                            </td>
+                            <td className="p-2 border-r border-yellow-200 text-center">
+                              {relevantFile ? (
+                                <a href={relevantFile.fileURL} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 font-semibold">
+                                  Download
+                                </a>
+                              ) : (
+                                <span className="text-gray-500">ยังไม่มีไฟล์</span>
+                              )}
+                            </td>
+                            <td className="p-2 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                {!isReadOnly && (
+                                  <>
+                                    {/* แสดงปุ่ม Edit เฉพาะเมื่อเป็นข้อมูลเก่า (มี logTimestamp) */}
+                                    {entry.isExistingData && (
+                                      <button 
+                                        onClick={() => toggleRowEdit(entry.id)}
+                                        className={`p-1 rounded-full transition-colors ${
+                                          editableRows.has(entry.id)
+                                            ? 'text-green-500 hover:text-green-700 hover:bg-green-100'
+                                            : 'text-blue-500 hover:text-blue-700 hover:bg-blue-100'
+                                        }`}
+                                        title={editableRows.has(entry.id) ? "บันทึก" : "แก้ไข"}
+                                      >
+                                        {editableRows.has(entry.id) ? (
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                          </svg>
+                                        ) : (
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                          </svg>
+                                        )}
+                                      </button>
+                                    )}
+                                    <button 
+                                      onClick={() => handleDeleteEntry(entry.id)} 
+                                      className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100" 
+                                      title="ลบ" 
+                                    >
+                                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" />
+                                      </svg>
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
+              {/* Action Buttons */}
               <div className="mt-4 flex justify-between items-center">
-                  <button type="button" onClick={handleAddRow} className="bg-orange-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-orange-600 text-sm" disabled={isReadOnly}>Add Row</button>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={handleShowHistory} className="bg-blue-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-600 text-sm" disabled={false}>ดูประวัติการลงข้อมูล</button>
-                    <button type="button" onClick={handleSubmit} className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-2 px-6 rounded-md hover:from-blue-700 hover:to-purple-700" disabled={isReadOnly || isFutureDate}>Submit</button>
-                  </div>
+                <button 
+                  type="button" 
+                  onClick={handleAddRow} 
+                  className="bg-orange-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-orange-600 text-sm" 
+                  disabled={isReadOnly}
+                >
+                  Add Row
+                </button>
+                <div className="flex gap-2">
+                  <button 
+                    type="button" 
+                    onClick={handleShowHistory} 
+                    className="bg-blue-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-600 text-sm"
+                  >
+                    ดูประวัติการลงข้อมูล
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={handleSubmit} 
+                    className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-2 px-6 rounded-md hover:from-blue-700 hover:to-purple-700" 
+                    disabled={isReadOnly || isFutureDate}
+                  >
+                    Submit
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Modals */}
       <HistoryModal
         isOpen={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
-        // Pass grouped logs instead of individual logs and remove taskName
         groupedLogs={historyLogsGrouped}
         allProjects={allProjects}
       />
