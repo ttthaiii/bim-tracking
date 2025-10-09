@@ -22,8 +22,12 @@ interface SubtaskAutocompleteProps {
 }
 
 const formatSubtaskDisplay = (subtask: Subtask, projects: Project[]): string => {
-  const projectObj = projects.find(p => p.id === subtask.project);
-  const abbr = projectObj ? projectObj.abbr : 'N/A';
+  // Comprehensive project lookup logic
+  const projectObj = projects.find(p => p.id === subtask.projectId) || 
+                     projects.find(p => p.id === subtask.project) ||
+                     projects.find(p => p.name === subtask.project);
+
+  const abbr = projectObj ? projectObj.abbr : subtask.project || 'N/A';
   const taskName = subtask.taskName || 'N/A';
   const subTaskName = subtask.subTaskName || 'N/A';
   const item = subtask.item || 'N/A';

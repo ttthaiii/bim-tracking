@@ -35,7 +35,8 @@ export interface Subtask {
   lastUpdate: Timestamp;
   mhOD: number;
   mhOT: number;
-  project: string; // Project ID
+  project: string; // Project ID or Project Name
+  projectId?: string; // Optional: Explicit Project ID
   remark: string;
   startDate: Timestamp;
   subTaskAssignee: string;
@@ -62,6 +63,10 @@ export interface DailyReportEntry {
   progress: string;
   note?: string;
   status: 'pending' | 'in-progress' | 'completed';
+  isLeaveTask?: boolean; // Flag to identify leave-related tasks
+  initialProgress?: number; // Store the initial progress from the database
+  progressError?: string; // To show a tooltip-like error message
+  logTimestamp?: Timestamp; // New: Timestamp of the specific log entry
   
   // New field for display
   relateDrawing: string; // e.g., "Project Abbr - Subtask Name"
@@ -71,7 +76,7 @@ export interface DailyReportEntry {
   subTaskCategory: string;
   internalRev?: string; 
   subTaskScale?: string;
-  project?: string;
+  project?: string; // This will hold the resolved Project ID
   taskName?: string;
   remark?: string;
   item?: string;

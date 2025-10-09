@@ -61,6 +61,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative; /* Added for marker positioning */
   height: 32px !important; /* Override default height */
   width: 32px !important;   /* Override default width */
   margin: auto !important; /* Center the circle in its container */
@@ -103,10 +104,32 @@
   font-weight: bold;
 }
 
-/* Date with existing data */
-.tile-has-data {
-  background-color: #fef9c3 !important; /* yellow-100 */
-  color: #854d0e !important; /* yellow-800 */
+/* Marker for a date with EDITED data */
+.has-edit-marker::after {
+  content: '';
+  position: absolute;
+  bottom: 4px; /* Position the dot at the bottom */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #facc15; /* yellow-400 */
+  box-shadow: 0 0 2px rgba(0,0,0,0.2);
+}
+
+/* Marker for a date with MISSING data */
+.has-missing-data-marker::after {
+  content: '';
+  position: absolute;
+  bottom: 4px; /* Position the dot at the bottom */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #ef4444; /* red-500 */
+  box-shadow: 0 0 2px rgba(0,0,0,0.2);
 }
 
 /* Past date that can be edited */

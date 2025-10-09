@@ -7,30 +7,63 @@ import {
   query,
   where,
   writeBatch,
-  arrayUnion
+  arrayUnion,
+  Timestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase'; 
 import { DailyReportEntry, Subtask } from '../types/database';
 import { getEmployeeByID } from './employeeService';
 
-// This function fetches from the old, incorrect location. 
-// It should be updated or replaced later to fetch from the sub-collections.
+// Fetches all daily report entries for a given employee from the correct sub-collection location.
 export const getEmployeeDailyReportEntries = async (
   employeeId: string
 ): Promise<DailyReportEntry[]> => {
   try {
-    const reportsRef = collection(db, 'daily_reports', employeeId, 'reports');
-    const querySnapshot = await getDocs(reportsRef);
-    const entries: DailyReportEntry[] = [];
+    const reportGroupRef = collectionGroup(db, 'dailyReport');
+    const q = query(reportGroupRef, where('employeeId', '==', employeeId));
+    const querySnapshot = await getDocs(q);
+    
+    const allEntries: DailyReportEntry[] = [];
+
     querySnapshot.forEach((doc) => {
-      entries.push({ id: doc.id, ...doc.data() } as DailyReportEntry);
+      const data = doc.data();
+      if (data.workhours && Array.isArray(data.workhours)) {
+        data.workhours.forEach((log: any, index: number) => {
+          const assignDate = log.timestamp.toDate().toISOString().split('T')[0];
+          
+          // Generate a truly unique ID for each individual log entry
+          const uniqueEntryId = `${doc.id}-${data.subtaskId}-${assignDate}-${log.timestamp.toMillis()}-${index}`;
+
+          allEntries.push({
+            id: uniqueEntryId,
+            employeeId: data.employeeId,
+            subtaskId: data.subtaskId,
+            subtaskPath: doc.ref.path.split('/dailyReport')[0],
+            assignDate: assignDate,
+            normalWorkingHours: `${Math.floor(log.day)}:${Math.round((log.day % 1) * 60)}`,
+            otWorkingHours: `${Math.floor(log.ot)}:${Math.round((log.ot % 1) * 60)}`,
+            progress: `${log.progress}%`,
+            note: log.note,
+            taskName: data.taskName || '',
+            subTaskName: data.subTaskName || '',
+            item: data.item || '',
+            subTaskCategory: data.subTaskCategory || '',
+            internalRev: data.internalRev || '',
+            subTaskScale: data.subTaskScale || '',
+            project: data.project || '',
+            logTimestamp: log.timestamp,
+          } as DailyReportEntry);
+        });
+      }
     });
-    return entries;
+    
+    return allEntries;
   } catch (error) {
-    console.error('Error fetching daily report entries:', error);
+    console.error('Error fetching daily report entries from collection group:', error);
     return [];
   }
 };
+
 
 export const fetchAvailableSubtasksForEmployee = async (
   employeeId: string
@@ -84,7 +117,7 @@ export const saveDailyReportEntries = async (
   employeeId: string,
   entries: DailyReportEntry[]
 ): Promise<void> => {
-  console.log('[DEBUG] Starting FINAL saveDailyReportEntries with correct data structure');
+  console.log('[DEBUG] Starting saveDailyReportEntries');
   try {
     const batch = writeBatch(db);
     const validEntries = entries.filter(entry => entry.subtaskId && entry.subtaskPath && entry.subtaskPath.includes('subtasks'));
@@ -95,42 +128,90 @@ export const saveDailyReportEntries = async (
     }
 
     for (const entry of validEntries) {
-      // CHANGE: The Document ID is now the employee's ID, ensuring one document per employee per subtask.
-      const dailyReportId = entry.employeeId;
+      // Path to the subtask document, e.g., /projects/XYZ/tasks/ABC/subtasks/123
+      const subtaskDocPath = entry.subtaskPath!;
       
-      const dailyReportRef = doc(db, entry.subtaskPath!, 'dailyReport', dailyReportId);
+      // Path to the dailyReport document for this employee within the subtask
+      const dailyReportRef = doc(db, subtaskDocPath, 'dailyReport', entry.employeeId);
       
-      const { 
-        id, relateDrawing, subtaskPath, normalWorkingHours, otWorkingHours, progress, note,
-        ...mainDataToSave 
-      } = entry;
+      // Ref to the subtask document itself to update its main progress
+      const subtaskDocRef = doc(db, subtaskDocPath);
 
-      // ACTION 1: Set the main document data (e.g., project, taskName).
-      // { merge: true } creates the document if it doesn't exist, and updates it without overwriting the workhours array if it does.
-      batch.set(dailyReportRef, mainDataToSave, { merge: true });
+      // 1. Define the core data for the dailyReport document.
+      // This should only contain metadata about the task and employee, not logs.
+      const dailyReportMainData = {
+        employeeId: entry.employeeId,
+        subtaskId: entry.subtaskId,
+        // Fields below are for easier querying/display if needed
+        taskName: entry.taskName || '',
+        subTaskName: entry.subTaskName || '',
+        item: entry.item || '',
+        subTaskCategory: entry.subTaskCategory || '',
+        internalRev: entry.internalRev || '',
+        subTaskScale: entry.subTaskScale || '',
+        project: entry.project || '',
+      };
 
-      // Prepare the work log object to be added to the array
+      // Set/merge this metadata into the employee's dailyReport document.
+      batch.set(dailyReportRef, dailyReportMainData, { merge: true });
+
+      // 2. Prepare the new work log entry.
+      const newProgressNumber = parseInt(entry.progress.replace('%', ''), 10) || 0;
       const workLogData = {
         day: parseHours(entry.normalWorkingHours),
         ot: parseHours(entry.otWorkingHours),
-        progress: parseInt(entry.progress, 10) || 0,
+        progress: newProgressNumber, // Use the parsed number
         note: entry.note || '',
-        timestamp: new Date() // Use client-side timestamp
+        timestamp: new Date()
       };
 
-      // ACTION 2: Update the 'workhours' array field by appending the new work log object.
+      // Atomically add the new work log to the 'workhours' array.
       batch.update(dailyReportRef, {
         workhours: arrayUnion(workLogData)
       });
       
-      console.log(`[DEBUG]   - Queued update for dailyReport ${dailyReportId}. Appending to workhours array.`);
+      // 3. IMPORTANT: Update the progress on the subtask document itself.
+      // This ensures the new progress is the source of truth for the next day.
+      batch.update(subtaskDocRef, {
+          subTaskProgress: newProgressNumber
+      });
+      
+      console.log(`[DEBUG] Queued update for dailyReport ${entry.employeeId}. Appending to workhours.`);
+      console.log(`[DEBUG] Queued update for subtask ${entry.subtaskId}. Setting subTaskProgress to ${newProgressNumber}.`);
     }
 
     await batch.commit();
-    console.log('[DEBUG] Daily report workhours updated successfully!');
-  } catch (error)
-{
-    console.error('[DEBUG] Error saving daily report entries:', error);
+    console.log('[DEBUG] Batch commit successful! Daily reports and subtask progresses updated.');
+  } catch (error) {
+    console.error('[DEBUG] Error in saveDailyReportEntries:', error);
     throw error;
   }
 };
+
+export interface UploadedFile {
+    id: string;
+    fileName: string;
+    fileURL: string;
+    subtaskId: string;
+    subtaskName: string;
+    uploadedAt: Timestamp;
+    workDate: string;
+  }
+  
+  export const getUploadedFilesForEmployee = async (employeeId: string): Promise<UploadedFile[]> => {
+    try {
+      const filesRef = collection(db, 'dailyReportFiles');
+      const q = query(filesRef, where('employeeId', '==', employeeId));
+      const querySnapshot = await getDocs(q);
+      
+      const files: UploadedFile[] = [];
+      querySnapshot.forEach((doc) => {
+        files.push({ id: doc.id, ...doc.data() } as UploadedFile);
+      });
+      
+      return files;
+    } catch (error) {
+      console.error('Error fetching uploaded files:', error);
+      return [];
+    }
+  };

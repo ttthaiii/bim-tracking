@@ -1,11 +1,10 @@
-
 'use client';
 
-import { useState, useEffect, useCallback, useId, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import Calendar from 'react-calendar';
 import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
-import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries } from '@/services/taskAssignService';
+import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee, UploadedFile } from '@/services/taskAssignService';
 import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useDashboard } from '@/context/DashboardContext';
@@ -14,29 +13,35 @@ import { getProjects } from '@/lib/projects';
 import { SubtaskAutocomplete } from '@/components/SubtaskAutocomplete';
 import Select from '@/components/ui/Select';
 import { RecheckPopup } from '@/components/RecheckPopup';
+import { HistoryModal } from '@/components/HistoryModal'; // Import the new modal
 import isEqual from 'lodash.isequal';
+import { Timestamp } from 'firebase/firestore';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
 
 const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: string, baseId: string, index: number): DailyReportEntry => ({
   id: `${baseId}-temp-${index}`,
-  employeeId, assignDate, subtaskId: '', subtaskPath: '', // Added subtaskPath
+  employeeId, assignDate, subtaskId: '', subtaskPath: '',
   normalWorkingHours: '0:0', otWorkingHours: '0:0', progress: '0%',
   note: '', status: 'pending', subTaskName: '', subTaskCategory: '', internalRev: '',
   subTaskScale: '', project: '', taskName: '', remark: '', item: '', relateDrawing: '',
+  isLeaveTask: false,
+  initialProgress: 0,
+  progressError: '',
 });
 
 const hourOptions = Array.from({ length: 13 }, (_, i) => ({ value: i.toString(), label: `${i} ชั่วโมง` }));
 const minuteOptions = [0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} นาที` }));
 
-const generateRelateDrawingText = (subtask: Subtask, project?: Project | null): string => {
-  if (!subtask) return '';
+const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
+  if (!entry.subtaskId) return '';
+  const project = projects.find(p => p.id === entry.project);
   let parts = [];
   if (project) parts.push(project.abbr);
-  if (subtask.taskName) parts.push(subtask.taskName);
-  if (subtask.subTaskName) parts.push(subtask.subTaskName);
-  if (subtask.item) parts.push(subtask.item);
+  if (entry.taskName) parts.push(entry.taskName);
+  if (entry.subTaskName) parts.push(entry.subTaskName);
+  if (entry.item) parts.push(entry.item);
   return parts.length > 0 ? `(${parts.join(' - ')})` : '';
 };
 
@@ -52,16 +57,51 @@ export default function DailyReport() {
   const [error, setError] = useState('');
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [isRecheckOpen, setIsRecheckOpen] = useState(false);
-
+  const [isFutureDate, setIsFutureDate] = useState(false);
+  
   const [reportDataCache, setReportDataCache] = useState<Record<string, DailyReportEntry[]>>({});
   const [allDailyEntries, setAllDailyEntries] = useState<DailyReportEntry[]>([]);
   const [dailyReportEntries, setDailyReportEntries] = useState<DailyReportEntry[]>([]);
-
+  
   const [touchedRows, setTouchedRows] = useState<Set<string>>(new Set());
   const [availableSubtasks, setAvailableSubtasks] = useState<Subtask[]>([]);
+  const [filteredSubtasks, setFilteredSubtasks] = useState<Subtask[]>([]);
   const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const prevWorkDateRef = useRef<string>(workDate);
+  const [entriesToSubmit, setEntriesToSubmit] = useState<DailyReportEntry[]>([]);
 
+  // States for History Modal
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  // historyLogs will now be grouped by timestamp
+  const [historyLogsGrouped, setHistoryLogsGrouped] = useState<Record<string, DailyReportEntry[]>>({});
+
+  const handleShowHistory = () => {
+    const entriesForDate = allDailyEntries.filter(entry => entry.assignDate === workDate);
+    const groupedLogs: Record<string, DailyReportEntry[]> = {};
+
+    entriesForDate.forEach(entry => {
+      // Round timestamp to the nearest second to group entries submitted at roughly the same time
+      const timestampKey = entry.logTimestamp?.toMillis() ? String(Math.floor(entry.logTimestamp.toMillis() / 1000) * 1000) : 'no-timestamp';
+      if (!groupedLogs[timestampKey]) {
+        groupedLogs[timestampKey] = [];
+      }
+      groupedLogs[timestampKey].push(entry);
+    });
+
+    // Sort timestamps in descending order (newest first)
+    const sortedTimestamps = Object.keys(groupedLogs).sort((a, b) => parseInt(b) - parseInt(a));
+    const sortedGroupedLogs: Record<string, DailyReportEntry[]> = {};
+    sortedTimestamps.forEach(ts => {
+      // Sort entries within each timestamp by subtask name for consistent display
+      groupedLogs[ts].sort((a, b) => (a.subTaskName || '').localeCompare(b.subTaskName || ''));
+      sortedGroupedLogs[ts] = groupedLogs[ts];
+    });
+    
+    setHistoryLogsGrouped(sortedGroupedLogs);
+    setShowHistoryModal(true);
+  };
+  
   useEffect(() => {
     const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
     const currentData = reportDataCache[workDate];
@@ -80,27 +120,18 @@ export default function DailyReport() {
     setLoading(true);
     setError('');
     try {
-      const [employee, dailyEntries, projects, subtasks] = await Promise.all([
+      const [employee, dailyEntries, projects, subtasks, files] = await Promise.all([
         getEmployeeByID(eid),
-        getEmployeeDailyReportEntries(eid), // This fetches from the old location, which might be fine for now or needs changing
+        getEmployeeDailyReportEntries(eid),
         getProjects(),
         fetchAvailableSubtasksForEmployee(eid),
+        getUploadedFilesForEmployee(eid),
       ]);
       
       setAllProjects(projects);
       setAvailableSubtasks(subtasks);
-      
-      const processedDailyEntries = dailyEntries.map(entry => {
-        const subtask = subtasks.find(s => s.id === entry.subtaskId);
-        const project = subtask ? projects.find(p => p.id === subtask.project) : null;
-        return {
-          ...entry,
-          subtaskPath: subtask?.path || '', // Make sure path is included
-          relateDrawing: subtask ? generateRelateDrawingText(subtask, project) : '',
-        };
-      });
-
-      setAllDailyEntries(processedDailyEntries);
+      setUploadedFiles(files);
+      setAllDailyEntries(dailyEntries);
 
       if (employee) setEmployeeData(employee);
       else {
@@ -108,7 +139,7 @@ export default function DailyReport() {
         setEmployeeData(null);
       }
     } catch (err) {
-      console.error('Error fetching daily report entries:', err);
+      console.error('Error fetching all data:', err);
       setError('เกิดข้อผิดพลาดในการดึงข้อมูล');
     } finally {
       setLoading(false);
@@ -127,6 +158,9 @@ export default function DailyReport() {
       const selectedDateLocal = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       const todayLocal = new Date();
       todayLocal.setHours(0, 0, 0, 0);
+      
+      setIsFutureDate(selectedDateLocal > todayLocal);
+      
       const twoDaysAgoLocal = new Date(todayLocal);
       twoDaysAgoLocal.setDate(todayLocal.getDate() - 2);
 
@@ -139,31 +173,52 @@ export default function DailyReport() {
     }
   }, [date]);
 
+  // Filter subtasks based on whether the date is in the future
+  useEffect(() => {
+    if (isFutureDate) {
+      const leaveTasks = availableSubtasks.filter(
+        subtask => (subtask.taskName || '').includes('ลา') || (subtask.subTaskName || '').includes('ลา')
+      );
+      setFilteredSubtasks(leaveTasks);
+    } else {
+      setFilteredSubtasks(availableSubtasks);
+    }
+  }, [isFutureDate, availableSubtasks]);
+
+  // THIS IS THE KEY LOGIC: Filter allDailyEntries to show only the latest log for the selected workDate
   useEffect(() => {
     if (!employeeId || !workDate) return;
 
-    const previousDate = prevWorkDateRef.current;
-    if (previousDate && previousDate !== workDate) {
-      setReportDataCache(prevCache => ({
-        ...prevCache,
-        [previousDate]: dailyReportEntries,
-      }));
+    const entriesForDate = allDailyEntries.filter(entry => entry.assignDate === workDate);
+
+    if (entriesForDate.length === 0) {
+        setDailyReportEntries([createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)]);
+        return;
     }
 
-    if (reportDataCache[workDate]) {
-      setDailyReportEntries(reportDataCache[workDate]);
-    } else {
-      const entriesFromBackend = allDailyEntries.filter(entry => entry.assignDate === workDate);
-      const entriesToShow = entriesFromBackend.length > 0
-        ? entriesFromBackend
-        : [createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)];
-      setDailyReportEntries(entriesToShow);
-      setReportDataCache(prevCache => ({ ...prevCache, [workDate]: entriesToShow }));
-    }
+    // 1. Find the absolute latest timestamp in milliseconds
+    const latestTimestampMillis = Math.max(...entriesForDate.map(entry => entry.logTimestamp?.toMillis() || 0));
 
-    prevWorkDateRef.current = workDate;
-    setTouchedRows(new Set());
-  }, [workDate, employeeId, allDailyEntries, baseId]);
+    // 2. Round this latest timestamp down to the nearest second
+    const latestTimestampSecond = Math.floor(latestTimestampMillis / 1000) * 1000;
+
+    // 3. Filter for all entries that fall within the same second as the latest entry
+    const latestSubmissionEntries = entriesForDate.filter(entry => {
+        const entryTimestampSecond = Math.floor((entry.logTimestamp?.toMillis() || 0) / 1000) * 1000;
+        return entryTimestampSecond === latestTimestampSecond;
+    });
+
+    // 4. Set the entries to show, and importantly, set initialProgress from the entry's actual progress
+    const entriesToShow = latestSubmissionEntries.length > 0
+      ? latestSubmissionEntries.map(entry => ({
+          ...entry,
+          initialProgress: parseInt(entry.progress.replace('%', ''), 10) || 0, // Set initialProgress from its own progress
+        }))
+      : [createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)];
+    
+    setDailyReportEntries(entriesToShow);
+
+  }, [workDate, allDailyEntries, employeeId, baseId]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
     setDailyReportEntries(currentEntries => {
@@ -178,8 +233,7 @@ export default function DailyReport() {
         }
         return entry;
       });
-      setReportDataCache(prevCache => ({ ...prevCache, [workDate]: newEntries }));
-      return newEntries;
+      return newEntries; // Ensure the newEntries array is returned here
     });
   };
 
@@ -200,47 +254,84 @@ export default function DailyReport() {
   };
 
   const handleDeleteEntry = (entryId: string) => {
-    if (dailyReportEntries.length <= 1) {
-      alert('ต้องมีอย่างน้อย 1 แถว');
-      return;
-    }
-    if (window.confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-      setDailyReportEntries(currentEntries => {
-        const newEntries = currentEntries.filter(entry => entry.id !== entryId);
-        setReportDataCache(prevCache => ({ ...prevCache, [workDate]: newEntries }));
-        return newEntries;
-      });
-    }
+    // This needs to be adapted to handle deleting from the correct place
+    console.warn("Delete functionality needs review for the new data structure.", entryId);
   };
   
   const handleAddRow = () => {
     setDailyReportEntries(currentEntries => {
-      const newEntries = [...currentEntries, createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, currentEntries.length)];
-      setReportDataCache(prevCache => ({ ...prevCache, [workDate]: newEntries }));
-      return newEntries;
+      // Prevent adding a new row if the last one is empty
+      if (currentEntries.length > 0 && !currentEntries[currentEntries.length - 1].subtaskId) {
+        return currentEntries;
+      }
+      return [...currentEntries, createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, currentEntries.length)];
     });
+  };
+
+  const handleProgressInput = (entryId: string, newProgressValue: string) => {
+    const entry = dailyReportEntries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const newProgress = parseInt(newProgressValue, 10);
+    const initialProgress = entry.initialProgress || 0;
+  
+    let progressError = '';
+    if (!isNaN(newProgress) && newProgress < initialProgress) {
+      progressError = `ค่าต้องไม่น้อยกว่าค่าเริ่มต้น (${initialProgress}%)`;
+    }
+  
+    handleUpdateEntry(entryId, { progress: newProgressValue, progressError });
+  };
+  
+  const handleProgressValidation = (entryId: string) => {
+    const entry = dailyReportEntries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    const currentProgress = parseInt(entry.progress, 10);
+    const initialProgress = entry.initialProgress || 0;
+
+    if (isNaN(currentProgress) || currentProgress < initialProgress) {
+      handleUpdateEntry(entryId, { progress: `${initialProgress}%`, progressError: '' });
+    } else {
+      handleUpdateEntry(entryId, { progressError: '' });
+    }
   };
 
   const handleRelateDrawingChange = (entryId: string, subtaskId: string | null) => {
     const selectedSubtask = subtaskId ? availableSubtasks.find(sub => sub.id === subtaskId) : null;
-    const project = selectedSubtask ? allProjects.find(p => p.id === selectedSubtask.project) : null;
+    
+    let project: Project | null = null;
+    if (selectedSubtask) {
+        project = allProjects.find(p => p.id === selectedSubtask.projectId) || 
+                  allProjects.find(p => p.id === selectedSubtask.project) || 
+                  allProjects.find(p => p.name === selectedSubtask.project) || 
+                  null;
+    }
 
-    const updates = selectedSubtask ? {
+    const isLeave = selectedSubtask?.taskName?.includes('ลา') || selectedSubtask?.subTaskName?.includes('ลา') || false;
+    // Note: initialProgress here is for newly selected subtask, not for existing entry validation.
+    const newSubtaskInitialProgress = selectedSubtask?.subTaskProgress || 0;
+
+    const updates: Partial<DailyReportEntry> = selectedSubtask ? {
         subtaskId: selectedSubtask.id,
-        subtaskPath: selectedSubtask.path || '', // <-- CRITICAL: Store the subtask path
+        subtaskPath: selectedSubtask.path || '',
         subTaskName: selectedSubtask.subTaskName,
         subTaskCategory: selectedSubtask.subTaskCategory,
-        progress: `${selectedSubtask.subTaskProgress || 0}%`,
+        progress: isLeave ? '0%' : `${newSubtaskInitialProgress}%`,
         note: selectedSubtask.remark,
         internalRev: selectedSubtask.internalRev,
         subTaskScale: selectedSubtask.subTaskScale,
-        project: selectedSubtask.project,
+        project: project ? project.id : '',
         taskName: selectedSubtask.taskName,
         item: selectedSubtask.item,
         status: 'pending',
-        relateDrawing: generateRelateDrawingText(selectedSubtask, project),
+        isLeaveTask: isLeave,
+        otWorkingHours: isLeave ? '0:0' : '0:0',
+        // This initialProgress is for the newly selected subtask, not to prevent decreasing existing daily report entry progress.
+        initialProgress: isLeave ? 0 : newSubtaskInitialProgress,
+        progressError: '',
     } : { 
-        subtaskId: '', subtaskPath: '', progress: '0%', note: '', item: '', status: 'pending', relateDrawing: '' 
+        subtaskId: '', subtaskPath: '', progress: '0%', note: '', item: '', status: 'pending', relateDrawing: '', isLeaveTask: false, initialProgress: 0, progressError: '',
     };
     handleUpdateEntry(entryId, updates);
   };
@@ -251,6 +342,25 @@ export default function DailyReport() {
       setError('ไม่พบรหัสพนักงาน ไม่สามารถบันทึกได้');
       return;
     }
+
+    const validEntries = dailyReportEntries.filter(entry => entry.subtaskId);
+
+    if (validEntries.length === 0) {
+      alert('กรุณาเลือก Task อย่างน้อย 1 รายการ');
+      return;
+    }
+
+    // Prepare data for RecheckPopup
+    const entriesForRecheck = validEntries.map(entry => {
+      const fullTaskName = generateRelateDrawingText(entry, allProjects);
+      return {
+        ...entry,
+        relateDrawing: fullTaskName, // Format Relate Drawing
+        progress: `${entry.progress}`, // Ensure progress is a string with '%' if it's already in that format, otherwise format it
+      };
+    });
+
+    setEntriesToSubmit(entriesForRecheck);
     setIsRecheckOpen(true);
   };
 
@@ -259,22 +369,22 @@ export default function DailyReport() {
     setLoading(true);
     setError('');
     try {
-      await saveDailyReportEntries(employeeId, dailyReportEntries);
+      const entriesToSave = entriesToSubmit.map(entry => ({
+        ...entry,
+        assignDate: workDate,
+      }));
+
+      await saveDailyReportEntries(employeeId, entriesToSave);
+      
       alert('บันทึกข้อมูล Daily Report สำเร็จ!');
       setHasUnsavedChanges(false);
       
-      setReportDataCache(prevCache => {
-        const newCache = { ...prevCache };
-        delete newCache[workDate];
-        return newCache;
-      });
-
+      setReportDataCache({});
       await fetchAllData(employeeId);
-
+      // The useEffect will handle resetting the dailyReportEntries correctly
     } catch (err) {
       console.error('Error submitting daily report:', err);
       setError('เกิดข้อผิดพลาดในการบันทึกข้อมูล Daily Report');
-      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล Daily Report');
     } finally {
       setLoading(false);
     }
@@ -282,19 +392,36 @@ export default function DailyReport() {
   
   const tileClassName = ({ date, view }: { date: Date; view: string }) => {
     if (view === 'month') {
-      const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-      const hasData = allDailyEntries.some(entry => {
-        const entryDate = new Date(entry.assignDate);
-        return new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate()).getTime() === normalizedDate;
-      });
-      if (hasData) return 'tile-has-data';
-
+      const classes = [];
+      const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const normalizedDateTimestamp = normalizedDate.getTime();
+      
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const twoDaysAgo = new Date(today);
-      twoDaysAgo.setDate(today.getDate() - 2);
 
-      if (date < today && date >= twoDaysAgo) return 'tile-can-edit-past';
+      // Check if the day is Sunday (getDay() returns 0 for Sunday)
+      const isSunday = date.getDay() === 0;
+
+      if (normalizedDate < today) {
+        const entriesForDate = allDailyEntries.filter(entry => {
+            const entryDate = new Date(entry.assignDate);
+            return new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate()).getTime() === normalizedDateTimestamp;
+        });
+
+        // Only add 'has-missing-data-marker' if it's not a Sunday and there are no entries
+        if (entriesForDate.length === 0 && !isSunday) {
+            classes.push('has-missing-data-marker');
+        } else {
+            const uniqueTimestamps = new Set(
+                entriesForDate.map(e => Math.floor((e.logTimestamp?.toMillis() || 0) / 1000))
+            );
+            if (uniqueTimestamps.size > 1) {
+                classes.push('has-edit-marker');
+            }
+        }
+      }
+      
+      return classes.length > 0 ? classes.join(' ') : '';
     }
     return '';
   };
@@ -302,42 +429,39 @@ export default function DailyReport() {
   return (
     <PageLayout>
       <div className="container-fluid mx-auto p-4 md:p-8 bg-gray-50 min-h-screen">
+        {/* Main Flex Container */}
         <div className="flex flex-col md:flex-row gap-6">
+          {/* Calendar and Legends */}
           <div className="w-full md:w-[384px] md:flex-shrink-0">
             <div className="bg-white rounded-lg shadow-md border border-gray-200">
-                <Calendar 
-                  onChange={setDate} 
-                  value={date} 
-                  className="custom-calendar" 
-                  locale="th-TH" 
-                  tileClassName={tileClassName}
-                />
+              <Calendar onChange={setDate} value={date} className="custom-calendar" locale="th-TH" tileClassName={tileClassName} />
             </div>
             <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
-              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
-              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-yellow-300 mr-2"></div><span>วันที่มีการลงข้อมูลแล้ว</span></div>
-              <div className="flex items-center"><div className="w-3 h-3 rounded-full bg-gray-300 mr-2"></div><span>วันที่สามารถลงข้อมูลย้อนหลังได้</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-blue-500 mr-2"></div><span>วันที่เลือก</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
+              <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>วันที่ยังไม่มีการลงข้อมูล</span></div>
+              <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-400 mr-2"></span><span>วันที่มีการแก้ไข</span></div>
             </div>
           </div>
 
+          {/* Form Section */}
           <div className="flex-1">
             <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[80vh]">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
-                  <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">รหัสพนักงาน</label>
-                      <input type="text" value={employeeId} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed" placeholder="กำลังโหลด..."/>
-                  </div>
-                  <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">วันที่ทำงาน</label>
-                      <input type="date" value={workDate} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed"/>
-                  </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">รหัสพนักงาน</label>
+                  <input type="text" value={employeeId} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed" placeholder="กำลังโหลด..."/>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">วันที่ทำงาน</label>
+                  <input type="date" value={workDate} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed"/>
+                </div>
               </div>
 
               {loading && <p>Loading...</p>}
-              {error && <p className="mb-4 text-red-500 text-sm">{error}</p>}
-              {employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
+              {error && <p className="mb-4 text-red-500 text-sm">โค้ดผิดพลาด</p>}{employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto min-h-[20rem]">
                 <table className="w-full border-collapse text-xs">
                   <thead>
                     <tr className="bg-orange-500 text-white">
@@ -348,88 +472,95 @@ export default function DailyReport() {
                       <th className="p-2 font-semibold text-left">Progress</th>
                       <th className="p-2 font-semibold text-left">Note</th>
                       <th className="p-2 font-semibold text-left">Upload File</th>
-                      <th className="p-2 font-semibold text-center w-16">Actions</th>
+                      <th className="p-2 font-semibold text-center w-24">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {dailyReportEntries.map((entry, index) => (
+                    {dailyReportEntries.map((entry, index) => {
+                      const relevantFile = uploadedFiles.find(file => file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate);
+                      const fullTaskName = generateRelateDrawingText(entry, allProjects);
+                      return (
                         <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
                           <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
                           <td className="p-2 border-r border-yellow-200">
                              <SubtaskAutocomplete
                                 entryId={entry.id}
                                 value={entry.subtaskId}
-                                options={availableSubtasks}
+                                options={filteredSubtasks}
                                 allProjects={allProjects}
                                 onChange={handleRelateDrawingChange}
                                 onFocus={() => handleRowFocus(entry.id, index)}
-                                disabled={isReadOnly}
+                                isDisabled={isReadOnly && !isFutureDate}
                               />
                           </td>
                           <td className="p-2 border-r border-yellow-200">
                             <div className="flex items-center gap-1">
-                                <Select 
-                                  value={String((entry.normalWorkingHours || '0:0').split(':')[0])} 
-                                  onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} 
-                                  options={hourOptions} 
-                                  disabled={isReadOnly} 
-                                />
-                                <Select 
-                                  value={String((entry.normalWorkingHours || '0:0').split(':')[1])} 
-                                  onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'm', value)} 
-                                  options={minuteOptions} 
-                                  disabled={isReadOnly} 
-                                />
+                                <Select value={String((entry.normalWorkingHours || '0:0').split(':')[0])} onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} options={hourOptions} disabled={isReadOnly} />
+                                <Select value={String((entry.normalWorkingHours || '0:0').split(':')[1])} onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'm', value)} options={minuteOptions} disabled={isReadOnly} />
                             </div>
                           </td>
                            <td className="p-2 border-r border-yellow-200">
                             <div className="flex items-center gap-1">
-                                <Select 
-                                  value={String((entry.otWorkingHours || '0:0').split(':')[0])} 
-                                  onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} 
-                                  options={hourOptions} 
-                                  disabled={isReadOnly}
-                                />
-                                <Select 
-                                  value={String((entry.otWorkingHours || '0:0').split(':')[1])} 
-                                  onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} 
-                                  options={minuteOptions} 
-                                  disabled={isReadOnly}
-                                />
+                                <Select value={String((entry.otWorkingHours || '0:0').split(':')[0])} onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} options={hourOptions} disabled={isReadOnly || entry.isLeaveTask} />
+                                <Select value={String((entry.otWorkingHours || '0:0').split(':')[1])} onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} options={minuteOptions} disabled={isReadOnly || entry.isLeaveTask} />
                             </div>
                           </td>
                           <td className="p-2 border-r border-yellow-200">
-                            <div className="flex items-center gap-1">
-                              <input type="number" min="0" max="100" value={parseInt(entry.progress, 10) || 0} onChange={(e) => handleUpdateEntry(entry.id, { progress: `${e.target.value}%` })} className="w-14 p-1 border border-gray-300 rounded-md text-center text-xs text-gray-900" disabled={isReadOnly}/>
-                              <span className="text-gray-800">%</span>
+                            <div title={entry.progressError || `Progress ต้องไม่น้อยกว่า ${entry.initialProgress || 0}%`}>
+                              <div className="flex items-center gap-1">
+                                <input type="number" value={entry.progress.replace('%', '')} onChange={(e) => handleProgressInput(entry.id, e.target.value)} onBlur={() => handleProgressValidation(entry.id)} className="w-14 p-1 border border-gray-300 rounded-md text-center text-xs text-gray-900" disabled={isReadOnly || entry.isLeaveTask || isFutureDate} />
+                                <span className="text-gray-800">%</span>
+                              </div>
                             </div>
                           </td>
-                          <td className="p-2 border-r border-yellow-200"><input type="text" value={entry.note || ''} onChange={(e) => handleUpdateEntry(entry.id, { note: e.target.value })} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900" placeholder="เพิ่มหมายเหตุ" disabled={isReadOnly}/></td>
-                          <td className="p-2 border-r border-yellow-200 text-center text-gray-500">Progress<br/>ต้องถึง 100%</td>
+                          <td className="p-2 border-r border-yellow-200"><input type="text" value={entry.note || ''} onChange={(e) => handleUpdateEntry(entry.id, { note: e.target.value })} className="w-full p-1 border border-gray-300 rounded-md text-xs text-gray-900" placeholder="เพิ่มหมายเหตุ" disabled={isReadOnly || isFutureDate}/></td>
+                          <td className="p-2 border-r border-yellow-200 text-center">
+                            {relevantFile ? (
+                              <a href={relevantFile.fileURL} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 font-semibold">
+                                Download
+                              </a>
+                            ) : (
+                              <span className="text-gray-500">ยังไม่มีไฟล์</span>
+                            )}
+                          </td>
                           <td className="p-2 text-center">
-                            <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100" title="ลบ" disabled={isReadOnly}>
+                            <div className="flex items-center justify-center gap-2">
+                              {/* Removed individual history button from here */}
+                              <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100" title="ลบ" disabled={isReadOnly}>
                                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>
-                            </button>
+                              </button>
+                            </div>
                           </td>
                         </tr>
-                      ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
 
               <div className="mt-4 flex justify-between items-center">
                   <button type="button" onClick={handleAddRow} className="bg-orange-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-orange-600 text-sm" disabled={isReadOnly}>Add Row</button>
-                  <button type="button" onClick={handleSubmit} className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-2 px-6 rounded-md hover:from-blue-700 hover:to-purple-700" disabled={isReadOnly}>Submit</button>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handleShowHistory} className="bg-blue-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-600 text-sm" disabled={false}>ดูประวัติการลงข้อมูล</button>
+                    <button type="button" onClick={handleSubmit} className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-2 px-6 rounded-md hover:from-blue-700 hover:to-purple-700" disabled={isReadOnly || isFutureDate}>Submit</button>
+                  </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+      <HistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)}
+        // Pass grouped logs instead of individual logs and remove taskName
+        groupedLogs={historyLogsGrouped}
+        allProjects={allProjects}
+      />
       <RecheckPopup 
         isOpen={isRecheckOpen}
         onClose={() => setIsRecheckOpen(false)}
         onConfirm={handleConfirmSubmit}
-        dailyReportEntries={dailyReportEntries}
+        dailyReportEntries={entriesToSubmit}
         workDate={workDate}
       />
     </PageLayout>
