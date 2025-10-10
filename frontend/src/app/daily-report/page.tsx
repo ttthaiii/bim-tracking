@@ -32,8 +32,45 @@ const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: stri
   progressError: '',
 });
 
-const hourOptions = Array.from({ length: 13 }, (_, i) => ({ value: i.toString(), label: `${i} ชั่วโมง` }));
-const minuteOptions = [0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} นาที` }));
+// Calculate total working hours excluding a specific entry
+const calculateTotalHoursExcluding = (entries: DailyReportEntry[], excludeEntryId: string): number => {
+  return entries.reduce((total, entry) => {
+    if (entry.id === excludeEntryId) return total;
+    const [hours, minutes] = (entry.normalWorkingHours || '0:0').split(':').map(Number);
+    return total + hours + minutes / 60;
+  }, 0);
+};
+
+// Generate hour options based on available hours
+const getHourOptions = (entries: DailyReportEntry[], currentEntryId: string): { value: string; label: string; }[] => {
+  const totalOtherHours = calculateTotalHoursExcluding(entries, currentEntryId);
+  const maxAvailableHours = Math.floor(8 - totalOtherHours);
+  return Array.from(
+    { length: maxAvailableHours + 1 },
+    (_, i) => ({ value: i.toString(), label: `${i} hrs` })
+  );
+};
+
+// สร้างตัวเลือกนาทีตามเวลาที่เหลือ
+const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, currentHours: number): { value: string; label: string; }[] => {
+  const totalOtherHours = calculateTotalHoursExcluding(entries, currentEntryId);
+  const remainingHours = 8 - (totalOtherHours + currentHours);
+  
+  // ถ้าเหลือเวลาน้อยกว่า 1 ชั่วโมง ให้แสดงตัวเลือกนาทีตามที่เหลือ
+  if (remainingHours < 0) {
+    return [{ value: '0', label: '0 m' }];
+  } else if (remainingHours === 0) {
+    return [{ value: '0', label: '0 m' }];
+  } else if (remainingHours < 1) {
+    const maxMinutes = Math.floor(remainingHours * 60);
+    return [0, 15, 30, 45]
+      .filter(m => m <= maxMinutes)
+      .map(m => ({ value: m.toString(), label: `${m} m` }));
+  }
+  
+  // ถ้าเหลือเวลามากกว่า 1 ชั่วโมง แสดงตัวเลือกนาทีทั้งหมด
+  return [0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} m` }));
+};
 
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
   if (!entry.subtaskId) return '';
@@ -175,6 +212,19 @@ export default function DailyReport() {
     }
   }, [date]);
 
+  // Effect สำหรับจัดการ cache เมื่อมีการเปลี่ยนวันที่
+  useEffect(() => {
+    if (!dailyReportEntries.length) return;
+    
+    // บันทึกข้อมูลลง cache เมื่อมีการเปลี่ยนวันที่
+    setReportDataCache(prev => ({
+      ...prev,
+      [workDate]: dailyReportEntries
+    }));
+    
+    prevWorkDateRef.current = workDate;
+  }, [workDate, dailyReportEntries]);
+
   // Filter subtasks based on whether the date is in the future
   useEffect(() => {
     if (isFutureDate) {
@@ -187,19 +237,27 @@ export default function DailyReport() {
     }
   }, [isFutureDate, availableSubtasks]);
 
-  // THIS IS THE KEY LOGIC: Filter allDailyEntries to show only the latest log for the selected workDate
+  // Effect สำหรับโหลดข้อมูลจาก cache หรือ server
   useEffect(() => {
     if (!employeeId || !workDate) return;
+
+    // ถ้ามีข้อมูลใน cache ให้ใช้ข้อมูลจาก cache
+    if (reportDataCache[workDate]) {
+      setDailyReportEntries(reportDataCache[workDate]);
+      return;
+    }
 
     const entriesForDate = allDailyEntries.filter((entry: DailyReportEntry) => entry.assignDate === workDate);
 
     if (entriesForDate.length === 0) {
         const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
-        setDailyReportEntries([{
+        const newEntry = {
             ...initialEntry,
             isExistingData: false,
-            logTimestamp: Timestamp.now() // Add logTimestamp
-        }]);
+            logTimestamp: Timestamp.now()
+        };
+        setDailyReportEntries([newEntry]);
+        setReportDataCache(prev => ({ ...prev, [workDate]: [newEntry] }));
         setEditableRows(new Set()); // เคลียร์ editableRows เพราะเป็นข้อมูลใหม่ แก้ไขได้เลย
         return;
     }    
@@ -224,12 +282,29 @@ export default function DailyReport() {
           (subtask.taskName?.includes('ลา') || subtask.subTaskName?.includes('ลา')) : 
           (entry.taskName?.includes('ลา') || entry.subTaskName?.includes('ลา'));
 
+        // สร้าง relateDrawing สำหรับข้อมูลเก่า
+        let relateDrawing = entry.relateDrawing;
+        if (!relateDrawing && subtask) {
+          // ค้นหา project
+          const project = allProjects.find(p => p.id === subtask.projectId) || 
+                         allProjects.find(p => p.id === subtask.project) ||
+                         allProjects.find(p => p.name === subtask.project);
+          
+          // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
+          const abbr = project?.abbr || subtask.project || 'N/A';
+          const taskName = subtask.taskName || 'N/A';
+          const subTaskName = subtask.subTaskName || 'N/A';
+          const item = subtask.item || 'N/A';
+          relateDrawing = `${abbr}_${taskName}_${subTaskName}_${item}`;
+        }
+
         return {
           ...entry,
           isLeaveTask,
           initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
           progress: isLeaveTask ? '0%' : entry.progress,
           isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
+          relateDrawing: relateDrawing || '', // เพิ่ม relateDrawing
         };
     });
     
@@ -250,7 +325,9 @@ export default function DailyReport() {
         }
         return entry;
       });
-      return newEntries; // Ensure the newEntries array is returned here
+      // อัพเดท cache ด้วย
+      setReportDataCache(prev => ({ ...prev, [workDate]: newEntries }));
+      return newEntries;
     });
   };
 
@@ -278,9 +355,24 @@ export default function DailyReport() {
   const handleTimeChange = (entryId: string, type: 'normalWorkingHours' | 'otWorkingHours', part: 'h' | 'm', value: string) => {
     const currentEntry = dailyReportEntries.find(e => e.id === entryId);
     if (!currentEntry) return;
+
     let [h, m] = (currentEntry[type] || '0:0').split(':').map(Number);
     if (part === 'h') h = Number(value);
     if (part === 'm') m = Number(value);
+
+    // For normal working hours, validate against 8-hour total limit
+    if (type === 'normalWorkingHours') {
+      const totalOtherHours = calculateTotalHoursExcluding(dailyReportEntries, entryId);
+      const newTotalHours = totalOtherHours + h + m / 60;
+      
+      if (newTotalHours > 8) {
+        // If exceeds 8 hours, adjust to maximum available
+        const maxAvailableHours = Math.floor(8 - totalOtherHours);
+        h = maxAvailableHours;
+        m = 0;
+      }
+    }
+
     handleUpdateEntry(entryId, { [type]: `${h}:${m}` });
   };
 
@@ -354,8 +446,8 @@ export default function DailyReport() {
     }
   };
 
-  const handleRelateDrawingChange = (entryId: string, subtaskId: string | null) => {
-    const selectedSubtask = subtaskId ? availableSubtasks.find(sub => sub.id === subtaskId) : null;
+  const handleRelateDrawingChange = (entryId: string, subtaskPath: string | null) => {
+    const selectedSubtask = subtaskPath ? availableSubtasks.find(sub => sub.path === subtaskPath) : null;
     
     let project: Project | null = null;
     if (selectedSubtask) {
@@ -369,18 +461,26 @@ export default function DailyReport() {
     // Note: initialProgress here is for newly selected subtask, not for existing entry validation.
     const newSubtaskInitialProgress = selectedSubtask?.subTaskProgress || 0;
 
+    // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
+    const abbr = project?.abbr || selectedSubtask?.project || 'N/A';
+    const taskName = selectedSubtask?.taskName || 'N/A';
+    const subTaskName = selectedSubtask?.subTaskName || 'N/A';
+    const item = selectedSubtask?.item || 'N/A';
+    const relateDrawing = `${abbr}_${taskName}_${subTaskName}_${item}`;
+
     const updates: Partial<DailyReportEntry> = selectedSubtask ? {
         subtaskId: selectedSubtask.id,
         subtaskPath: selectedSubtask.path || '',
-        subTaskName: selectedSubtask.subTaskName,
-        subTaskCategory: selectedSubtask.subTaskCategory,
+        subTaskName: selectedSubtask.subTaskName || 'N/A',
+        subTaskCategory: selectedSubtask.subTaskCategory || '',
         progress: isLeave ? '0%' : `${newSubtaskInitialProgress}%`,
-        note: selectedSubtask.remark,
-        internalRev: selectedSubtask.internalRev,
-        subTaskScale: selectedSubtask.subTaskScale,
-        project: project ? project.id : '',
-        taskName: selectedSubtask.taskName,
-        item: selectedSubtask.item,
+        note: selectedSubtask.remark || '',
+        internalRev: selectedSubtask.internalRev || '',
+        subTaskScale: selectedSubtask.subTaskScale || '',
+        project: project ? project.id : (selectedSubtask.projectId || selectedSubtask.project || ''),
+        taskName: selectedSubtask.taskName || 'N/A',
+        item: selectedSubtask.item || '',
+        relateDrawing: relateDrawing,
         status: 'pending',
         isLeaveTask: isLeave,
         otWorkingHours: isLeave ? '0:0' : '0:0',
@@ -451,7 +551,9 @@ export default function DailyReport() {
       alert('บันทึกข้อมูล Daily Report สำเร็จ!');
       setHasUnsavedChanges(false);
       
+      // เคลียร์ cache และ flag ว่าเพิ่ง submit
       setReportDataCache({});
+      prevWorkDateRef.current = workDate;
       await fetchAllData(employeeId);
       // The useEffect will handle resetting the dailyReportEntries correctly
     } catch (err) {
@@ -560,45 +662,71 @@ export default function DailyReport() {
                           <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
                             <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
                             <td className="p-2 border-r border-yellow-200">
-                              <SubtaskAutocomplete
-                                entryId={entry.id}
-                                value={entry.subtaskId}
-                                options={filteredSubtasks}
-                                allProjects={allProjects}
-                                onChange={handleRelateDrawingChange}
-                                onFocus={() => handleRowFocus(entry.id, index)}
-                                isDisabled={isReadOnly && !isFutureDate}
-                              />
+                              {entry.subtaskId ? (
+                                <div className="text-gray-800">
+                                  {entry.relateDrawing}
+                                  <button 
+                                    onClick={() => handleUpdateEntry(entry.id, { subtaskId: '', relateDrawing: '' })}
+                                    className="ml-2 text-red-500 hover:text-red-700"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ) : (
+                                <SubtaskAutocomplete
+                                  entryId={entry.id}
+                                  value={entry.subtaskPath || null}
+                                  options={filteredSubtasks}
+                                  allProjects={allProjects}
+                                  selectedSubtaskIds={new Set(dailyReportEntries
+                                    .filter(e => e.id !== entry.id && e.subtaskPath) // ไม่รวม entry ปัจจุบัน
+                                    .map(e => e.subtaskPath || '')
+                                    .filter(path => path !== ''))} // รวบรวม subtaskPath ที่ถูกเลือกแล้ว และไม่เป็น empty string
+                                  onChange={handleRelateDrawingChange}
+                                  onFocus={() => handleRowFocus(entry.id, index)}
+                                  isDisabled={isReadOnly && !isFutureDate}
+                                />
+                              )}
                             </td>
                             <td className="p-2 border-r border-yellow-200">
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center space-x-1 w-28">
                                 <Select 
                                   value={String((entry.normalWorkingHours || '0:0').split(':')[0])} 
                                   onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} 
-                                  options={hourOptions} 
-                                  disabled={isReadOnly || (entry.isExistingData && !editableRows.has(entry.id))} 
+                                  options={getHourOptions(dailyReportEntries, entry.id)} 
+                                  disabled={isReadOnly || (entry.isExistingData && !editableRows.has(entry.id))}
+                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
                                 />
+                                <span className="text-gray-400">:</span>
                                 <Select 
                                   value={String((entry.normalWorkingHours || '0:0').split(':')[1])} 
                                   onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'm', value)} 
-                                  options={minuteOptions} 
-                                  disabled={Boolean(isReadOnly || (entry.subtaskId && !editableRows.has(entry.id)))} 
+                                  options={getMinuteOptions(
+                                    dailyReportEntries,
+                                    entry.id,
+                                    Number((entry.normalWorkingHours || '0:0').split(':')[0])
+                                  )} 
+                                  disabled={Boolean(isReadOnly || (entry.isExistingData && !editableRows.has(entry.id)))}
+                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
                                 />
                               </div>
                             </td>
                             <td className="p-2 border-r border-yellow-200">
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center space-x-1 w-28">
                                 <Select 
                                   value={String((entry.otWorkingHours || '0:0').split(':')[0])} 
                                   onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} 
-                                  options={hourOptions} 
-                                  disabled={isReadOnly || entry.isLeaveTask || (entry.subtaskId && !editableRows.has(entry.id))} 
+                                  options={Array.from({ length: 13 }, (_, i) => ({ value: i.toString(), label: `${i} hrs` }))} 
+                                  disabled={Boolean(isReadOnly || entry.isLeaveTask || (entry.isExistingData && !editableRows.has(entry.id)))}
+                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
                                 />
+                                <span className="text-gray-400">:</span>
                                 <Select 
                                   value={String((entry.otWorkingHours || '0:0').split(':')[1])} 
                                   onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} 
-                                  options={minuteOptions} 
-                                  disabled={isReadOnly || entry.isLeaveTask || (entry.subtaskId && !editableRows.has(entry.id))} 
+                                  options={[0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} m` }))} 
+                                  disabled={Boolean(isReadOnly || entry.isLeaveTask || (entry.isExistingData && !editableRows.has(entry.id)))}
+                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
                                 />
                               </div>
                             </td>
@@ -615,7 +743,7 @@ export default function DailyReport() {
                                         ? 'bg-gray-100 border-gray-200 text-gray-700'
                                         : 'border-gray-300 text-gray-900'
                                     }`}
-                                    disabled={Boolean(isReadOnly || entry.isLeaveTask || isFutureDate || (entry.subtaskId && !editableRows.has(entry.id)))} 
+                                    disabled={Boolean(isReadOnly || entry.isLeaveTask || isFutureDate || (entry.isExistingData && !editableRows.has(entry.id)))} 
                                   />
                                   <span className="text-gray-800">%</span>
                                 </div>

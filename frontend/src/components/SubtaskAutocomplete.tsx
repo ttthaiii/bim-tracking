@@ -16,6 +16,7 @@ interface SubtaskAutocompleteProps {
   value: string | null;
   options: Subtask[];
   allProjects: Project[];
+  selectedSubtaskIds: Set<string>; // เพิ่ม prop สำหรับเก็บ ID ของ subtask ที่ถูกเลือกแล้ว
   onChange: (entryId: string, subtaskId: string | null) => void;
   onFocus: (entryId: string) => void;
   isDisabled?: boolean;
@@ -27,11 +28,23 @@ const formatSubtaskDisplay = (subtask: Subtask, projects: Project[]): string => 
                      projects.find(p => p.id === subtask.project) ||
                      projects.find(p => p.name === subtask.project);
 
-  const abbr = projectObj ? projectObj.abbr : subtask.project || 'N/A';
+  let projectDisplay = 'N/A';
+  if (projectObj) {
+    projectDisplay = projectObj.abbr || projectObj.name;
+  } else if (subtask.projectId) {
+    projectDisplay = subtask.projectId;
+  } else if (subtask.project) {
+    projectDisplay = subtask.project;
+  }
+
   const taskName = subtask.taskName || 'N/A';
   const subTaskName = subtask.subTaskName || 'N/A';
-  const item = subtask.item || 'N/A';
-  return `(${abbr} - ${taskName} - ${subTaskName} - ${item})`;
+  const item = subtask.item || '';
+  const internalRev = subtask.internalRev ? ` (Rev.${subtask.internalRev})` : '';
+  
+  return item ? 
+    `${projectDisplay} - ${taskName} - ${subTaskName} - ${item}${internalRev}` :
+    `${projectDisplay} - ${taskName} - ${subTaskName}${internalRev}`;
 };
 
 // Custom styles for react-select to match the UI
@@ -91,14 +104,20 @@ export const SubtaskAutocomplete: React.FC<SubtaskAutocompleteProps> = ({
     entryId, 
     value, 
     options, 
-    allProjects, 
+    allProjects,
+    selectedSubtaskIds = new Set(), // กำหนดค่าเริ่มต้นเป็น empty Set
     onChange, 
     onFocus,
     isDisabled
 }) => {
 
-  const subtaskOptions: SubtaskOption[] = options.map(subtask => ({
-    value: subtask.id,
+  const subtaskOptions: SubtaskOption[] = options
+    .filter(subtask => {
+      // ใช้ path เป็น unique identifier เนื่องจาก Subtask ใช้ path เป็น id
+      return !selectedSubtaskIds.has(subtask.path || '') || subtask.path === value;
+    })
+    .map(subtask => ({
+    value: subtask.path || '',
     label: formatSubtaskDisplay(subtask, allProjects),
     subtask: subtask,
   }));
