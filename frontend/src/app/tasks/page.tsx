@@ -56,6 +56,10 @@ interface ExistingSubtask {
     bgColor: string;
     isOverdue: boolean;
   };
+    subTaskFiles?: Array<{    // ⬅️ เพิ่มนี้
+    fileName: string;
+    fileUrl: string;
+  }> | null;
 }
 
 export default function TaskAssignment() {
@@ -86,6 +90,13 @@ export default function TaskAssignment() {
       progress: 0
     }
   ]);
+
+    // ✅ เพิ่มตรงนี้! ⬇️⬇️⬇️
+  const [showFileModal, setShowFileModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<{
+    fileName: string;
+    fileUrl: string;
+  } | null>(null);
 
 // ✅ โค้ดใหม่ - เรียบง่าย ไม่โหลดทุก Project
   useEffect(() => {
@@ -563,6 +574,38 @@ export default function TaskAssignment() {
     );
   };
 
+// ✅ Function แปลง Firebase Storage URL → Cloudflare CDN URL
+  const convertToCdnUrl = (fileUrl: string): string => {
+    // ถ้า URL มาจาก Firebase Storage
+    if (fileUrl.includes('firebasestorage.googleapis.com')) {
+      // แยก path จาก URL
+      const match = fileUrl.match(/o\/(.+?)\?/);
+      if (match) {
+        const path = decodeURIComponent(match[1]);
+        return `https://bim-tracking-cdn.ttthaiii30.workers.dev/${path}`;
+      }
+    }
+    
+    // ถ้าเป็น path ธรรมดา (ไม่มี https://)
+    if (!fileUrl.startsWith('http')) {
+      return `https://bim-tracking-cdn.ttthaiii30.workers.dev/${fileUrl}`;
+    }
+    
+    // ถ้าเป็น URL อื่นๆ ให้ใช้ตามเดิม
+    return fileUrl;
+  };
+
+  // ✅ Function เปิดไฟล์
+  const handleOpenFile = (file: { fileName: string; fileUrl: string }) => {
+    const cdnUrl = convertToCdnUrl(file.fileUrl);
+    setSelectedFile({
+      fileName: file.fileName,
+      fileUrl: cdnUrl
+    });
+    setShowFileModal(true);
+  };
+
+
   // 🆕 Function สำหรับคำนวณ Deadline Status ของ Existing Subtasks
   const calculateSubtaskDeadlines = (
     subtasks: ExistingSubtask[],
@@ -836,8 +879,17 @@ export default function TaskAssignment() {
         </div>
       </td>
       <td className="px-2 py-2 text-center">
-        <Button variant="outline" size="sm">LINK</Button>
-      </td>
+  {subtask.subTaskFiles && subtask.subTaskFiles.length > 0 ? (
+    <button
+      onClick={() => handleOpenFile(subtask.subTaskFiles![0])}
+      className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200 flex items-center gap-1 mx-auto"
+    >
+      📎 VIEW
+    </button>
+  ) : (
+    <span className="text-gray-400 text-xs">-</span>
+  )}
+</td>
       <td className="px-2 py-2">
         <div className="flex items-center justify-center space-x-1">
           <button onClick={() => alert(`Edit: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-blue-600">
@@ -937,12 +989,58 @@ export default function TaskAssignment() {
           </div>
         </div>
       </Modal>
-            <SuccessModal
+ <SuccessModal
         isOpen={showSuccessModal}
         onClose={handleCloseSuccessModal}
         newCount={successNewCount}
         updateCount={successUpdateCount}
       />
+
+      {/* ✅ Modal แสดงไฟล์ PDF */}
+      <Modal
+        isOpen={showFileModal}
+        onClose={() => {
+          setShowFileModal(false);
+          setSelectedFile(null);
+        }}
+        title={selectedFile?.fileName || 'File Viewer'}
+        size="xl"
+        footer={
+          <div className="flex justify-end space-x-3">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowFileModal(false);
+                setSelectedFile(null);
+              }}
+            >
+              Close
+            </Button>
+            {selectedFile && (
+              <a
+                href={selectedFile.fileUrl}
+                download={selectedFile.fileName}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button>
+                  ⬇️ Download
+                </Button>
+              </a>
+            )}
+          </div>
+        }
+      >
+        {selectedFile && (
+          <div className="w-full h-[70vh]">
+            <iframe
+              src={selectedFile.fileUrl}
+              className="w-full h-full border-0 rounded"
+              title={selectedFile.fileName}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -119,7 +119,8 @@ export async function getCachedSubtasks(
               subTaskAssignee: data.subTaskAssignee || '',
               subTaskProgress: data.subTaskProgress || 0,
               startDate: data.startDate,
-              endDate: data.endDate
+              endDate: data.endDate,
+              subTaskFiles: data.subTaskFiles || null
             });
           });
         })

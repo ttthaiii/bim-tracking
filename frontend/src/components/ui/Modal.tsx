@@ -73,11 +73,11 @@ export default function Modal({
       role="dialog"
       aria-modal="true"
     >
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
-        onClick={handleBackdropClick}
-      />
+      {/* Backdrop - ลด opacity เพื่อให้เห็น UI ด้านหลัง */}
+<div
+  className="fixed inset-0 bg-gray-900 bg-opacity-40 backdrop-blur-sm transition-opacity"
+  onClick={handleBackdropClick}
+/>
 
       {/* Modal Container */}
       <div className="flex min-h-full items-center justify-center p-4">
