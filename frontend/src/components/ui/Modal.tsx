@@ -37,18 +37,10 @@ export default function Modal({
     return () => document.removeEventListener('keydown', handleEsc);
   }, [isOpen, closeOnEsc, onClose]);
 
-  // Prevent body scroll when modal is open
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [isOpen]);
+  // ไม่ใช้ body overflow hidden เพื่อให้เห็นตารางข้างหลัง
+  // useEffect(() => {
+  //   // ปิดการใช้งานเพื่อให้เห็นตารางข้างหลัง
+  // }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -73,9 +65,9 @@ export default function Modal({
       role="dialog"
       aria-modal="true"
     >
-      {/* Backdrop - ลด opacity เพื่อให้เห็น UI ด้านหลัง */}
+      {/* Backdrop - ไม่มีพื้นหลังเพื่อให้เห็นตารางข้างหลังชัดเจน */}
 <div
-  className="fixed inset-0 bg-gray-900 bg-opacity-40 backdrop-blur-sm transition-opacity"
+  className="fixed inset-0 transition-opacity"
   onClick={handleBackdropClick}
 />
 

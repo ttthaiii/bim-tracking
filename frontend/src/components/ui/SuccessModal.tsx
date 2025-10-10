@@ -17,8 +17,8 @@ export default function SuccessModal({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" />
+      {/* Backdrop - ไม่มีพื้นหลังเพื่อให้เห็นตารางข้างหลังชัดเจน */}
+      <div className="fixed inset-0 transition-opacity" />
 
       {/* Modal Container */}
       <div className="flex min-h-full items-center justify-center p-4">

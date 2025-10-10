@@ -764,35 +764,14 @@ export default function TaskAssignment() {
     />
   )}
 </td>
-                      <td className="px-2 py-2">
-                        <input
-                          type="text"
-                          value={row.deadline}
-                          onChange={(e) => updateRow(row.id, 'deadline', e.target.value)}
-                          placeholder="3 Days"
-                          className="w-full px-1 py-1 border border-gray-300 rounded text-xs"
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <div className="flex items-center space-x-2">
-                          <ProgressBar value={row.progress} size="sm" />
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={row.progress}
-                            onChange={(e) => {
-                              const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                              updateRow(row.id, 'progress', value);
-                            }}
-                            className="w-16 px-1 py-1 border border-gray-300 rounded text-xs"
-                          />
-                        </div>
+                      <td className="px-2 py-2 text-center">
+                        <span className="text-gray-400 text-xs">-</span>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <Button variant="outline" size="sm" disabled>
-                          LINK
-                        </Button>
+                        <span className="text-gray-400 text-xs">-</span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span className="text-gray-400 text-xs">-</span>
                       </td>
                       <td className="px-2 py-2 text-center">
                         <button 
