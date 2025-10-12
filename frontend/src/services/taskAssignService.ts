@@ -19,10 +19,12 @@ export const getEmployeeDailyReportEntries = async (
   employeeId: string
 ): Promise<DailyReportEntry[]> => {
   try {
+    console.log('Getting daily report entries for employee:', employeeId);
     const reportGroupRef = collectionGroup(db, 'dailyReport');
     const q = query(reportGroupRef, where('employeeId', '==', employeeId));
     const querySnapshot = await getDocs(q);
     
+    console.log('Query snapshot size:', querySnapshot.size);
     const allEntries: DailyReportEntry[] = [];
 
     querySnapshot.forEach((doc) => {

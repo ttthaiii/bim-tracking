@@ -1,7 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId, useRef } from 'react';
-import Calendar from 'react-calendar';
+import dynamic from 'next/dynamic';
+
+// Dynamic import Calendar with no SSR
+const Calendar = dynamic(
+  () => import('react-calendar'),
+  { ssr: false } // This ensures the component only renders on client-side
+);
 import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
 import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee, UploadedFile } from '@/services/taskAssignService';
@@ -45,10 +51,12 @@ const calculateTotalHoursExcluding = (entries: DailyReportEntry[], excludeEntryI
 const getHourOptions = (entries: DailyReportEntry[], currentEntryId: string): { value: string; label: string; }[] => {
   const totalOtherHours = calculateTotalHoursExcluding(entries, currentEntryId);
   const maxAvailableHours = Math.floor(8 - totalOtherHours);
-  return Array.from(
+  const options = Array.from(
     { length: maxAvailableHours + 1 },
-    (_, i) => ({ value: i.toString(), label: `${i} hrs` })
+    (_, i) => ({ value: i.toString(), label: `${i} ชม.` })
   );
+  
+  return options;
 };
 
 // สร้างตัวเลือกนาทีตามเวลาที่เหลือ
@@ -58,18 +66,25 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
   
   // ถ้าเหลือเวลาน้อยกว่า 1 ชั่วโมง ให้แสดงตัวเลือกนาทีตามที่เหลือ
   if (remainingHours < 0) {
-    return [{ value: '0', label: '0 m' }];
+    return [{ value: '0', label: '0 น. (เกินเวลา)' }];
   } else if (remainingHours === 0) {
-    return [{ value: '0', label: '0 m' }];
+    return [{ value: '0', label: '0 น. (ครบ 8 ชม.)' }];
   } else if (remainingHours < 1) {
     const maxMinutes = Math.floor(remainingHours * 60);
     return [0, 15, 30, 45]
       .filter(m => m <= maxMinutes)
-      .map(m => ({ value: m.toString(), label: `${m} m` }));
+      .map(m => ({ 
+        value: m.toString(), 
+        label: `${m} น. (เหลือ ${maxMinutes} น.)`
+      }));
   }
   
   // ถ้าเหลือเวลามากกว่า 1 ชั่วโมง แสดงตัวเลือกนาทีทั้งหมด
-  return [0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} m` }));
+  const remainingMinutes = Math.floor(remainingHours * 60);
+  return [0, 15, 30, 45].map(m => ({ 
+    value: m.toString(), 
+    label: `${m} น. (เหลือ ${remainingMinutes - m} น.)`
+  }));
 };
 
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
@@ -87,7 +102,7 @@ export default function DailyReport() {
   const { appUser } = useAuth();
   const { setHasUnsavedChanges } = useDashboard();
   const baseId = useId();
-  const [date, setDate] = useState<Value>(new Date());
+  const [date, setDate] = useState<Value>(null);
   const [workDate, setWorkDate] = useState(new Date().toISOString().split('T')[0]);
   const [employeeId, setEmployeeId] = useState('');
   const [employeeData, setEmployeeData] = useState<{ employeeId: string; fullName: string } | null>(null);
@@ -97,7 +112,7 @@ export default function DailyReport() {
   const [isRecheckOpen, setIsRecheckOpen] = useState(false);
   const [isFutureDate, setIsFutureDate] = useState(false);
   
-  const [reportDataCache, setReportDataCache] = useState<Record<string, DailyReportEntry[]>>({});
+  const [tempDataCache, setTempDataCache] = useState<Record<string, DailyReportEntry[]>>({});
   const [allDailyEntries, setAllDailyEntries] = useState<DailyReportEntry[]>([]);
   const [dailyReportEntries, setDailyReportEntries] = useState<DailyReportEntry[]>([]);
   
@@ -143,22 +158,23 @@ export default function DailyReport() {
   
   useEffect(() => {
     const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
-    const currentData = reportDataCache[workDate];
+    const currentData = tempDataCache[workDate];
     
     const normalize = (entries: DailyReportEntry[] = []) => 
       entries.map(({ id, relateDrawing, ...rest }) => ({ ...rest, id: id.startsWith('temp-') ? '' : id }));
 
-    if (originalData.length === 0 && currentData && currentData.some(d => d.subtaskId)) {
+    if (originalData.length === 0 && currentData && currentData.some((d: DailyReportEntry) => d.subtaskId)) {
         setHasUnsavedChanges(true);
     } else {
         setHasUnsavedChanges(!isEqual(normalize(originalData), normalize(currentData)));
     }
-  }, [reportDataCache, workDate, allDailyEntries, setHasUnsavedChanges]);
+  }, [workDate, allDailyEntries, setHasUnsavedChanges, tempDataCache]);
 
   const fetchAllData = useCallback(async (eid: string) => {
     setLoading(true);
     setError('');
     try {
+      console.log('Fetching data for employee:', eid);
       const [employee, dailyEntries, projects, subtasks, files] = await Promise.all([
         getEmployeeByID(eid),
         getEmployeeDailyReportEntries(eid),
@@ -166,6 +182,8 @@ export default function DailyReport() {
         fetchAvailableSubtasksForEmployee(eid),
         getUploadedFilesForEmployee(eid),
       ]);
+      
+      console.log('Daily entries from API:', dailyEntries);
       
       setAllProjects(projects);
       setAvailableSubtasks(subtasks);
@@ -192,6 +210,13 @@ export default function DailyReport() {
     }
   }, [appUser, employeeId, fetchAllData]);
 
+  // Set initial date after component mounts
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !date) {
+      setDate(new Date());
+    }
+  }, [date]);
+
   useEffect(() => {
     if (date instanceof Date) {
       const selectedDateLocal = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -217,7 +242,7 @@ export default function DailyReport() {
     if (!dailyReportEntries.length) return;
     
     // บันทึกข้อมูลลง cache เมื่อมีการเปลี่ยนวันที่
-    setReportDataCache(prev => ({
+    setTempDataCache(prev => ({
       ...prev,
       [workDate]: dailyReportEntries
     }));
@@ -237,19 +262,36 @@ export default function DailyReport() {
     }
   }, [isFutureDate, availableSubtasks]);
 
-  // Effect สำหรับโหลดข้อมูลจาก cache หรือ server
+    // Effect สำหรับโหลดข้อมูลจาก allDailyEntries หรือ cache เมื่อเปลี่ยนวันที่
   useEffect(() => {
-    if (!employeeId || !workDate) return;
+    console.log('Loading data for date:', workDate);
 
-    // ถ้ามีข้อมูลใน cache ให้ใช้ข้อมูลจาก cache
-    if (reportDataCache[workDate]) {
-      setDailyReportEntries(reportDataCache[workDate]);
+    if (!employeeId || !workDate) {
+      console.log('Missing required data, skipping');
       return;
     }
 
-    const entriesForDate = allDailyEntries.filter((entry: DailyReportEntry) => entry.assignDate === workDate);
+    // ถ้ามีข้อมูลใน cache ใช้ข้อมูลจาก cache
+    if (tempDataCache[workDate]) {
+      console.log('Using temp cached data for', workDate);
+      setDailyReportEntries(tempDataCache[workDate]);
+      return;
+    }
 
-    if (entriesForDate.length === 0) {
+    // ถ้าไม่มีข้อมูลใน cache และไม่มีข้อมูลใน allDailyEntries
+    if (!allDailyEntries.length) {
+      console.log('No entries available');
+      return;
+    }
+
+    console.log('Filtering entries for date', workDate);
+    const entriesForDate = allDailyEntries.filter(entry => {
+      const matches = entry.assignDate === workDate;
+      if (matches) {
+        console.log('Found matching entry:', entry);
+      }
+      return matches;
+    });    if (entriesForDate.length === 0) {
         const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
         const newEntry = {
             ...initialEntry,
@@ -257,58 +299,62 @@ export default function DailyReport() {
             logTimestamp: Timestamp.now()
         };
         setDailyReportEntries([newEntry]);
-        setReportDataCache(prev => ({ ...prev, [workDate]: [newEntry] }));
+        setTempDataCache(prev => ({ ...prev, [workDate]: [newEntry] }));
         setEditableRows(new Set()); // เคลียร์ editableRows เพราะเป็นข้อมูลใหม่ แก้ไขได้เลย
         return;
     }    
 
-    // 1. Find the absolute latest timestamp in milliseconds
-    const latestTimestampMillis = Math.max(...entriesForDate.map((entry: DailyReportEntry) => entry.logTimestamp?.toMillis() || 0));
+    // หา timestamp ล่าสุดของวันนั้น
+    const latestTimestamp = Math.max(...entriesForDate.map(entry => entry.logTimestamp?.toMillis() || 0));
+    console.log('Latest timestamp for date:', new Date(latestTimestamp));
 
-    // 2. Round this latest timestamp down to the nearest second
-    const latestTimestampSecond = Math.floor(latestTimestampMillis / 1000) * 1000;
+    // กรองเฉพาะ entries ที่มี timestamp ตรงกับ timestamp ล่าสุด
+    const latestEntries = entriesForDate.filter(entry => 
+      Math.floor((entry.logTimestamp?.toMillis() || 0) / 1000) === Math.floor(latestTimestamp / 1000)
+    );
+    console.log('Latest entries:', latestEntries);
 
-    // 3. Filter for all entries that fall within the same second as the latest entry
-    const latestSubmissionEntries = entriesForDate.filter((entry: DailyReportEntry) => {
-        const entryTimestampSecond = Math.floor((entry.logTimestamp?.toMillis() || 0) / 1000) * 1000;
-        return entryTimestampSecond === latestTimestampSecond;
+    const latestEntriesMap: Record<string, DailyReportEntry> = {};
+    latestEntries.forEach((entry: DailyReportEntry) => {
+      if (!entry.subtaskId) return;
+      latestEntriesMap[entry.subtaskId] = entry;
     });
 
-    // 4. Set the entries to show, and importantly, set initialProgress from the entry's actual progress
-    const entriesToShow = latestSubmissionEntries.map((entry: DailyReportEntry) => {
-        // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
-        const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
-        const isLeaveTask = subtask ? 
-          (subtask.taskName?.includes('ลา') || subtask.subTaskName?.includes('ลา')) : 
-          (entry.taskName?.includes('ลา') || entry.subTaskName?.includes('ลา'));
+  const entriesToShow = Object.values(latestEntriesMap).map((entry: DailyReportEntry) => {
+      // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
+      const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
+      const isLeaveTask = subtask ?
+        (subtask.taskName?.includes('ลา') || subtask.subTaskName?.includes('ลา')) :
+        (entry.taskName?.includes('ลา') || entry.subTaskName?.includes('ลา'));
 
-        // สร้าง relateDrawing สำหรับข้อมูลเก่า
-        let relateDrawing = entry.relateDrawing;
-        if (!relateDrawing && subtask) {
-          // ค้นหา project
-          const project = allProjects.find(p => p.id === subtask.projectId) || 
-                         allProjects.find(p => p.id === subtask.project) ||
-                         allProjects.find(p => p.name === subtask.project);
-          
-          // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
-          const abbr = project?.abbr || subtask.project || 'N/A';
-          const taskName = subtask.taskName || 'N/A';
-          const subTaskName = subtask.subTaskName || 'N/A';
-          const item = subtask.item || 'N/A';
-          relateDrawing = `${abbr}_${taskName}_${subTaskName}_${item}`;
-        }
+      // สร้าง relateDrawing สำหรับข้อมูลเก่า
+      let relateDrawing = entry.relateDrawing;
+      if (!relateDrawing && subtask) {
+        // ค้นหา project
+        const project = allProjects.find(p => p.id === subtask.projectId) ||
+                       allProjects.find(p => p.id === subtask.project) ||
+                       allProjects.find(p => p.name === subtask.project);
 
-        return {
-          ...entry,
-          isLeaveTask,
-          initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
-          progress: isLeaveTask ? '0%' : entry.progress,
-          isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
-          relateDrawing: relateDrawing || '', // เพิ่ม relateDrawing
-        };
+        // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
+        const abbr = project?.abbr || subtask.project || 'N/A';
+        const taskName = subtask.taskName || 'N/A';
+        const subTaskName = subtask.subTaskName || 'N/A';
+        const item = subtask.item || 'N/A';
+        relateDrawing = `${abbr}_${taskName}_${subTaskName}_${item}`;
+      }
+
+      return {
+        ...entry,
+        isLeaveTask,
+        initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
+        progress: isLeaveTask ? '0%' : entry.progress,
+        isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
+        relateDrawing: relateDrawing || '', // เพิ่ม relateDrawing
+      };
     });
-    
-    setDailyReportEntries(entriesToShow);
+
+  console.log('entriesToShow', entriesToShow);
+  setDailyReportEntries(entriesToShow);
     setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
   }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks]);
 
@@ -326,7 +372,7 @@ export default function DailyReport() {
         return entry;
       });
       // อัพเดท cache ด้วย
-      setReportDataCache(prev => ({ ...prev, [workDate]: newEntries }));
+      setTempDataCache(prev => ({ ...prev, [workDate]: newEntries }));
       return newEntries;
     });
   };
@@ -552,7 +598,7 @@ export default function DailyReport() {
       setHasUnsavedChanges(false);
       
       // เคลียร์ cache และ flag ว่าเพิ่ง submit
-      setReportDataCache({});
+      setTempDataCache({});
       prevWorkDateRef.current = workDate;
       await fetchAllData(employeeId);
       // The useEffect will handle resetting the dailyReportEntries correctly
@@ -607,14 +653,41 @@ export default function DailyReport() {
         <div className="flex flex-col md:flex-row gap-6">
           {/* Calendar and Legend Section */}
           <div className="w-full md:w-[384px] md:flex-shrink-0">
-            <div className="bg-white rounded-lg shadow-md border border-gray-200">
-              <Calendar onChange={setDate} value={date} className="custom-calendar" locale="th-TH" tileClassName={tileClassName} />
-            </div>
+          <div className="bg-white rounded-lg shadow-md border border-gray-200">
+            <Calendar 
+              onChange={setDate} 
+              value={date || new Date()} 
+              className="custom-calendar" 
+              locale="th-TH"
+              tileClassName={tileClassName}
+              key={`calendar-${employeeId}`} 
+            />
+          </div>
             <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
               <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-blue-500 mr-2"></div><span>วันที่เลือก</span></div>
               <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
               <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>วันที่ยังไม่มีการลงข้อมูล</span></div>
               <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-400 mr-2"></span><span>วันที่มีการแก้ไข</span></div>
+            </div>
+            {/* เพิ่มส่วนแสดงระยะเวลาทำงานคงเหลือ */}
+            <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200">
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-gray-800 mb-2">ระยะเวลาทำงานคงเหลือ</span>
+                {(() => {
+                  const totalWorkingHours = dailyReportEntries.reduce((total, entry) => {
+                    const [hours, minutes] = (entry.normalWorkingHours || '0:0').split(':').map(Number);
+                    return total + hours + minutes / 60;
+                  }, 0);
+                  
+                  const remainingHours = Math.max(0, 8 - totalWorkingHours);
+                  const hours = Math.floor(remainingHours);
+                  const minutes = Math.round((remainingHours - hours) * 60);
+                  
+                  // Format to HH:mm
+                  const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+                  return <span className="text-2xl font-bold text-blue-600 text-center">{formattedTime}</span>;
+                })()}
+              </div>
             </div>
           </div>
 
