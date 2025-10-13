@@ -20,6 +20,7 @@ interface TaskItem {
   id: string;
   taskName: string;
   taskCategory: string;
+  taskStatus?: string; // ✅ ต้องมี field นี้
   dueDate?: any;
 }
 
@@ -75,6 +76,7 @@ export default function TaskAssignment() {
   const [successNewCount, setSuccessNewCount] = useState(0);
   const [successUpdateCount, setSuccessUpdateCount] = useState(0);
   const [rows, setRows] = useState<SubtaskRow[]>([
+   
     {
       id: '1',
       subtaskId: '',
@@ -98,7 +100,82 @@ export default function TaskAssignment() {
     fileUrl: string;
   } | null>(null);
 
-// ✅ โค้ดใหม่ - เรียบง่าย ไม่โหลดทุก Project
+   // ✅ เพิ่ม State สำหรับ Edit Confirmation
+  const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
+  const [editConfirmData, setEditConfirmData] = useState<{
+    subtaskNumber: string;
+    activity: string;
+    relateDrawing: string;
+    relateWork: string;
+    item: string;
+    internalRev: string | number;
+    workScale: string;
+    assignee: string;
+  } | null>(null);
+
+  // ✅ เพิ่ม State สำหรับ Edit Mode
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
+  const [editingData, setEditingData] = useState<{
+    activity: string;
+    relateDrawing: string;
+    relateDrawingName: string;
+    relateWork: string;
+    item: string;
+    internalRev: number | null;
+    workScale: string;
+    assignee: string;
+  } | null>(null);
+
+  // ✅ เพิ่ม State สำหรับเก็บข้อมูลที่แก้ไขแล้ว (ยังไม่บันทึกลงฐานข้อมูล)
+  const [editedSubtasks, setEditedSubtasks] = useState<{[key: string]: ExistingSubtask}>({});
+
+  // ✅ Function บันทึกการแก้ไขใน State เท่านั้น (ไม่บันทึกลงฐานข้อมูล)
+  const handleSaveEditToState = () => {
+    if (!editingSubtaskId || !editingData) return;
+
+    const subtaskIndex = existingSubtasks.findIndex(s => s.id === editingSubtaskId);
+    if (subtaskIndex === -1) return;
+
+    // อัพเดท existing subtasks โดยตรง
+    setExistingSubtasks(prev => {
+      const updated = [...prev];
+      updated[subtaskIndex] = {
+        ...updated[subtaskIndex],
+        // อัพเดทข้อมูลที่แก้ไข
+        subTaskCategory: editingData.relateWork,
+        item: editingData.item || '',
+        internalRev: editingData.internalRev ? String(editingData.internalRev) : '',
+        subTaskScale: editingData.workScale,
+        subTaskAssignee: editingData.assignee,
+        taskName: editingData.relateDrawingName,
+      };
+      return updated;
+    });
+
+    // เก็บข้อมูลที่แก้ไขสำหรับการบันทึกภายหลัง
+    setEditedSubtasks(prev => ({
+      ...prev,
+      [editingSubtaskId]: {
+        id: editingSubtaskId,
+        subTaskNumber: existingSubtasks.find(s => s.id === editingSubtaskId)?.subTaskNumber || '',
+        taskName: editingData.relateDrawingName,
+        subTaskCategory: editingData.relateWork,
+        item: editingData.item || '',
+        internalRev: editingData.internalRev ? String(editingData.internalRev) : '',
+        subTaskScale: editingData.workScale,
+        subTaskAssignee: editingData.assignee,
+        // 🔧 เพิ่มข้อมูลเหล่านี้
+        activity: editingData.activity,
+        relateDrawing: editingData.relateDrawing,
+        _isEdited: true
+      }
+    }));
+
+    // ออกจาก Edit Mode
+    handleCancelEdit();
+  };
+
+  // ✅ โค้ดใหม่ - เรียบง่าย ไม่โหลดทุก Project
   useEffect(() => {
     const loadProjects = async () => {
       setLoading(true);
@@ -360,10 +437,19 @@ export default function TaskAssignment() {
 
   const handleShowConfirmation = () => {
     const validation = validateRows();
-    if (!validation.valid) {
+    const hasNewItems = getValidRows().length > 0;
+    const hasEditedItems = Object.keys(editedSubtasks).length > 0;
+    
+    if (!hasNewItems && !hasEditedItems) {
+      alert('กรุณากรอกข้อมูลใหม่หรือแก้ไขข้อมูลเดิมอย่างน้อย 1 รายการ');
+      return;
+    }
+
+    if (!validation.valid && hasNewItems) {
       alert(validation.message);
       return;
     }
+    
     setShowConfirmModal(true);
   };
 
@@ -415,42 +501,38 @@ export default function TaskAssignment() {
   const handleConfirmSave = async () => {
     setIsSaving(true);
     try {
+      // 1. บันทึกรายการใหม่จาก rows
       const rowsToSave = rows.filter(row => 
         row.relateDrawing && row.activity && row.relateWork && row.workScale && row.assignee
       );
 
-      console.log('🔄 Rows to save:', rowsToSave);
+      // 2. บันทึกรายการที่แก้ไข
+      const editedItems = Object.values(editedSubtasks);
+
+      console.log('🔄 Rows to save (new):', rowsToSave);
+      console.log('🔄 Items to save (edited):', editedItems);
 
       const selectedProjectData = projects.find(p => p.id === selectedProject);
       const projectName = selectedProjectData?.name || '';
-      console.log('📦 Project Name:', projectName);
 
+      // บันทึกรายการใหม่
       for (const row of rowsToSave) {
-        console.log('📝 Processing row:', row);
         const subTaskNumber = await generateSubTaskNumber(row.relateDrawing);
+        if (!subTaskNumber) continue;
         
-        if (!subTaskNumber) {
-          console.error('Failed to generate subTaskNumber');
-          continue;
-        }
-        
-        // 🆕 เพิ่มบรรทัดนี้ก่อน docData
         const finalAssignee = isSpecialLeaveCase(row) ? 'all' : row.assignee;
 
         const docData = {
-          // ข้อมูลที่ต้องเก็บค่า
-          subTaskNumber,                        // generate อัตโนมัติ
-          projectId: selectedProject,           // เก็บเฉพาะ ID
+          subTaskNumber,
+          projectId: selectedProject,
           project: projectName,
-          taskName: row.relateDrawingName,     // จาก Relate Drawing
-          subTaskName: row.relateWork,         // จาก Relate Work
-          subTaskCategory: row.relateWork,     // จาก Relate Work
-          subTaskScale: row.workScale,         // จาก Work Scale
-          subTaskAssignee: finalAssignee,       // จาก Assignee
-          item: row.item || null,              // จาก Item
-          internalRev: row.internalRev || null, // จาก Internal Rev.
-
-          // ข้อมูลที่ยังไม่ต้องเก็บค่า (set เป็น null)
+          taskName: row.relateDrawingName,
+          subTaskName: row.relateWork,
+          subTaskCategory: row.relateWork,
+          subTaskScale: row.workScale,
+          subTaskAssignee: finalAssignee,
+          item: row.item || null,
+          internalRev: row.internalRev || null,
           endDate: null,
           lastUpdate: null,
           mhOD: null,
@@ -463,20 +545,74 @@ export default function TaskAssignment() {
           wlRemaining: null
         };
 
-        console.log('📄 Document data to save:', docData);
-        
         await setDoc(doc(db, 'tasks', row.relateDrawing, 'subtasks', subTaskNumber), docData);
       }
-            // 🆕 เก็บจำนวนรายการที่บันทึก
-      const newItemsCount = rowsToSave.length;
-      const updateItemsCount = 0; // อนาคตจะนับจากการแก้ไข existing subtasks
 
-      // ✅ โค้ดใหม่ - เพิ่ม Cache Invalidation
-      // ✅ Invalidate Cache หลังบันทึกสำเร็จ
+      // 🔧 แก้ไขการบันทึกรายการที่แก้ไข - วิธีใหม่ที่ถูกต้อง
+      for (const editedSubtask of editedItems) {
+        const originalSubtask = existingSubtasks.find(s => s.id === editedSubtask.id);
+        if (!originalSubtask) {
+          console.warn('ไม่พบ originalSubtask สำหรับ:', editedSubtask.id);
+          continue;
+        }
+
+        console.log('🔍 Processing edited subtask:', {
+          originalSubtask: originalSubtask,
+          editedSubtask: editedSubtask,
+          originalId: originalSubtask.id
+        });
+
+        // 🔧 หา taskId ที่ถูกต้องจาก editedSubtask.relateDrawing
+        const taskId = editedSubtask.relateDrawing;
+        
+        if (!taskId) {
+          console.warn('ไม่มี taskId สำหรับ subtask:', editedSubtask.id);
+          continue;
+        }
+
+        const docPath = `tasks/${taskId}/subtasks/${originalSubtask.subTaskNumber}`;
+        console.log('📍 Document path:', docPath);
+
+        try {
+          const docData = {
+            taskName: editedSubtask.taskName,
+            subTaskName: editedSubtask.subTaskCategory,
+            subTaskCategory: editedSubtask.subTaskCategory,
+            item: editedSubtask.item || null,
+            internalRev: editedSubtask.internalRev || null,
+            subTaskScale: editedSubtask.subTaskScale,
+            subTaskAssignee: editedSubtask.subTaskAssignee,
+            lastUpdate: Timestamp.now()
+          };
+
+          console.log('💾 Saving document with data:', docData);
+
+          await setDoc(
+            doc(db, 'tasks', taskId, 'subtasks', originalSubtask.subTaskNumber),
+            docData,
+            { merge: true }
+          );
+          
+          console.log('✅ บันทึก editedSubtask สำเร็จ:', docPath);
+        } catch (docError) {
+          console.error('❌ เกิดข้อผิดพลาดในการบันทึก editedSubtask:', docError);
+          console.error('Document path:', docPath);
+          console.error('TaskId used:', taskId);
+          throw docError;
+        }
+      }
+
+      // เก็บจำนวนรายการที่บันทึก
+      const newItemsCount = rowsToSave.length;
+      const updateItemsCount = editedItems.length;
+
+      // Invalidate Cache
       const cacheKey = `subtasks_projectId:${selectedProject}`;
       invalidateCache(cacheKey);
       
       setShowConfirmModal(false);
+      
+      // รีเซ็ต State
       setRows([{
         id: '1',
         subtaskId: '',
@@ -492,11 +628,13 @@ export default function TaskAssignment() {
         progress: 0
       }]);
       
+      setEditedSubtasks({}); // รีเซ็ตข้อมูลที่แก้ไข
+      
       setSuccessNewCount(newItemsCount);
       setSuccessUpdateCount(updateItemsCount);
       setShowSuccessModal(true);
       
-      // ✅ Reload ข้อมูล Subtasks ใหม่
+      // Reload ข้อมูล Subtasks ใหม่
       const taskIds = tasks.map(t => t.id);
       const updatedSubtasks = await getCachedSubtasks(
         selectedProject, 
@@ -508,7 +646,7 @@ export default function TaskAssignment() {
       
     } catch (error) {
       console.error('Error saving subtasks:', error);
-      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + error.message);
     } finally {
       setIsSaving(false);
     } 
@@ -604,6 +742,164 @@ export default function TaskAssignment() {
     });
     setShowFileModal(true);
   };
+
+  // ✅ Function เริ่ม Edit Mode
+  const handleStartEdit = (subtask: ExistingSubtask) => {
+    const task = tasks.find(t => t.taskName === subtask.taskName);
+    
+    setEditingSubtaskId(subtask.id);
+    setEditingData({
+      activity: task?.taskCategory || '',
+      relateDrawing: task?.id || '',
+      relateDrawingName: subtask.taskName,
+      relateWork: subtask.subTaskCategory,
+      item: subtask.item || '',
+      internalRev: subtask.internalRev ? parseInt(subtask.internalRev) : null,
+      workScale: subtask.subTaskScale,
+      assignee: subtask.subTaskAssignee
+    });
+  };
+
+  // ✅ Function ยกเลิก Edit
+  const handleCancelEdit = () => {
+    setEditingSubtaskId(null);
+    setEditingData(null);
+  };
+
+  // ✅ Function อัพเดทข้อมูลใน Edit Mode
+  const handleUpdateEditData = (field: string, value: any) => {
+    if (!editingData) return;
+
+    setEditingData(prev => {
+      if (!prev) return prev;
+      
+      const updated = { ...prev, [field]: value };
+      
+      // ถ้าเปลี่ยน Activity → รีเซ็ต Relate Drawing และ Relate Work
+      if (field === 'activity') {
+        updated.relateDrawing = '';
+        updated.relateDrawingName = '';
+        updated.relateWork = '';
+        updated.assignee = '';
+      }
+      
+      // ถ้าเปลี่ยน Relate Drawing
+      if (field === 'relateDrawing') {
+        const task = tasks.find(t => t.id === value);
+        updated.relateDrawingName = task?.taskName || '';
+        updated.relateWork = '';
+        
+        // เช็คเงื่อนไขพิเศษ (Bim room + ลางาน)
+        const selectedProjectData = projects.find(p => p.id === selectedProject);
+        const projectName = selectedProjectData?.name || '';
+        
+        if (
+          projectName === "Bim room" &&
+          updated.activity === "ลางาน" &&
+          task?.taskName === "ลางาน"
+        ) {
+          updated.assignee = 'all';
+        }
+      }
+      
+      return updated;
+    });
+  };
+
+  // ✅ Function เตรียมข้อมูลสำหรับ Confirmation
+  const handlePrepareEditConfirm = () => {
+    if (!editingSubtaskId || !editingData) return;
+
+    const subtask = existingSubtasks.find(s => s.id === editingSubtaskId);
+    if (!subtask) return;
+
+    setEditConfirmData({
+      subtaskNumber: subtask.subTaskNumber,
+      activity: editingData.activity,
+      relateDrawing: editingData.relateDrawingName,
+      relateWork: editingData.relateWork,
+      item: editingData.item || '-',
+      internalRev: editingData.internalRev || '-',
+      workScale: editingData.workScale,
+      assignee: editingData.assignee
+    });
+
+    setShowEditConfirmModal(true);
+  };
+
+  // ✅ Function บันทึกหลังจากยืนยัน
+  const handleConfirmEditSave = async () => {
+    if (!editingSubtaskId || !editingData) return;
+
+    setIsSaving(true);
+    try {
+      const subtask = existingSubtasks.find(s => s.id === editingSubtaskId);
+      if (!subtask) return;
+
+      // 🔧 แก้ไขตรงนี้: ใช้ Task ID ที่ถูกต้อง
+      const taskId = editingData.relateDrawing; // นี่คือ Task ID ที่ถูกต้องแล้ว
+      
+      // บันทึกลง Firestore
+      await setDoc(
+        doc(db, 'tasks', taskId, 'subtasks', subtask.subTaskNumber), // ✅ ใช้ taskId แทน
+        {
+          taskName: editingData.relateDrawingName,
+          subTaskName: editingData.relateWork,
+          subTaskCategory: editingData.relateWork,
+          item: editingData.item || null,
+          internalRev: editingData.internalRev ? String(editingData.internalRev) : null,
+          subTaskScale: editingData.workScale,
+          subTaskAssignee: editingData.assignee,
+          lastUpdate: Timestamp.now()
+        },
+        { merge: true }
+      );
+
+      // Invalidate Cache
+      const cacheKey = `subtasks_projectId:${selectedProject}`;
+      invalidateCache(cacheKey);
+
+      // รีเฟรชข้อมูล
+      const taskIds = tasks.map(t => t.id);
+      const updatedSubtasks = await getCachedSubtasks(
+        selectedProject,
+        taskIds,
+        getCache,
+        setCache
+      );
+      setExistingSubtasks(updatedSubtasks);
+
+      // ปิด Edit Mode และ Confirmation Modal
+      handleCancelEdit();
+      setShowEditConfirmModal(false);
+      setEditConfirmData(null);
+
+      // แสดง Success Modal
+      setSuccessNewCount(0);
+      setSuccessUpdateCount(1);
+      setShowSuccessModal(true);
+
+    } catch (error) {
+      console.error('Error saving edit:', error);
+      alert('เกิดข้อผิดพลาดในการบันทึก');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ✅ ตรวจสอบว่ากรอกข้อมูลครบหรือยัง
+  const isEditDataValid = (): boolean => {
+    if (!editingData) return false;
+    
+    return Boolean(
+      editingData.activity &&
+      editingData.relateDrawing &&
+      editingData.relateWork &&
+      editingData.workScale &&
+      editingData.assignee
+    );
+  };
+  
 
 
   // 🆕 Function สำหรับคำนวณ Deadline Status ของ Existing Subtasks
@@ -798,51 +1094,173 @@ export default function TaskAssignment() {
                   ))}
 
                   
-{existingSubtasks.map((subtask) => {
-  // ✅ ดึง deadlineStatus (ถ้ามี)
+{existingSubtasks.map((subtask, index) => {
   const deadlineStatus = subtask.deadlineStatus || {
     text: '-',
     bgColor: '',
     isOverdue: false
   };
+  
+  const isEditing = editingSubtaskId === subtask.id;
+  const task = tasks.find(t => t.taskName === subtask.taskName);
+  
+  // ✅ ตรวจสอบว่าแถวนี้ถูกแก้ไขหรือไม่
+  const isEdited = !!editedSubtasks[subtask.id];
 
   return (
     <tr 
-      key={`existing-${subtask.id}`} 
-      className={`hover:bg-gray-50 ${deadlineStatus.bgColor}`}
+      key={`existing-${subtask.subTaskNumber}-${index}`}
+      className={`hover:bg-gray-50 ${deadlineStatus.bgColor} ${
+        isEditing 
+          ? 'bg-blue-100 border-l-4 border-blue-400' 
+          : isEdited 
+            ? 'bg-blue-50 border-l-4 border-blue-300' 
+            : ''
+      }`}
     >
-      <td className="px-2 py-2 text-xs text-gray-900 whitespace-normal break-words" title={subtask.subTaskNumber}>
+      {/* SUBTASK ID - ไม่แก้ไข */}
+      <td className="px-2 py-2 text-xs text-gray-900 whitespace-normal break-words">
         {subtask.subTaskNumber}
+        {isEdited && (
+          <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+            แก้ไขแล้ว
+          </span>
+        )}
       </td>
-      <td className="px-2 py-2 text-xs text-gray-500">-</td>
-      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.taskName}>
-        {subtask.taskName}
+
+      {/* ACTIVITY - แก้ไขได้ */}
+      <td className="px-2 py-2 text-xs">
+        {isEditing ? (
+          <Select
+            options={uniqueCategories.map(cat => ({ value: cat, label: cat }))}
+            value={editingData?.activity || ''}
+            onChange={(value) => handleUpdateEditData('activity', value)}
+            placeholder="Select"
+          />
+        ) : (
+          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-900'}`} title={task?.taskCategory || ''}>
+            {/* 🔧 แก้ไขตรงนี้: แสดงข้อมูลที่แก้ไขแล้ว */}
+            {isEdited && editedSubtasks[subtask.id]?.activity 
+              ? editedSubtasks[subtask.id].activity
+              : task?.taskCategory || '-'
+            }
+          </span>
+        )}
       </td>
-      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.subTaskCategory}>
-        {subtask.subTaskCategory}
+
+      {/* RELATE DRAWING - แก้ไขได้ */}
+      <td className="px-2 py-2 text-xs">
+        {isEditing ? (
+          <Select
+            options={tasks
+              .filter(t => !editingData?.activity || t.taskCategory === editingData.activity)
+              .map(t => ({ value: t.id, label: t.taskName }))}
+            value={editingData?.relateDrawing || ''}
+            onChange={(value) => handleUpdateEditData('relateDrawing', value)}
+            placeholder="Select"
+            disabled={!editingData?.activity}
+          />
+        ) : (
+          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`} title={subtask.taskName}>
+            {subtask.taskName}
+          </span>
+        )}
       </td>
-      <td className="px-2 py-2 text-xs text-gray-500 truncate" title={subtask.item}>
-        {subtask.item || '-'}
+
+      {/* RELATE WORK - แก้ไขได้ */}
+      <td className="px-2 py-2 text-xs">
+        {isEditing ? (
+          <RelateWorkSelect
+            activityId={editingData?.activity || ''}
+            value={editingData?.relateWork || ''}
+            onChange={(value) => handleUpdateEditData('relateWork', value)}
+            disabled={!editingData?.activity}
+          />
+        ) : (
+          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`} title={subtask.subTaskCategory}>
+            {subtask.subTaskCategory}
+          </span>
+        )}
       </td>
-      <td className="px-2 py-2 text-xs text-gray-500 text-center">
-        {subtask.internalRev ? subtask.internalRev : '-'}
+
+      {/* ITEM - แก้ไขได้ */}
+      <td className="px-2 py-2 text-xs">
+        {isEditing ? (
+          <input
+            type="text"
+            value={editingData?.item || ''}
+            onChange={(e) => handleUpdateEditData('item', e.target.value)}
+            className="w-full px-1 py-1 border border-gray-300 rounded text-xs text-gray-900 bg-white focus:outline-none focus:border-blue-500"
+            placeholder="Item"
+          />
+        ) : (
+          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`}>
+            {subtask.item || '-'}
+          </span>
+        )}
       </td>
-      <td className="px-2 py-2 text-xs text-gray-500 text-center">
-        {subtask.subTaskScale}
+
+      {/* INTERNAL REV - แก้ไขได้ */}
+      <td className="px-2 py-2 text-xs text-center">
+        {isEditing ? (
+          <input
+            type="number"
+            value={editingData?.internalRev || ''}
+            onChange={(e) => handleUpdateEditData('internalRev', e.target.value ? parseInt(e.target.value) : null)}
+            className="w-full px-1 py-1 border border-gray-300 rounded text-center text-xs text-gray-900 bg-white focus:outline-none focus:border-blue-500"
+            min="1"
+            placeholder="Rev"
+          />
+        ) : (
+          <span className={`${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`}>
+            {subtask.internalRev || '-'}
+          </span>
+        )}
       </td>
+
+      {/* WORK SCALE - แก้ไขได้ */}
+      <td className="px-2 py-2 text-xs text-center">
+        {isEditing ? (
+          <Select
+            options={[
+              { value: 'S', label: 'S' },
+              { value: 'M', label: 'M' },
+              { value: 'L', label: 'L' }
+            ]}
+            value={editingData?.workScale || ''}
+            onChange={(value) => handleUpdateEditData('workScale', value)}
+          />
+        ) : (
+          <span className={`${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`}>
+            {subtask.subTaskScale}
+          </span>
+        )}
+      </td>
+
+      {/* ASSIGNEE - แก้ไขได้ */}
       <td className="px-2 py-2">
-        <div className="flex items-center space-x-2">
-          <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center">
-            <span className="text-xs font-medium text-white">
-              {subtask.subTaskAssignee?.charAt(0).toUpperCase()}
+        {isEditing ? (
+          <AssigneeSelect
+            value={editingData?.assignee || ''}
+            onChange={(value) => handleUpdateEditData('assignee', value)}
+          />
+        ) : (
+          <div className="flex items-center space-x-2">
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+              isEdited ? 'bg-blue-600' : 'bg-blue-500'
+            }`}>
+              <span className="text-xs font-medium text-white">
+                {subtask.subTaskAssignee?.charAt(0).toUpperCase()}
+              </span>
+            </div>
+            <span className={`text-xs ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-900'}`}>
+              {subtask.subTaskAssignee}
             </span>
           </div>
-          <span className="text-xs text-gray-900">
-            {subtask.subTaskAssignee}
-          </span>
-        </div>
+        )}
       </td>
-      {/* ✅ แก้คอลัมน์ DEADLINE - แสดงค่าจริง */}
+
+      {/* DEADLINE - ไม่แก้ไข */}
       <td className="px-2 py-2 text-xs">
         <span className={`font-medium ${
           deadlineStatus.isOverdue ? 'text-red-600' : 
@@ -852,36 +1270,88 @@ export default function TaskAssignment() {
           {deadlineStatus.text}
         </span>
       </td>
+
+      {/* PROGRESS - ไม่แก้ไข */}
       <td className="px-2 py-2">
-        <div className="flex items-center space-x-2">
-          <ProgressBar value={subtask.subTaskProgress} size="sm" />
-        </div>
+        <ProgressBar value={subtask.subTaskProgress} size="sm" />
       </td>
+
+      {/* LINK FILE - ไม่แก้ไข */}
       <td className="px-2 py-2 text-center">
-  {subtask.subTaskFiles && subtask.subTaskFiles.length > 0 ? (
-    <button
-      onClick={() => handleOpenFile(subtask.subTaskFiles![0])}
-      className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200 flex items-center gap-1 mx-auto"
-    >
-      📎 VIEW
-    </button>
-  ) : (
-    <span className="text-gray-400 text-xs">-</span>
-  )}
-</td>
+        {subtask.subTaskFiles && 
+         subtask.subTaskFiles.length > 0 && 
+         subtask.subTaskFiles[0] && 
+         typeof subtask.subTaskFiles[0] === 'object' &&
+         subtask.subTaskFiles[0].fileName &&
+         subtask.subTaskFiles[0].fileUrl ? (
+          <button
+            onClick={() => handleOpenFile(subtask.subTaskFiles![0])}
+            className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200 flex items-center gap-1 mx-auto"
+          >
+            📎 VIEW
+          </button>
+        ) : (
+          <span className="text-gray-400 text-xs">-</span>
+        )}
+      </td>
+
+      {/* CORRECT - ปุ่ม Edit/Save/Cancel/Delete */}
       <td className="px-2 py-2">
         <div className="flex items-center justify-center space-x-1">
-          <button onClick={() => alert(`Edit: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-blue-600">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-            </svg>
-          </button>
-          <span className="text-gray-300">/</span>
-          <button onClick={() => alert(`Delete: ${subtask.id}`)} className="p-1 text-gray-600 hover:text-red-600">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
+          {isEditing ? (
+            <>
+              {/* ปุ่ม Save (เครื่องหมายถูก) */}
+              <button 
+                onClick={handleSaveEditToState}
+                disabled={!isEditDataValid()}
+                className={`p-1 transition-colors ${
+                  isEditDataValid()
+                    ? 'text-green-600 hover:text-green-800 cursor-pointer'
+                    : 'text-gray-300 cursor-not-allowed'
+                }`}
+                title="Save to state"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+              <span className="text-gray-300">|</span>
+              {/* ปุ่ม Cancel (เครื่องหมายผิด) */}
+              <button 
+                onClick={handleCancelEdit}
+                className="p-1 text-red-600 hover:text-red-800 transition-colors"
+                title="Cancel"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </>
+          ) : (
+            <>
+              {/* ปุ่ม Edit */}
+              <button 
+                onClick={() => handleStartEdit(subtask)}
+                className="p-1 text-gray-600 hover:text-blue-600 transition-colors"
+                title="Edit"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </button>
+              <span className="text-gray-300">|</span>
+              {/* ปุ่ม Delete */}
+              <button 
+                onClick={() => alert(`Delete: ${subtask.id}`)}
+                className="p-1 text-gray-600 hover:text-red-600 transition-colors"
+                title="Delete"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
       </td>
     </tr>
@@ -924,13 +1394,13 @@ export default function TaskAssignment() {
               <div className="text-3xl font-bold text-yellow-800">
                 {getValidRows().length}
               </div>
-              <div className="text-sm text-yellow-600">รายการ</div>
+              <div className="text-sm text-yellow-600">รายการใหม่</div>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="text-3xl font-bold text-blue-800">
-                {getValidRows().filter(r => r.subtaskId !== '').length}
+                {Object.keys(editedSubtasks).length}
               </div>
-              <div className="text-sm text-blue-600">เพิ่มข้อมูลใหม่</div>
+              <div className="text-sm text-blue-600">รายการแก้ไข</div>
             </div>
           </div>
 
@@ -948,8 +1418,9 @@ export default function TaskAssignment() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
+                {/* รายการใหม่ */}
                 {getValidRows().map((row, index) => (
-                  <tr key={index}>
+                  <tr key={`new-${index}`}>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
                         ใหม่
@@ -963,6 +1434,25 @@ export default function TaskAssignment() {
                     <td className="px-4 py-3 text-sm text-gray-900">{row.assignee}</td>
                   </tr>
                 ))}
+                
+                {/* รายการแก้ไข */}
+                {Object.values(editedSubtasks).map((subtask, index) => (
+                  <tr key={`edited-${index}`}>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                        แก้ไข
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      {tasks.find(t => t.taskName === subtask.taskName)?.taskCategory || '-'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{subtask.taskName}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{subtask.subTaskCategory}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{subtask.item || '-'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{subtask.subTaskScale}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{subtask.subTaskAssignee}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -974,6 +1464,85 @@ export default function TaskAssignment() {
         newCount={successNewCount}
         updateCount={successUpdateCount}
       />
+
+      {/* ✅ Edit Confirmation Modal */}
+      <Modal
+        isOpen={showEditConfirmModal}
+        onClose={() => setShowEditConfirmModal(false)}
+        title="ยืนยันการแก้ไขข้อมูล"
+        size="xl"
+        footer={
+          <div className="flex justify-end space-x-3">
+            <Button 
+              variant="outline" 
+              onClick={() => setShowEditConfirmModal(false)}
+              disabled={isSaving}
+            >
+              ยกเลิก
+            </Button>
+            <Button 
+              onClick={handleConfirmEditSave}
+              disabled={isSaving}
+            >
+              {isSaving ? 'กำลังบันทึก...' : 'ยืนยันการแก้ไข'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">กรุณาตรวจสอบข้อมูลก่อนบันทึก</p>
+          
+          {/* สถิติ */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="text-3xl font-bold text-blue-800">1</div>
+              <div className="text-sm text-blue-600">รายการที่แก้ไข</div>
+            </div>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="text-3xl font-bold text-yellow-800">แก้ไข</div>
+              <div className="text-sm text-yellow-600">ประเภท</div>
+            </div>
+          </div>
+
+          {/* ตารางข้อมูล */}
+          {editConfirmData && (
+            <div className="overflow-x-auto max-h-96 border rounded-lg">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ประเภท</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Subtask ID</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Activity</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relate Drawing</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Relate Work</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Internal Rev</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Work Scale</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Assignee</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  <tr>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                        แก้ไข
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{editConfirmData.subtaskNumber}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{editConfirmData.activity}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{editConfirmData.relateDrawing}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{editConfirmData.relateWork}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{editConfirmData.item}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{editConfirmData.internalRev}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{editConfirmData.workScale}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{editConfirmData.assignee}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* ✅ Modal แสดงไฟล์ PDF */}
       <Modal
