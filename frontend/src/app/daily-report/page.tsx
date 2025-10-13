@@ -645,20 +645,23 @@ export default function DailyReport() {
     // Prepare data for RecheckPopup with old progress info
     const entriesForRecheck = validEntries.map(entry => {
       const fullTaskName = generateRelateDrawingText(entry, allProjects);
-      // หา progress เดิมจาก allDailyEntries
+      // หา progress เดิมจาก allDailyEntries (Progress ล่าสุดของ Subtask ในวันที่นี้)
       const existingEntry = allDailyEntries.find(e => 
         e.assignDate === selectedDate && 
         e.subtaskId === entry.subtaskId
       );
       const oldProgress = existingEntry?.progress || '0%';
       
+      // ตรวจสอบว่า progress มี % หรือไม่
+      const newProgress = entry.progress.includes('%') ? entry.progress : `${entry.progress}%`;
+      
       // ใช้วันที่ที่เลือกจาก workDate
       return {
         ...entry,
         assignDate: selectedDate, // กำหนดวันที่ที่เลือกไว้
         relateDrawing: fullTaskName,
-        progress: `${entry.progress}`,
-        oldProgress, // เพิ่ม progress เดิม
+        progress: newProgress,
+        oldProgress, // Progress ล่าสุดของ Subtask ในวันที่นี้ก่อนแก้ไข
       };
     });
 
@@ -1049,13 +1052,6 @@ export default function DailyReport() {
         onConfirm={handleConfirmSubmit}
         dailyReportEntries={entriesToSubmit}
         workDate={workDate}
-        debug={{ // เพิ่มข้อมูล debug
-          title: "Debug Information",
-          selectedDate: workDate,
-          currentSystemDate: formatDateToYYYYMMDD(new Date()),
-          entriesToSubmitDates: entriesToSubmit.map(e => e.assignDate),
-          timestamp: new Date().toISOString()
-        }}
       />
     </PageLayout>
   );

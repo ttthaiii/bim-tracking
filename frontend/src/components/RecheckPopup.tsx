@@ -261,11 +261,11 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
                       }`}>
                         {task.oldProgress && task.oldProgress !== task.progress ? (
                           <div className="flex flex-col items-center gap-1">
-                            <span className="text-sm text-gray-500 line-through">{task.oldProgress}%</span>
-                            <span className="text-green-600">{task.progress}%</span>
+                            <span className="text-sm text-gray-500 line-through">{task.oldProgress}</span>
+                            <span className="text-green-600">{task.progress}</span>
                           </div>
                         ) : (
-                          `${task.progress}%`
+                          task.progress
                         )}
                       </div>
                     </td>
