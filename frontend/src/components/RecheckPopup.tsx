@@ -13,6 +13,13 @@ interface RecheckPopupProps {
   dailyReportEntries: DailyReportEntry[];
   workDate: string;
   onEdit?: () => void;
+  debug?: {
+    title: string;
+    selectedDate: string;
+    currentSystemDate: string;
+    entriesToSubmitDates: string[];
+    timestamp: string;
+  };
 }
 
 export const RecheckPopup: React.FC<RecheckPopupProps> = ({
@@ -21,7 +28,8 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   onConfirm,
   dailyReportEntries,
   workDate,
-  onEdit
+  onEdit,
+  debug
 }) => {
   // แปลง workDate string เป็น Date object
   // แปลงวันที่จาก input type="date" (YYYY-MM-DD) เป็น Date object
@@ -289,6 +297,35 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
               </tbody>
             </table>
           </div>
+
+          {/* Debug Information Section */}
+          {debug && (
+            <div className="mt-6 p-4 bg-gray-100 rounded-xl border border-gray-300 text-sm space-y-2">
+              <h3 className="font-bold text-gray-700">{debug.title}</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-gray-600">Selected Date:</p>
+                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.selectedDate}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">System Date:</p>
+                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.currentSystemDate}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-gray-600">Entry Dates:</p>
+                  <div className="font-mono bg-white px-2 py-1 rounded">
+                    {debug.entriesToSubmitDates.map((date: string, i: number) => (
+                      <span key={i} className="inline-block mr-2">{date}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-gray-600">Timestamp:</p>
+                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.timestamp}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end space-x-6 mt-8">
             <button

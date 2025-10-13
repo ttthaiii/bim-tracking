@@ -30,11 +30,24 @@ export const getEmployeeDailyReportEntries = async (
     querySnapshot.forEach((doc) => {
       const data = doc.data();
       if (data.workhours && Array.isArray(data.workhours)) {
-        data.workhours.forEach((log: any, index: number) => {
-          const assignDate = log.timestamp.toDate().toISOString().split('T')[0];
+        // เรียงลำดับข้อมูลตาม timestamp (เวลาที่บันทึก) ล่าสุด
+        const sortedLogs = [...data.workhours].sort((a, b) => {
+          const timeA = a.timestamp?.toDate().getTime() || 0;
+          const timeB = b.timestamp?.toDate().getTime() || 0;
+          return timeB - timeA; // เรียงจากใหม่ไปเก่า
+        });
+
+        sortedLogs.forEach((log: any, index: number) => {
+          // ใช้ assignDate ถ้ามี, ไม่งั้นใช้ timestamp
+          let assignDate: string;
+          if (log.assignDate) {
+            assignDate = log.assignDate;
+          } else {
+            assignDate = log.timestamp.toDate().toISOString().split('T')[0];
+          }
           
           // Generate a truly unique ID for each individual log entry
-          const uniqueEntryId = `${doc.id}-${data.subtaskId}-${assignDate}-${log.timestamp.toMillis()}-${index}`;
+          const uniqueEntryId = `${doc.id}-${data.subtaskId}-${assignDate}-${log.timestamp?.toMillis() || 0}-${index}`;
 
           allEntries.push({
             id: uniqueEntryId,
@@ -53,7 +66,10 @@ export const getEmployeeDailyReportEntries = async (
             internalRev: data.internalRev || '',
             subTaskScale: data.subTaskScale || '',
             project: data.project || '',
-            logTimestamp: log.timestamp,
+            timestamp: log.timestamp,
+            loggedAt: log.loggedAt, // เพิ่ม loggedAt
+            status: 'pending',
+            relateDrawing: '',
           } as DailyReportEntry);
         });
       }
@@ -159,12 +175,28 @@ export const saveDailyReportEntries = async (
 
       // 2. Prepare the new work log entry.
       const newProgressNumber = parseInt(entry.progress.replace('%', ''), 10) || 0;
+      // สร้าง Date object จาก assignDate (วันที่เลือกจากปฏิทิน)
+      const [year, month, day] = entry.assignDate.split('-').map(Number);
+      const selectedDate = new Date(year, month - 1, day);
+      selectedDate.setHours(12, 0, 0, 0); // ตั้งเวลาเป็นเที่ยงวัน
+      
+      // สร้าง timestamp ปัจจุบัน
+      const now = new Date();
+      
+      console.log('[DEBUG] Saving work log with dates:', {
+        assignDate: entry.assignDate,
+        selectedDate: selectedDate.toISOString(),
+        currentTime: now.toISOString()
+      });
+
       const workLogData = {
         day: parseHours(entry.normalWorkingHours),
         ot: parseHours(entry.otWorkingHours),
-        progress: newProgressNumber, // Use the parsed number
+        progress: newProgressNumber,
         note: entry.note || '',
-        timestamp: new Date()
+        timestamp: now,              // เวลาที่กดบันทึก (เวลาปัจจุบัน) - ใช้จัดเรียงข้อมูลล่าสุด
+        loggedAt: selectedDate,      // วันที่ที่เลือกจากปฏิทิน (Date + เวลา 12:00)
+        assignDate: entry.assignDate  // วันที่ที่เลือกจากปฏิทิน (YYYY-MM-DD)
       };
 
       // Atomically add the new work log to the 'workhours' array.

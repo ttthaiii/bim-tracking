@@ -27,6 +27,16 @@ import { Timestamp } from 'firebase/firestore';
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
 
+/**
+ * แปลง Date เป็น string ในรูปแบบ YYYY-MM-DD โดยไม่มีปัญหา timezone
+ */
+const formatDateToYYYYMMDD = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: string, baseId: string, index: number): DailyReportEntry => ({
   id: `${baseId}-temp-${index}`,
   employeeId, assignDate, subtaskId: '', subtaskPath: '',
@@ -103,7 +113,11 @@ export default function DailyReport() {
   const { setHasUnsavedChanges } = useDashboard();
   const baseId = useId();
   const [date, setDate] = useState<Value>(null);
-  const [workDate, setWorkDate] = useState(new Date().toISOString().split('T')[0]);
+  // เก็บ workDate ในรูปแบบ YYYY-MM-DD โดยตรง
+  const [workDate, setWorkDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  });
   const [employeeId, setEmployeeId] = useState('');
   const [employeeData, setEmployeeData] = useState<{ employeeId: string; fullName: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -131,12 +145,28 @@ export default function DailyReport() {
   const [historyLogsGrouped, setHistoryLogsGrouped] = useState<Record<string, DailyReportEntry[]>>({});
 
   const handleShowHistory = () => {
-    const entriesForDate = allDailyEntries.filter(entry => entry.assignDate === workDate);
+    // กรองข้อมูลสำหรับประวัติ: ใช้ assignDate เป็นหลัก
+    const entriesForDate = allDailyEntries.filter(entry => {
+      const matches = entry.assignDate === workDate;
+      return matches;
+    });
+
+    console.log('Found entries for history:', {
+      workDate,
+      entriesCount: entriesForDate.length,
+      entries: entriesForDate
+    });
+
     const groupedLogs: Record<string, DailyReportEntry[]> = {};
 
     entriesForDate.forEach(entry => {
-      // Round timestamp to the nearest second to group entries submitted at roughly the same time
-      const timestampKey = entry.logTimestamp?.toMillis() ? String(Math.floor(entry.logTimestamp.toMillis() / 1000) * 1000) : 'no-timestamp';
+      // จัดกลุ่มตาม timestamp สำหรับการเรียงลำดับการส่งข้อมูล
+      const groupingTime = entry.loggedAt || entry.timestamp;
+      
+      const timestampKey = groupingTime?.toMillis() 
+        ? String(Math.floor(groupingTime.toMillis() / 1000) * 1000) 
+        : 'no-timestamp';
+      
       if (!groupedLogs[timestampKey]) {
         groupedLogs[timestampKey] = [];
       }
@@ -219,26 +249,51 @@ export default function DailyReport() {
 
   useEffect(() => {
     if (date instanceof Date) {
-      const selectedDateLocal = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      const todayLocal = new Date();
-      todayLocal.setHours(0, 0, 0, 0);
-      
-      setIsFutureDate(selectedDateLocal > todayLocal);
-      
-      const twoDaysAgoLocal = new Date(todayLocal);
-      twoDaysAgoLocal.setDate(todayLocal.getDate() - 2);
+      // แปลงวันที่เป็น string โดยตรง
+      const selectedDate = formatDateToYYYYMMDD(date);
+      console.log('🔍 Selected date:', {
+        original: date.toISOString(),
+        formatted: selectedDate
+      });
+      setWorkDate(selectedDate);
 
-      setIsReadOnly(selectedDateLocal < twoDaysAgoLocal);
+      // เปรียบเทียบวันที่ด้วย string
+      const today = formatDateToYYYYMMDD(new Date());
+      const twoDaysAgo = new Date();
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const twoDaysAgoStr = formatDateToYYYYMMDD(twoDaysAgo);
 
-      const year = selectedDateLocal.getFullYear();
-      const month = String(selectedDateLocal.getMonth() + 1).padStart(2, '0');
-      const day = String(selectedDateLocal.getDate()).padStart(2, '0');
-      setWorkDate(`${year}-${month}-${day}`);
+      console.log('🔍 Date comparisons:', {
+        selectedDate,
+        today,
+        twoDaysAgo: twoDaysAgoStr
+      });
+
+      setIsFutureDate(selectedDate > today);
+      setIsReadOnly(selectedDate < twoDaysAgoStr);
     }
   }, [date]);
 
-  // Effect สำหรับจัดการ cache เมื่อมีการเปลี่ยนวันที่
+  // Effect สำหรับจัดการ cache และ validate workDate เมื่อมีการเปลี่ยนวันที่
   useEffect(() => {
+    // Validate workDate format
+    if (workDate) {
+      console.log('Validating workDate:', workDate);
+      // ตรวจสอบว่า workDate เป็น YYYY-MM-DD format
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(workDate)) {
+        console.error('Invalid workDate format:', workDate);
+        // ถ้าไม่ใช่ format ที่ถูกต้อง ให้แปลงใหม่
+        const date = new Date(workDate);
+        if (!isNaN(date.getTime())) {
+          const correctedDate = formatDateToYYYYMMDD(date);
+          console.log('Correcting workDate to:', correctedDate);
+          setWorkDate(correctedDate);
+          return;
+        }
+      }
+    }
+
     if (!dailyReportEntries.length) return;
     
     // บันทึกข้อมูลลง cache เมื่อมีการเปลี่ยนวันที่
@@ -273,44 +328,55 @@ export default function DailyReport() {
 
     // ถ้ามีข้อมูลใน cache ใช้ข้อมูลจาก cache
     if (tempDataCache[workDate]) {
-      console.log('Using temp cached data for', workDate);
+      console.log('🔍 Using cached data:', {
+        workDate,
+        cachedEntries: tempDataCache[workDate],
+        cacheKeys: Object.keys(tempDataCache)
+      });
       setDailyReportEntries(tempDataCache[workDate]);
       return;
     }
 
     // ถ้าไม่มีข้อมูลใน cache และไม่มีข้อมูลใน allDailyEntries
     if (!allDailyEntries.length) {
-      console.log('No entries available');
+      console.log('🔍 No entries state:', {
+        workDate,
+        allEntriesLength: allDailyEntries.length,
+        cache: tempDataCache
+      });
       return;
     }
 
-    console.log('Filtering entries for date', workDate);
+    console.log('Filtering entries for table display:', workDate);
+    // กรองข้อมูลโดยใช้ assignDate เป็นหลัก
     const entriesForDate = allDailyEntries.filter(entry => {
       const matches = entry.assignDate === workDate;
       if (matches) {
-        console.log('Found matching entry:', entry);
+        console.log('Found matching entry for table:', entry);
       }
       return matches;
-    });    if (entriesForDate.length === 0) {
+    });
+
+    if (entriesForDate.length === 0) {
         const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
         const newEntry = {
             ...initialEntry,
             isExistingData: false,
-            logTimestamp: Timestamp.now()
+            timestamp: Timestamp.now()
         };
         setDailyReportEntries([newEntry]);
         setTempDataCache(prev => ({ ...prev, [workDate]: [newEntry] }));
         setEditableRows(new Set()); // เคลียร์ editableRows เพราะเป็นข้อมูลใหม่ แก้ไขได้เลย
         return;
-    }    
+    }
 
-    // หา timestamp ล่าสุดของวันนั้น
-    const latestTimestamp = Math.max(...entriesForDate.map(entry => entry.logTimestamp?.toMillis() || 0));
+    // หา timestamp ล่าสุดของวันนั้น (ข้อมูลที่บันทึกล่าสุดตาม timestamp)
+    const latestTimestamp = Math.max(...entriesForDate.map(entry => entry.timestamp?.toMillis() || 0));
     console.log('Latest timestamp for date:', new Date(latestTimestamp));
 
     // กรองเฉพาะ entries ที่มี timestamp ตรงกับ timestamp ล่าสุด
     const latestEntries = entriesForDate.filter(entry => 
-      Math.floor((entry.logTimestamp?.toMillis() || 0) / 1000) === Math.floor(latestTimestamp / 1000)
+      Math.floor((entry.timestamp?.toMillis() || 0) / 1000) === Math.floor(latestTimestamp / 1000)
     );
     console.log('Latest entries:', latestEntries);
 
@@ -553,6 +619,21 @@ export default function DailyReport() {
       return;
     }
 
+    // ตรวจสอบว่าวันที่ที่เลือกเป็นวันที่อนาคตหรือไม่
+    const selectedDate = workDate;
+    const today = formatDateToYYYYMMDD(new Date());
+    
+    console.log('Submitting data check:', {
+      selectedDate,
+      today,
+      isFutureDate: selectedDate > today
+    });
+
+    if (selectedDate > today) {
+      alert('ไม่สามารถลงข้อมูลล่วงหน้าได้');
+      return;
+    }
+
     const validEntries = dailyReportEntries.filter(entry => entry.subtaskId);
 
     if (validEntries.length === 0) {
@@ -565,17 +646,25 @@ export default function DailyReport() {
       const fullTaskName = generateRelateDrawingText(entry, allProjects);
       // หา progress เดิมจาก allDailyEntries
       const existingEntry = allDailyEntries.find(e => 
-        e.assignDate === workDate && 
+        e.assignDate === selectedDate && 
         e.subtaskId === entry.subtaskId
       );
       const oldProgress = existingEntry?.progress || '0%';
       
+      // ใช้วันที่ที่เลือกจาก workDate
       return {
         ...entry,
+        assignDate: selectedDate, // กำหนดวันที่ที่เลือกไว้
         relateDrawing: fullTaskName,
         progress: `${entry.progress}`,
         oldProgress, // เพิ่ม progress เดิม
       };
+    });
+
+    console.log('Entries to submit:', {
+      workDate: selectedDate,
+      entriesCount: entriesForRecheck.length,
+      sampleDates: entriesForRecheck.map(e => e.assignDate)
     });
 
     setEntriesToSubmit(entriesForRecheck);
@@ -587,10 +676,29 @@ export default function DailyReport() {
     setLoading(true);
     setError('');
     try {
+      // ใช้วันที่จาก workDate โดยตรง (ที่ถูกตั้งค่าตอนเลือกวันที่)
+      const selectedDate = workDate;
+      
+      // เช็คอีกครั้งว่าวันที่ถูกต้อง
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(selectedDate)) {
+        throw new Error(`Invalid date format: ${selectedDate}`);
+      }
+
+      console.log('Confirming submission:', {
+        selectedDate,
+        entriesCount: entriesToSubmit.length
+      });
+
       const entriesToSave = entriesToSubmit.map(entry => ({
         ...entry,
-        assignDate: workDate,
+        assignDate: selectedDate, // ใช้วันที่ที่เลือกไว้
       }));
+
+      console.log('Saving entries with date:', {
+        workDate,
+        entriesAssignDates: entriesToSave.map(e => e.assignDate)
+      });
 
       await saveDailyReportEntries(employeeId, entriesToSave);
       
@@ -613,27 +721,29 @@ export default function DailyReport() {
   const tileClassName = ({ date, view }: { date: Date; view: string }) => {
     if (view === 'month') {
       const classes = [];
-      const normalizedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      const normalizedDateTimestamp = normalizedDate.getTime();
       
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      // แปลงเป็น string YYYY-MM-DD โดยตรง
+      const tileDate = formatDateToYYYYMMDD(date);
+      const today = formatDateToYYYYMMDD(new Date());
+
+      console.log('🔍 Tile date check:', {
+        date: tileDate,
+        today,
+        comparison: tileDate < today
+      });
 
       // Check if the day is Sunday (getDay() returns 0 for Sunday)
       const isSunday = date.getDay() === 0;
 
-      if (normalizedDate < today) {
-        const entriesForDate = allDailyEntries.filter(entry => {
-            const entryDate = new Date(entry.assignDate);
-            return new Date(entryDate.getFullYear(), entryDate.getMonth(), entryDate.getDate()).getTime() === normalizedDateTimestamp;
-        });
+      if (tileDate < today) {
+        const entriesForDate = allDailyEntries.filter(entry => entry.assignDate === tileDate);
 
         // Only add 'has-missing-data-marker' if it's not a Sunday and there are no entries
         if (entriesForDate.length === 0 && !isSunday) {
             classes.push('has-missing-data-marker');
         } else {
             const uniqueTimestamps = new Set(
-                entriesForDate.map(e => Math.floor((e.logTimestamp?.toMillis() || 0) / 1000))
+                entriesForDate.map(e => Math.floor((e.timestamp?.toMillis() || 0) / 1000))
             );
             if (uniqueTimestamps.size > 1) {
                 classes.push('has-edit-marker');
@@ -938,6 +1048,13 @@ export default function DailyReport() {
         onConfirm={handleConfirmSubmit}
         dailyReportEntries={entriesToSubmit}
         workDate={workDate}
+        debug={{ // เพิ่มข้อมูล debug
+          title: "Debug Information",
+          selectedDate: workDate,
+          currentSystemDate: formatDateToYYYYMMDD(new Date()),
+          entriesToSubmitDates: entriesToSubmit.map(e => e.assignDate),
+          timestamp: new Date().toISOString()
+        }}
       />
     </PageLayout>
   );

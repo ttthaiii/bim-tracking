@@ -68,8 +68,9 @@ export interface DailyReportEntry {
   isLeaveTask?: boolean; // Flag to identify leave-related tasks
   initialProgress?: number; // Store the initial progress from the database
   progressError?: string; // To show a tooltip-like error message
-  logTimestamp?: Timestamp; // New: Timestamp of the specific log entry
-  oldProgress?: string; // Progress value from previous submission
+  timestamp?: Timestamp;    // วันที่เลือกจากปฏิทิน (ข้อมูลเก่า) หรือเวลาที่บันทึก (ข้อมูลใหม่)
+  loggedAt?: Timestamp;     // เวลาที่บันทึกจริง (สำหรับข้อมูลใหม่)
+  oldProgress?: string;     // Progress value from previous submission
   isExistingData?: boolean; // Flag to identify if this is existing data
   
   // New field for display
