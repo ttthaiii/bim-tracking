@@ -161,7 +161,8 @@ export default function DailyReport() {
 
     entriesForDate.forEach(entry => {
       // จัดกลุ่มตาม timestamp สำหรับการเรียงลำดับการส่งข้อมูล
-      const groupingTime = entry.loggedAt || entry.timestamp;
+      // ใช้ timestamp เป็นหลักในการจัดกลุ่ม เพราะแต่ละครั้งที่บันทึกจะมี timestamp ไม่เหมือนกัน
+      const groupingTime = entry.timestamp;
       
       const timestampKey = groupingTime?.toMillis() 
         ? String(Math.floor(groupingTime.toMillis() / 1000) * 1000) 
