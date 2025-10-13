@@ -926,13 +926,20 @@ export default function DailyReport() {
                                     onChange={(e) => handleProgressInput(entry.id, e.target.value)} 
                                     onBlur={() => handleProgressValidation(entry.id)} 
                                     className={`w-14 p-1 border rounded-md text-center text-xs ${
-                                      entry.isExistingData && !editableRows.has(entry.id)
+                                      parseInt(entry.progress.replace('%', '')) === 100 
+                                        ? 'bg-green-100 border-green-400 text-green-800 font-bold'
+                                        : entry.isExistingData && !editableRows.has(entry.id)
                                         ? 'bg-gray-100 border-gray-200 text-gray-700'
                                         : 'border-gray-300 text-gray-900'
                                     }`}
                                     disabled={Boolean(isReadOnly || entry.isLeaveTask || isFutureDate || (entry.isExistingData && !editableRows.has(entry.id)))} 
                                   />
                                   <span className="text-gray-800">%</span>
+                                  {parseInt(entry.progress.replace('%', '')) === 100 && (
+                                    <span className="text-green-600 font-bold text-xs ml-1" title="งานเสร็จแล้ว จำเป็นต้อง Upload File">
+                                      📎
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </td>

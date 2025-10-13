@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DailyReportEntry } from '@/types/database';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
+import { UploadPopup } from './UploadPopup';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
@@ -35,6 +36,7 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   // แปลงวันที่จาก input type="date" (YYYY-MM-DD) เป็น Date object
   const initialDate = workDate ? new Date(workDate.replace(/-/g, '/')) : new Date();
   const [selectedDate, setSelectedDate] = useState<Value>(initialDate);
+  const [showUploadPopup, setShowUploadPopup] = useState(false);
 
   // อัพเดท selectedDate เมื่อ workDate เปลี่ยน
   useEffect(() => {
@@ -62,6 +64,28 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   };
 
   const totalHours = calculateTotalHours();
+
+  // กรอง tasks ที่มี progress 100%
+  const completedTasks = dailyReportEntries.filter(task => 
+    parseInt(task.progress.replace('%', '')) === 100
+  );
+
+  // จัดการการยืนยันข้อมูล
+  const handleConfirmData = () => {
+    if (completedTasks.length > 0) {
+      // ถ้ามี task ที่เสร็จ 100% ให้แสดง Upload Popup
+      setShowUploadPopup(true);
+    } else {
+      // ถ้าไม่มี task ที่เสร็จ 100% ให้ confirm ตรงไป
+      onConfirm();
+    }
+  };
+
+  // จัดการเมื่อ Upload เสร็จ
+  const handleUploadComplete = () => {
+    setShowUploadPopup(false);
+    onConfirm(); // เรียก onConfirm หลังจาก upload เสร็จ
+  };
 
   return (
     <>
@@ -338,14 +362,27 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
               แก้ไขข้อมูล
             </button>
             <button
-              onClick={onConfirm}
+              onClick={handleConfirmData}
               className="px-8 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
             >
               ยืนยันข้อมูล
+              {completedTasks.length > 0 && (
+                <span className="ml-2 bg-white text-indigo-600 px-2 py-1 rounded-full text-sm font-bold">
+                  {completedTasks.length}
+                </span>
+              )}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Upload Popup */}
+      <UploadPopup
+        isOpen={showUploadPopup}
+        onClose={() => setShowUploadPopup(false)}
+        onComplete={handleUploadComplete}
+        completedTasks={completedTasks}
+      />
     </div>
     </>
   );
