@@ -8,6 +8,7 @@ const navItems = [
   { name: 'Projects', path: '/projects' },
   { name: 'Tasks', path: '/tasks' },
   { name: 'Reports', path: '/reports' },
+  { name: '🗑️ Deleted Items', path: '/deleted-items' }, // ← เพิ่มบรรทัดนี้
 ];
 
 export default function Navbar() {
