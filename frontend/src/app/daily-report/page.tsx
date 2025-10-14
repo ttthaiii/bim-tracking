@@ -1,10 +1,12 @@
+export const dynamic = 'force-dynamic';
 'use client';
 
 import { useState, useEffect, useCallback, useId, useRef } from 'react';
-import dynamic from 'next/dynamic';
+// 1. แก้ไข: เปลี่ยนชื่อ import ที่ซ้ำซ้อน
+import dynamicImport from 'next/dynamic'; 
 
-// Dynamic import Calendar with no SSR
-const Calendar = dynamic(
+// 2. แก้ไข: ใช้ชื่อใหม่ที่ import เข้ามา
+const Calendar = dynamicImport(
   () => import('react-calendar'),
   { ssr: false } // This ensures the component only renders on client-side
 );
