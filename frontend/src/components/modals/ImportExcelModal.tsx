@@ -18,7 +18,7 @@ export default function ImportExcelModal({
   onImport 
 }: ImportExcelModalProps) {
   const [step, setStep] = useState(1);
-  const [parsedTasks, setParsedTasks] = useState<any[]>([]);
+  // const [parsedTasks, setParsedTasks] = useState<any[]>([]); // Warning: Not used
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   if (!isOpen) return null;
@@ -251,7 +251,8 @@ export default function ImportExcelModal({
                 border: '1px solid #fbbf24'
               }}>
                 <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>
-                  💡 <strong>หมายเหตุ:</strong> หลังจากดาวน์โหลดแล้ว กรุณากรอกข้อมูลใน Excel และกลับมากดปุ่ม "ถัดไป"
+                  {/* --- แก้ไข: เปลี่ยน "" เป็น &ldquo;&rdquo; --- */}
+                  💡 <strong>หมายเหตุ:</strong> หลังจากดาวน์โหลดแล้ว กรุณากรอกข้อมูลใน Excel และกลับมากดปุ่ม &ldquo;ถัดไป&rdquo;
                 </p>
               </div>
             </div>

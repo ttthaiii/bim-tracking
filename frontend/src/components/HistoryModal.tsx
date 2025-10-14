@@ -1,8 +1,6 @@
-
 'use client';
 
 import { DailyReportEntry, Project } from '@/types/database';
-import { Timestamp } from 'firebase/firestore';
 import { useState } from 'react';
 
 interface HistoryModalProps {
@@ -25,7 +23,7 @@ const formatTimestampToDateTime = (timestampMillis: string) => {
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
   if (!entry.subtaskId) return '';
   const project = projects.find(p => p.id === entry.project);
-  let parts = [];
+  const parts = []; // <--- แก้ไข: เปลี่ยนจาก let เป็น const
   if (project) parts.push(project.abbr);
   if (entry.taskName) parts.push(entry.taskName);
   if (entry.subTaskName) parts.push(entry.subTaskName);
@@ -34,9 +32,10 @@ const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[])
 };
 
 export const HistoryModal: React.FC<HistoryModalProps> = ({ isOpen, onClose, groupedLogs, allProjects }) => {
-  if (!isOpen) return null;
-
+  // --- แก้ไข: ย้าย Hook มาไว้บนสุด ก่อนเงื่อนไข ---
   const [expandedTimestamps, setExpandedTimestamps] = useState<Set<string>>(new Set());
+
+  if (!isOpen) return null; // <--- เงื่อนไขยังอยู่เหมือนเดิม
 
   const toggleExpand = (timestamp: string) => {
     setExpandedTimestamps(prev => {

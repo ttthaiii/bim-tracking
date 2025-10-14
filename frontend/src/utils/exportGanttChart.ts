@@ -60,7 +60,8 @@ export const exportGanttChart = async (
   const daysBetween = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
   const weeks = Math.ceil(daysBetween / 7);
 
-  let currentWeekStart = new Date(startDate);
+  // --- แก้ไข: เปลี่ยน let เป็น const ---
+  const currentWeekStart = new Date(startDate);
   for (let i = 0; i < weeks; i++) {
     const weekCol = dateColumnStart + i;
     const cell = worksheet.getCell(headerRow, weekCol);
@@ -125,7 +126,8 @@ export const exportGanttChart = async (
 
     const taskStart = new Date(task.startDate);
     const taskEnd = new Date(task.dueDate);
-    let currentDate = new Date(startDate);
+    // --- แก้ไข: เปลี่ยน let เป็น const ---
+    const currentDate = new Date(startDate);
     
     for (let weekIndex = 0; weekIndex < weeks; weekIndex++) {
       const weekStart = new Date(currentDate);

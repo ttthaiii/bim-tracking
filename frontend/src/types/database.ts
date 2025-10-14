@@ -9,7 +9,7 @@ export interface Project {
   startDate?: Timestamp;
   dueDate?: Timestamp;
   createdAt: Timestamp;
-  projectAssignee?: string;  // ← เพิ่มบรรทัดนี้
+  projectAssignee?: string;
 }
 
 export interface User {
@@ -34,9 +34,8 @@ export interface Task {
   lastRev?: string;
   documentNumber?: string;
   rev?: string;
-  currentStep?: string;
-  taskStatus?: string;      // ← เพิ่ม
-  deletedAt?: Timestamp;    // ← เพิ่ม
+  taskStatus?: string;
+  deletedAt?: Timestamp;
 }
 
 // Interface for Subtask (from tasks > subtasks collection)
@@ -63,6 +62,8 @@ export interface Subtask {
   taskName: string;
   wlFromscale: number;
   wlRemaining: number;
+  subtaskStatus?: string;
+  deletedAt?: Timestamp;
 }
 
 // Interface for DailyReportEntry (UI state representation)
@@ -113,15 +114,6 @@ export interface User {
 export interface Employee {
   employeeId: string;
   fullName: string;
-}
-  remark?: string;
-  project: string;
-  subTaskFiles: Array<{
-    fileName: string;
-    fileUrl: string;
-  }>;
-  subtaskStatus?: string;   // ← เพิ่ม
-  deletedAt?: Timestamp;    // ← เพิ่ม
 }
 
 export interface RelateWork {

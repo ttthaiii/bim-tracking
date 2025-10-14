@@ -20,7 +20,6 @@ import { SubtaskAutocomplete } from '@/components/SubtaskAutocomplete';
 import Select from '@/components/ui/Select';
 import { RecheckPopup } from '@/components/RecheckPopup';
 import { HistoryModal } from '@/components/HistoryModal'; // Import the new modal
-import isEqual from 'lodash.isequal';
 import { Timestamp } from 'firebase/firestore';
 
 type ValuePiece = Date | null;
@@ -99,7 +98,7 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
   if (!entry.subtaskId) return '';
   const project = projects.find(p => p.id === entry.project);
-  let parts = [];
+  const parts = [];
   if (project) parts.push(project.abbr);
   if (entry.taskName) parts.push(entry.taskName);
   if (entry.subTaskName) parts.push(entry.subTaskName);
@@ -387,8 +386,8 @@ export default function DailyReport() {
       if (!relateDrawing && subtask) {
         // ค้นหา project
         const project = allProjects.find(p => p.id === subtask.projectId) ||
-                       allProjects.find(p => p.id === subtask.project) ||
-                       allProjects.find(p => p.name === subtask.project);
+                          allProjects.find(p => p.id === subtask.project) ||
+                          allProjects.find(p => p.name === subtask.project);
 
         // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
         const abbr = project?.abbr || subtask.project || 'N/A';
@@ -411,7 +410,7 @@ export default function DailyReport() {
   console.log('entriesToShow', entriesToShow);
   setDailyReportEntries(entriesToShow);
     setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
-  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks]);
+  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects, tempDataCache]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
     setDailyReportEntries((currentEntries: DailyReportEntry[]) => {
@@ -631,7 +630,7 @@ export default function DailyReport() {
 
     // Prepare data for RecheckPopup with old progress info
     const entriesForRecheck = validEntries.map(entry => {
-      const fullTaskName = generateRelateDrawingText(entry, allProjects);
+      // --- แก้ไข: ลบตัวแปรที่ไม่ได้ใช้ออก ---
       // หา progress เดิมจาก allDailyEntries (Progress ล่าสุดของ Subtask ในวันที่นี้)
       const existingEntry = allDailyEntries.find(e => 
         e.assignDate === selectedDate && 
@@ -646,7 +645,7 @@ export default function DailyReport() {
       return {
         ...entry,
         assignDate: selectedDate, // กำหนดวันที่ที่เลือกไว้
-        relateDrawing: fullTaskName,
+        relateDrawing: generateRelateDrawingText(entry, allProjects), // สร้าง relateDrawing ที่นี่
         progress: newProgress,
         oldProgress, // Progress ล่าสุดของ Subtask ในวันที่นี้ก่อนแก้ไข
       };
@@ -831,7 +830,7 @@ export default function DailyReport() {
                     <tbody>
                       {dailyReportEntries.map((entry, index) => {
                         const relevantFile = uploadedFiles.find(file => file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate);
-                        const fullTaskName = generateRelateDrawingText(entry, allProjects);
+                        
                         return (
                           <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
                             <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>

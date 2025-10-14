@@ -24,10 +24,9 @@ function Select({
   loading = false,
   className = ''
 }: SelectProps) {
-  // 🆕 เพิ่ม guard เพื่อป้องกัน double call
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newValue = e.target.value;
-    if (newValue !== value) {  // ⬅️ เช็คก่อนเรียก onChange
+    if (newValue !== value) {
       onChange(newValue);
     }
   };
@@ -35,12 +34,10 @@ function Select({
   return (
     <div className={`relative ${className}`}>
       <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={Boolean(disabled || loading)}
         value={value || ''}
-        onChange={handleChange}  // ⬅️ ใช้ handleChange แทน
-        disabled={disabled || loading}
+        onChange={handleChange}
+        // --- แก้ไข: แปลงค่าให้เป็น boolean เสมอ ---
+        disabled={Boolean(disabled || loading)}
         className={`
           px-3 py-2 
           bg-white border border-gray-300 rounded-md 
@@ -49,7 +46,6 @@ function Select({
           disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed
           appearance-none
           w-full
-          ${className}
         `}
       >
         <option value="">{loading ? 'Loading...' : placeholder}</option>
@@ -79,7 +75,6 @@ function Select({
   );
 }
 
-// 🆕 ใช้ React.memo เพื่อป้องกัน unnecessary re-render
 export default React.memo(Select, (prevProps, nextProps) => {
   return (
     prevProps.value === nextProps.value &&
