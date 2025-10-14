@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, setDoc, doc, Timestamp, getDoc } from 'firebase/firestore'; // ✅ เพิ่ม getDoc
 import { db } from '@/config/firebase';

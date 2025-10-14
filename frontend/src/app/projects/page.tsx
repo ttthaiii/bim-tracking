@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import React, { useEffect, useState } from "react";
 import { Timestamp } from "firebase/firestore";
 import CreateProjectModal from "@/components/modals/CreateProjectModal";
