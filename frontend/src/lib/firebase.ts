@@ -11,19 +11,10 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID || ''
 };
 
-// ✅ เพิ่ม guard เพื่อป้องกันการ initialize ซ้ำหรือตอนยังไม่พร้อม
-let app;
-let db;
+// ✅ Initialize Firebase (ไม่ต้องมี guard เพราะเราใช้ 'use client' อยู่แล้ว)
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-if (typeof window !== 'undefined') {
-  // ทำงานเฉพาะฝั่ง client เท่านั้น
-  if (getApps().length === 0) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApps()[0];
-  }
-  db = getFirestore(app);
-}
+// ✅ Export db โดยตรง
+export const db = getFirestore(app);
 
-export { app, db };
 export default app;
