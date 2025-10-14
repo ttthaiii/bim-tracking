@@ -1137,7 +1137,7 @@ const ProjectsPage = () => {
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
                           {row.lastRev || "00"}
                         </td>
-                        <td style={{ padding: "2px 3px", fontSize: 10, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <td style={{ padding: "2px 3px", fontSize: 10, textAlign: "center" }}>
                           {row.statusDwg ? (
                             <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
                           ) : isNewRow ? (
@@ -1153,7 +1153,9 @@ const ProjectsPage = () => {
                                 fontSize: 10,
                                 cursor: "pointer",
                                 color: "white",
-                                boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)"
+                                boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)",
+                                margin: "0 auto",
+                                display: "block"
                               }}
                             >
                               บันทึก
@@ -1170,7 +1172,8 @@ const ProjectsPage = () => {
                                 color: "#3b82f6",
                                 display: "flex",
                                 alignItems: "center",
-                                justifyContent: "center"
+                                justifyContent: "center",
+                                margin: "0 auto"
                               }}
                               title="แก้ไข"
                             >
@@ -1180,7 +1183,7 @@ const ProjectsPage = () => {
                             </button>
                           )}
                         </td>
-                        <td style={{ padding: "2px 4px", fontSize: 10, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <td style={{ padding: "2px 4px", fontSize: 10, textAlign: "center" }}>
                           {(() => {
                             const isEmptyRow = !row.id && !row.relateDrawing && !row.activity && !row.startDate && !row.dueDate;
                             const isLastEmptyRow = isEmptyRow && idx === rows.length - 1;
@@ -1203,7 +1206,8 @@ const ProjectsPage = () => {
                                   borderRadius: "3px",
                                   display: "flex",
                                   alignItems: "center",
-                                  justifyContent: "center"
+                                  justifyContent: "center",
+                                  margin: "0 auto"
                                 }}
                                 title="ลบ"
                               >
