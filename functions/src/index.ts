@@ -1,6 +1,7 @@
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
-import * as admin from "firebase-admin";
-import * as logger from "firebase-functions/logger";
+import { logger } from "firebase-functions";
+import { getBimTrackingDb, getAdminDb } from "./lib/firebase/admin";
+import * as admin from "firebase-admin"; // <--- ของเดิม
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -197,5 +198,65 @@ export const aggregateTaskData = onDocumentWritten(
     } catch (error) {
       logger.error(`❌ Error updating parent task '${taskId}':`, error);
     }
+  }
+);
+
+export const onBimTrackingTaskUpdate = onDocumentWritten(
+  {
+    document: "tasks/{taskId}",
+    region: "asia-southeast1",
+    secrets: ["TTSDOC_PRIVATE_KEY", "BIM_TRACKING_PRIVATE_KEY", "TTSDOC_PROJECT_ID", "TTSDOC_CLIENT_EMAIL"]
+  },
+  async (event) => {
+    const taskId = event.params.taskId;
+    const dataAfter = event.data?.after.data();
+    const dataBefore = event.data?.before.data();
+
+    if (!dataAfter || !dataBefore) {
+        logger.log(`[Sync Back/${taskId}] No data to process.`);
+        return null;
+    }
+
+    const isWorkRequest = dataAfter.taskCategory === 'Work Request';
+    const isWorkAccepted = !dataBefore.planStartDate && dataAfter.planStartDate;
+
+    if (!isWorkRequest || !isWorkAccepted) {
+        logger.log(`[Sync Back/${taskId}] No action needed. (isWorkRequest: ${isWorkRequest}, isWorkAccepted: ${isWorkAccepted})`);
+        return null;
+    }
+
+    logger.log(`[Sync Back/${taskId}] Work Request accepted. Syncing status back to ttsdoc...`);
+
+    try {
+        const link = dataAfter.link as string;
+        if (!link || !link.includes('/dashboard/work-request?docId=')) {
+            throw new Error("Task link is invalid or does not belong to a Work Request.");
+        }
+
+        const wrDocId = link.split('docId=')[1];
+        if (!wrDocId) {
+            throw new Error(`Could not extract Work Request ID from link: ${link}`);
+        }
+
+        const ttsdocDb = getAdminDb();
+        const wrRef = ttsdocDb.collection("workRequests").doc(wrDocId);
+
+        await wrRef.update({
+            status: 'IN_PROGRESS',
+            planStartDate: dataAfter.planStartDate,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        logger.log(`✅ [Sync Back/${taskId}] Successfully updated Work Request ${wrDocId} to IN_PROGRESS.`);
+
+    } catch (error) {
+        logger.error(`[Sync Back/${taskId}] Failed to sync status back to ttsdoc:`, error);
+        const bimTrackingDb = getBimTrackingDb();
+        await bimTrackingDb.collection("tasks").doc(taskId).update({
+          syncBackError: (error as Error).message
+        });
+    }
+
+    return null;
   }
 );
