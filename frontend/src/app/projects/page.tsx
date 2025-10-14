@@ -206,6 +206,7 @@ const ProjectsPage = () => {
   const [highlightedRow, setHighlightedRow] = useState<number | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showDeletedModal, setShowDeletedModal] = useState(false);
+ 
   
   // ========== ✨ เพิ่มใหม่: State สำหรับนับจำนวนงานที่รอ Rev. ==========
   const [pendingRevCount, setPendingRevCount] = useState(0);
@@ -419,29 +420,35 @@ useEffect(() => {
     }
   };
 
-  const handleDelete = (idx: number) => {
-    const rowToDelete = rows[idx];
-    
-    const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
-    
-    if (isEmptyRow && idx === rows.length - 1) {
-      alert('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
-      return;
-    }
-    
-    if (rowToDelete.statusDwg) {
-      alert('ไม่สามารถลบแถวที่มีสถานะเอกสารได้');
-      return;
-    }
-    
-    if (rowToDelete.progress && rowToDelete.progress > 0) {
-      alert('ไม่สามารถลบงานที่มีความคืบหน้าแล้ว');
-      return;
-    }
-    
-    setDeleteTarget({ idx, row: rowToDelete });
-    setShowDeleteModal(true);
-  };
+const handleDelete = (idx: number) => {
+  const rowToDelete = rows[idx];
+  
+  // ✅ ห้ามลบ Work Request
+  if (rowToDelete.activity === 'Work Request') {
+    alert('⚠️ ไม่สามารถลบงาน Work Request ได้');
+    return;
+  }
+  
+  const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
+  
+  if (isEmptyRow && idx === rows.length - 1) {
+    alert('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
+    return;
+  }
+  
+  if (rowToDelete.statusDwg) {
+    alert('ไม่สามารถลบแถวที่มีสถานะเอกสารได้');
+    return;
+  }
+  
+  if (rowToDelete.progress && rowToDelete.progress > 0) {
+    alert('ไม่สามารถลบงานที่มีความคืบหน้าแล้ว');
+    return;
+  }
+  
+  setDeleteTarget({ idx, row: rowToDelete });
+  setShowDeleteModal(true);
+};
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
@@ -661,16 +668,27 @@ useEffect(() => {
     }
   };
 
-  const handleEdit = (idx: number) => {
-    setOriginalRows(prev => {
-      const newMap = new Map(prev);
-      if (!prev.has(idx)) {
-        newMap.set(idx, { ...rows[idx] });
-      }
-      return newMap;
-    });
-    setEditingRows(prev => new Set(prev).add(idx));
-  };
+const handleEdit = (idx: number) => {
+  const row = rows[idx];
+  
+  // ✅ เช็คว่าเป็น Work Request หรือไม่
+  const isWorkRequest = row.activity === 'Work Request';
+  
+  // ✅ ถ้าเป็น Work Request และไม่ใช่สถานะ PENDING_BIM → ห้ามแก้ไข
+  if (isWorkRequest && row.statusDwg !== 'PENDING_BIM') {
+    alert('⚠️ แก้ไข Work Request ได้เฉพาะสถานะ PENDING_BIM เท่านั้น');
+    return;
+  }
+  
+  setOriginalRows(prev => {
+    const newMap = new Map(prev);
+    if (!prev.has(idx)) {
+      newMap.set(idx, { ...rows[idx] });
+    }
+    return newMap;
+  });
+  setEditingRows(prev => new Set(prev).add(idx));
+};
 
   const handleCancelEdit = (idx: number) => {
     const original = originalRows.get(idx);
@@ -818,6 +836,8 @@ useEffect(() => {
     setTimeout(() => setHighlightedRow(null), 2000);
   };
 
+
+// ========== ✨ เพิ่ม Function นี้ ========== 
 const handleRestoreComplete = async () => {
   try {
     // Reload tasks หลังกู้คืน
@@ -828,6 +848,7 @@ const handleRestoreComplete = async () => {
     console.error('Error reloading tasks:', error);
   }
 };
+// ========================================
 
   const statuses = ["กำลังดำเนินการ", "เสร็จสิ้น", "รอดำเนินการ"];
 
@@ -1025,26 +1046,30 @@ const handleRestoreComplete = async () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, idx) => {
-                    const isNewRow = !row.id;
-                    const isEditing = editingRows.has(idx);
-                    const isEditable = isNewRow || isEditing;
-                    
-                    return (
-                      <tr 
-                        key={row.firestoreId || `row-${idx}`} 
-                        style={{ 
-                          borderBottom: "1px solid #e5e7eb", 
-                          background: highlightedRow === idx 
-                            ? "#fef08a" 
-                            : isEditing 
-                            ? "#fff7ed" 
-                            : idx % 2 === 0 
-                            ? "#f9fafb" 
-                            : "#fff",
-                          transition: "background-color 0.15s ease-out",
-                          cursor: "pointer"
-                        }}
+                {rows.map((row, idx) => {
+                  const isNewRow = !row.id;
+                  const isEditing = editingRows.has(idx);
+                  const isWorkRequest = row.activity === 'Work Request';
+                  const isWorkRequestEditable = isWorkRequest && row.statusDwg === 'PENDING_BIM';
+                  const isEditable = isNewRow || (isEditing && (!isWorkRequest || isWorkRequestEditable));
+                  
+                  return (
+                    <tr 
+                      key={row.firestoreId || `row-${idx}`} 
+                      style={{ 
+                        borderBottom: "1px solid #e5e7eb", 
+                        background: highlightedRow === idx 
+                          ? "#fef08a" 
+                          : isWorkRequest 
+                          ? "#fef9c3"  // ✅ พื้นหลังสีเหลืองอ่อนสำหรับ Work Request
+                          : isEditing 
+                          ? "#fff7ed" 
+                          : idx % 2 === 0 
+                          ? "#f9fafb" 
+                          : "#fff",
+                        transition: "background-color 0.15s ease-out",
+                        cursor: "pointer"
+                      }}
                         onMouseEnter={(e) => {
                           if (highlightedRow !== idx && !isEditing) {
                             e.currentTarget.style.backgroundColor = "#e0f2fe";
@@ -1076,26 +1101,43 @@ const handleRestoreComplete = async () => {
                           />
                         </td>
                         <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                          <select 
-                            value={row.activity}
-                            onClick={() => handleRowFocus(idx)}
-                            onChange={e => handleRowChange(idx, "activity", e.target.value)}
-                            disabled={activitiesLoading || !isEditable}
-                            style={{ 
-                              width: "100%", 
-                              padding: "4px 6px", 
-                              border: "1px solid #e5e7eb",
-                              borderRadius: "4px",
+                          {isWorkRequest ? (
+                            // ✅ Work Request → แสดงเป็น text ล็อคไม่ให้แก้
+                            <div style={{
+                              width: "100%",
+                              padding: "4px 6px",
                               fontSize: 10,
-                              backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff",
-                              cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer"
-                            }}
-                          >
+                              color: "#92400e",
+                              fontWeight: 600,
+                              backgroundColor: "#fef3c7",
+                              border: "1px solid #fbbf24",
+                              borderRadius: "4px"
+                            }}>
+                              Work Request
+                            </div>
+                          ) : (
+                            // ✅ งานปกติ → ใช้ Dropdown ตามเดิม
+                            <select 
+                              value={row.activity}
+                              onClick={() => handleRowFocus(idx)}
+                              onChange={e => handleRowChange(idx, "activity", e.target.value)}
+                              disabled={activitiesLoading || !isEditable}
+                              style={{ 
+                                width: "100%", 
+                                padding: "4px 6px", 
+                                border: "1px solid #e5e7eb",
+                                borderRadius: "4px",
+                                fontSize: 10,
+                                backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff",
+                                cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer"
+                              }}
+                            >
                             <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
                             {activities.map(act => (
                               <option key={act.id} value={act.activityName}>{act.activityName}</option>
                             ))}
                           </select>
+                           )}
                         </td>
                         <td style={{ padding: "6px 10px", fontSize: 10 }}>
                           <input
@@ -1155,45 +1197,62 @@ const handleRestoreComplete = async () => {
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
                           {row.lastRev || "00"}
                         </td>
-                        <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-                          {row.statusDwg ? (
-                            <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
-                          ) : isNewRow ? (
-                            <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
-                          ) : isEditing ? (
-                            <button 
-                              onClick={() => handleCancelEdit(idx)}
-                              style={{
-                                padding: "3px 10px",
-                                background: "#10b981",
-                                border: "none",
-                                borderRadius: "3px",
-                                fontSize: 10,
-                                cursor: "pointer",
-                                color: "white",
-                                boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)"
-                              }}
-                            >
-                              บันทึก
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={() => handleEdit(idx)}
-                              style={{
-                                padding: "3px 10px",
-                                background: "#f97316",
-                                border: "none",
-                                borderRadius: "3px",
-                                fontSize: 10,
-                                cursor: "pointer",
-                                color: "white",
-                                boxShadow: "0 2px 4px rgba(249, 115, 22, 0.2)"
-                              }}
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+                            {/* ✅ เช็คก่อนว่าเป็น Work Request ที่ไม่ใช่ PENDING_BIM หรือไม่ */}
+                            {isWorkRequest && row.statusDwg !== 'PENDING_BIM' ? (
+                              // ✅ กรณี: Work Request + สถานะไม่ใช่ PENDING_BIM → แสดง "🔒 ล็อค"
+                              <span style={{ 
+                                fontSize: 10, 
+                                color: "#dc2626",
+                                fontWeight: 600,
+                                padding: "3px 8px",
+                                background: "#fee2e2",
+                                borderRadius: "3px"
+                              }}>
+                                🔒 ล็อค
+                              </span>
+                            ) : row.statusDwg && !isWorkRequest ? (
+                              // ✅ กรณี: งานปกติที่มีสถานะแล้ว → แสดง "-"
+                              <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
+                            ) : isNewRow ? (
+                              // ✅ กรณี: แถวใหม่ → แสดง "ใหม่"
+                              <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
+                            ) : isEditing ? (
+                              // ✅ กรณี: กำลังแก้ไขอยู่ → แสดงปุ่ม "บันทึก"
+                              <button 
+                                onClick={() => handleCancelEdit(idx)}
+                                style={{
+                                  padding: "3px 10px",
+                                  background: "#10b981",
+                                  border: "none",
+                                  borderRadius: "3px",
+                                  fontSize: 10,
+                                  cursor: "pointer",
+                                  color: "white",
+                                  boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)"
+                                }}
+                              >
+                                บันทึก
+                              </button>
+                            ) : (
+                              // ✅ กรณี: ปกติ → แสดงปุ่ม "Edit"
+                              <button 
+                                onClick={() => handleEdit(idx)}
+                                style={{
+                                  padding: "3px 10px",
+                                  background: "#f97316",
+                                  border: "none",
+                                  borderRadius: "3px",
+                                  fontSize: 10,
+                                  cursor: "pointer",
+                                  color: "white",
+                                  boxShadow: "0 2px 4px rgba(249, 115, 22, 0.2)"
+                                }}
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </td>
                         <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
                           {(() => {
                             const isEmptyRow = !row.id && !row.relateDrawing && !row.activity && !row.startDate && !row.dueDate;
@@ -1323,21 +1382,21 @@ const handleRestoreComplete = async () => {
 
             {/* ========== ✨ เพิ่มปุ่มนี้ ========== */}
             <button
-              onClick={() => setShowDeletedModal(true)}
-              style={{
-                padding: "8px 16px",
-                background: "#6b7280",
-                border: "none",
-                borderRadius: "6px",
-                fontSize: "14px",
-                cursor: "pointer",
-                color: "white",
-                fontWeight: 500,
-                boxShadow: "0 1px 2px rgba(0, 0, 0, 0.1)"
-              }}
-            >
-              🗑️ View Deleted
-            </button>
+            onClick={() => setShowDeletedModal(true)}
+            style={{
+              padding: "8px 16px",
+              background: "#6b7280",
+              border: "none",
+              borderRadius: "6px",
+              fontSize: "14px",
+              cursor: "pointer",
+              color: "white",
+              fontWeight: 500,
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.1)"
+            }}
+          >
+            🗑️ View Deleted
+          </button>
           </div>
         </div>
       </div>
@@ -1405,7 +1464,6 @@ const handleRestoreComplete = async () => {
           setShowImportModal(false);
         }}
       />
-
       {/* ========== ✨ เพิ่ม Modal นี้ ========== */}
       <ViewDeletedModal
         isOpen={showDeletedModal}
@@ -1413,6 +1471,7 @@ const handleRestoreComplete = async () => {
         onRestore={handleRestoreComplete}
         currentProjectId={selectedProject}
       />
+
     </div>
   );
 };

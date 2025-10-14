@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+// ========== ✨ เพิ่มส่วนนี้ ==========
 const navItems = [
   { name: 'Home', path: '/' },
   { name: 'Dashboard', path: '/dashboard' },
@@ -8,8 +9,8 @@ const navItems = [
   { name: 'Projects', path: '/projects' },
   { name: 'Tasks', path: '/tasks' },
   { name: 'Reports', path: '/reports' },
-  { name: '🗑️ Deleted Items', path: '/deleted-items' }, // ← เพิ่มบรรทัดนี้
 ];
+// =====================================
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -44,7 +45,7 @@ export default function Navbar() {
             </div>
           </div>
 
-          {/* Profile/Settings Dropdown - can be added later */}
+          {/* Profile/Settings Dropdown */}
           <div className="hidden sm:ml-6 sm:flex sm:items-center">
             <button className="p-2 rounded-full text-gray-500 hover:text-gray-700">
               <span className="sr-only">View profile</span>
