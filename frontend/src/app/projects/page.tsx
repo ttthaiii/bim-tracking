@@ -7,7 +7,6 @@ import ProjectListModal from "@/components/modals/ProjectListModal";
 import { createProject, updateProjectLeader } from "@/services/firebase";
 import { fetchProjects, fetchRelateWorks, fetchTasks } from "@/services/firebase";
 import { Project, Task } from "@/types/database";
-import { Timestamp } from "firebase/firestore";
 import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
 import { updateTask, createTask } from "@/services/firebase";
 import SuccessModal from "@/components/modals/SuccessModal";
@@ -818,7 +817,7 @@ const ProjectsPage = () => {
       {/* ลบส่วน Navbar ออก เพราะ PageLayout render ให้แล้ว */}
       
       {/* ลบ padding: "40px 40px" ออก ให้ PageLayout จัดการ margin-top แทน */}
-      <div style={{ maxWidth: "100%", margin: "0 auto" }}>
+      <div style={{ maxWidth: "100%", margin: "30px auto 0 auto" }}>
         <div style={{ marginBottom: "24px", display: "flex", gap: "16px", alignItems: "center" }}>
           <button 
             onClick={() => setIsCreateModalOpen(true)}
@@ -1051,6 +1050,7 @@ const ProjectsPage = () => {
                               border: "1px solid #e5e7eb",
                               borderRadius: "4px",
                               fontSize: 10,
+                              color: "#374151",
                               backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff",
                               cursor: !isEditable ? "not-allowed" : "text"
                             }}
@@ -1068,6 +1068,7 @@ const ProjectsPage = () => {
                               border: "1px solid #e5e7eb",
                               borderRadius: "4px",
                               fontSize: 10,
+                              color: "#374151",
                               backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff",
                               cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer"
                             }}

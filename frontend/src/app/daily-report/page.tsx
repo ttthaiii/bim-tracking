@@ -762,6 +762,7 @@ export default function DailyReport() {
 
   return (
     <PageLayout>
+      <h1 className="text-3xl font-bold ml-8 my-auto text-gray-900">Daily Task Tracking</h1>
       <div className="container-fluid mx-auto p-4 md:p-8 bg-gray-50 min-h-screen">
         {/* Main Content */}
         <div className="flex flex-col md:flex-row gap-6">

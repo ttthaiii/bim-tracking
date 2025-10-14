@@ -1,4 +1,3 @@
-// frontend/src/components/shared/PageLayout.tsx
 import { ReactNode } from 'react';
 import Navbar from './Navbar';
 
@@ -9,10 +8,10 @@ interface PageLayoutProps {
 
 export default function PageLayout({ children, className = '' }: PageLayoutProps) {
   return (
-    <div className="min-h-screen bg-gray-50 text-black"> {/* ตรงนี้มี text-black อยู่แล้ว */}
+    <div className="min-h-screen bg-gray-50 text-black"> 
       <Navbar />
-      {/* ปรับ margin-top ให้เท่ากับความสูงของ Navbar */}
-      <main className={`max-w-full mx-auto px-8 py-6 mt-16 ${className}`}> 
+      {/* ลบ padding ออกจาก main โดยตรง ให้เนื้อหาในแต่ละหน้าจัดการเอง */}
+      <main className={`max-w-full mx-auto px-1 py-0.5  mt-10 ${className}`}> {/* Removed px-8 py-6 */}
         {children}
       </main>
     </div>
