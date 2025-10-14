@@ -1,15 +1,15 @@
-export const dynamic = 'force-dynamic';
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect, useCallback, useId, useRef } from 'react';
-// 1. แก้ไข: เปลี่ยนชื่อ import ที่ซ้ำซ้อน
 import dynamicImport from 'next/dynamic'; 
 
-// 2. แก้ไข: ใช้ชื่อใหม่ที่ import เข้ามา
 const Calendar = dynamicImport(
   () => import('react-calendar'),
-  { ssr: false } // This ensures the component only renders on client-side
+  { ssr: false }
 );
+
 import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
 import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee, UploadedFile } from '@/services/taskAssignService';

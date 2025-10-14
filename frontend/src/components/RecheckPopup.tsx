@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { DailyReportEntry } from '@/types/database';
 import Calendar from 'react-calendar';

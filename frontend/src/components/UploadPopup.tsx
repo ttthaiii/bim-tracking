@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { DailyReportEntry } from '@/types/database';
 import { uploadFileForDailyReport } from '@/services/uploadService';
