@@ -129,7 +129,7 @@ export default function ProjectProgressChart() {
       title: {
         display: true,
         text: 'จำนวนเอกสารแยกตามโครงการ',
-        font: { size: 16, weight: '700' },
+        font: { size: 16, weight: 700 },
         padding: { top: 10, bottom: 20 }
       },
       tooltip: {

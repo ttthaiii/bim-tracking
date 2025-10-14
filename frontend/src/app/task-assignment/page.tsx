@@ -49,7 +49,8 @@ const ProjectsPage = () => {
   const [rows, setRows] = React.useState<TaskRow[]>(initialRows);
   const [isCreateModalOpen, setIsCreateModalOpen] = React.useState(false);
 
-  const handleCreateProject = (projectData: { name: string; description: string; status: string }) => {
+  // --- แก้ไข: ปรับ function signature ให้ตรงกับ onSubmit ---
+  const handleCreateProject = (projectData: { name: string; code: string; leader: string }) => {
     // TODO: Implement project creation logic
     console.log('Creating project:', projectData);
     setIsCreateModalOpen(false);
@@ -63,7 +64,6 @@ const ProjectsPage = () => {
         i === idx ? { ...row, [field]: value } : row
       );
       
-      // เพิ่มแถวใหม่เฉพาะเมื่อเป็นการแก้ไขครั้งแรกของแถวนั้นๆ
       if (!touchedRows.has(idx)) {
         setTouchedRows(prev => {
           const newSet = new Set(prev);
@@ -71,7 +71,6 @@ const ProjectsPage = () => {
           return newSet;
         });
         
-        // ถ้าไม่มีแถวว่างต่อจากแถวปัจจุบัน ให้เพิ่มแถวใหม่
         const hasEmptyRowAfter = updatedRows[idx + 1];
         if (!hasEmptyRowAfter) {
           return [...updatedRows, {
@@ -93,7 +92,6 @@ const ProjectsPage = () => {
   };
 
   const handleDelete = (idx: number) => {
-    // ลบแถวที่เลือกและอัพเดท touchedRows
     setRows(prevRows => {
       const newRows = prevRows.filter((_, i) => i !== idx);
       setTouchedRows(prev => {
@@ -136,7 +134,7 @@ const ProjectsPage = () => {
       
       <div style={{ padding: "40px 40px", maxWidth: "1400px", margin: "0 auto" }}>
         <div style={{ marginBottom: "24px", display: "flex", gap: "16px", alignItems: "center" }}>
-                    <button 
+          <button 
             onClick={() => setIsCreateModalOpen(true)}
             style={{
               padding: "8px 16px",
@@ -157,9 +155,12 @@ const ProjectsPage = () => {
             <span style={{ color: "#6366f1", fontWeight: "bold" }}>+</span> สร้างโครงการใหม่
           </button>
           
+          {/* --- แก้ไข: เปลี่ยน onCreate เป็น onSubmit และเพิ่ม props ที่ขาดไป --- */}
           {isCreateModalOpen && <CreateProjectModal
+            isOpen={isCreateModalOpen}
             onClose={() => setIsCreateModalOpen(false)}
-            onCreate={handleCreateProject}
+            onSubmit={handleCreateProject}
+            onViewProjects={() => console.log("View projects clicked from task assignment")}
           />}
           
           <select
@@ -233,7 +234,7 @@ const ProjectsPage = () => {
               </thead>
               <tbody>
                 {[...rows].map((row, idx) => (
-                  <tr key={row.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <tr key={row.id || `row-${idx}`} style={{ borderBottom: "1px solid #e5e7eb" }}>
                     <td style={{ padding: "12px 16px", fontSize: 14, color: "#2563eb" }}>{row.id}</td>
                     <td style={{ padding: "12px 16px", fontSize: 14 }}>
                       <input
@@ -298,7 +299,7 @@ const ProjectsPage = () => {
                     <td style={{ padding: "12px 16px", fontSize: 14 }}>{row.lastRev}</td>
                     <td style={{ padding: "12px 16px", fontSize: 14 }}>{row.docNo}</td>
                     <td style={{ padding: "12px 16px", fontSize: 14, textAlign: "center" }}>
-                                            <button style={{
+                      <button style={{
                         padding: "4px 12px",
                         background: "#f97316",
                         border: "none",
@@ -330,7 +331,7 @@ const ProjectsPage = () => {
             </table>
           </div>
 
-                    <div style={{ marginTop: 24, textAlign: "right", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+          <div style={{ marginTop: 24, textAlign: "right", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
             <button
               style={{
                 padding: "8px 24px",

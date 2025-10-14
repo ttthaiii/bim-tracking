@@ -1,8 +1,21 @@
 import React from 'react';
-import { Task } from '@/types/task';
+// 1. แก้ไข: เปลี่ยนการ import จาก Task เป็น Subtask
+import { Subtask } from '@/types/database'; 
 
+// 2. แก้ไข: Props ควรจะมีฟังก์ชันสำหรับการโต้ตอบกับ UI ด้วย (เช่นการเลือก)
+// ถ้าไม่มีฟังก์ชันเหล่านี้ ให้ใช้ interface แบบเดิมไปก่อน
 interface TaskTableProps {
-  tasks: Task[];
+  tasks: Subtask[]; // 3. แก้ไข: เปลี่ยนชนิดข้อมูลเป็น Subtask[]
+  // onTaskToggle?: (subtaskId: string) => void;
+  // selectedTasks?: Set<string>;
+}
+
+// Helper function สำหรับแปลง Timestamp เป็น String (dd/mm/yyyy)
+function formatDate(timestamp: any) {
+  if (!timestamp || !timestamp.toDate) {
+    return 'N/A';
+  }
+  return timestamp.toDate().toLocaleDateString('th-TH');
 }
 
 export default function TaskTable({ tasks }: TaskTableProps) {
@@ -15,13 +28,13 @@ export default function TaskTable({ tasks }: TaskTableProps) {
               Subtask ID
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Relate Drawing
+              Relate Drawing / Item
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Activity
+              Activity / Category
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Relate Work
+              Relate Work / Parent Task
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Internal Rev.
@@ -33,7 +46,7 @@ export default function TaskTable({ tasks }: TaskTableProps) {
               Assignee
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Deadline
+              Deadline / End Date
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Progress
@@ -41,112 +54,68 @@ export default function TaskTable({ tasks }: TaskTableProps) {
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Link File
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Correct
-            </th>
+            {/* ผมได้เอาคอลัมน์ Correct ออกไปก่อน เพราะไม่มีข้อมูลเทียบเท่าใน Subtask */}
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {tasks.map((task, index) => (
-            <tr key={task.subtaskId}>
+          {/* 4. แก้ไข: เปลี่ยนชื่อตัวแปรเป็น subtask เพื่อความชัดเจน */}
+          {tasks.map((subtask) => (
+            // 5. แก้ไข: เปลี่ยน key และการเรียกใช้ property ทั้งหมดให้ตรงกับ Subtask
+            <tr key={subtask.id}>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                {task.subtaskId}
+                {subtask.subTaskNumber || subtask.id}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {task.relateDrawing}
+                {subtask.item}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {task.activity}
+                {subtask.subTaskCategory}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {task.relateWork}
+                {subtask.taskName}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {task.internalRev}
+                {subtask.internalRev}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {task.workScale}
+                {subtask.subTaskScale}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                 <div className="flex items-center">
-                  <span className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-500 mr-2">
-                    {task.assignee.charAt(0).toUpperCase()}
-                  </span>
-                  {task.assignee}
+                  {subtask.subTaskAssignee && (
+                    <>
+                      <span className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-500 mr-2">
+                        {subtask.subTaskAssignee.charAt(0).toUpperCase()}
+                      </span>
+                      {subtask.subTaskAssignee}
+                    </>
+                  )}
                 </div>
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {task.deadline}
+                {formatDate(subtask.endDate)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap">
                 <div className="w-full bg-gray-200 rounded-full h-2.5">
                   <div
                     className="bg-blue-600 h-2.5 rounded-full"
-                    style={{ width: `${task.progress}%` }}
+                    style={{ width: `${subtask.subTaskProgress || 0}%` }}
                   ></div>
                 </div>
-                <span className="text-xs text-gray-500 mt-1">{task.progress}%</span>
+                <span className="text-xs text-gray-500 mt-1">{subtask.subTaskProgress || 0}%</span>
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {task.linkFile && (
+                {subtask.subTaskFiles && subtask.subTaskFiles.length > 0 && (
                   <a
-                    href={task.linkFile}
+                    href={subtask.subTaskFiles[0]} // ลิงก์ไปยังไฟล์แรกใน array
                     className="text-blue-600 hover:text-blue-800"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-                      />
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                     </svg>
                   </a>
-                )}
-              </td>
-              <td className="px-4 py-3 whitespace-nowrap">
-                {task.isCorrect ? (
-                  <span className="text-green-600">
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  </span>
-                ) : (
-                  <span className="text-red-600">
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </span>
                 )}
               </td>
             </tr>

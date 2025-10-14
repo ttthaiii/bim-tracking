@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
-import { getWorkloadByWeek, fetchProjects } from '@/services/firebase'; // Import fetchProjects
+// 1. แก้ไข: เปลี่ยนชื่อฟังก์ชันที่ import และ import Project Type เข้ามาด้วย
+import { getWorkloadByWeek, getProjectDetails } from '@/services/firebase'; 
+import { Project } from '@/types/database'; 
 import { useDashboard } from '@/context/DashboardContext';
 import {
   Chart as ChartJS,
@@ -23,9 +25,8 @@ ChartJS.register(
   Legend
 );
 
-// No longer needs props
 export default function WorkloadChart() {
-  const { selectedProject, excludedStatuses } = useDashboard(); // Get selectedProject from context
+  const { selectedProject, excludedStatuses } = useDashboard();
   
   interface WorkloadChartData {
     labels: string[];
@@ -55,20 +56,19 @@ export default function WorkloadChart() {
       try {
         let projectIdForFilter: string | undefined = undefined;
 
-        // If a project is selected in the dashboard, find its ID
         if (selectedProject && selectedProject !== 'all') {
-            const allProjects = await fetchProjects();
-            const project = allProjects.find(p => p.name === selectedProject);
+            // 2. แก้ไข: เรียกใช้ฟังก์ชันด้วยชื่อใหม่
+            const allProjects = await getProjectDetails();
+            // 3. แก้ไข: เพิ่ม Type (p: Project) ให้กับ parameter
+            const project = allProjects.find((p: Project) => p.name === selectedProject);
             if (project) {
                 projectIdForFilter = project.id;
             } else {
-                 // If project name not found, show no data to be safe
-                 setChartData({ labels: [], datasets: [{ label: 'Estimated Workload (Hours)', data: [], borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] });
-                 return;
+                setChartData({ labels: [], datasets: [{ label: 'Estimated Workload (Hours)', data: [], borderColor: 'rgb(75, 192, 192)', tension: 0.1 }] });
+                return;
             }
         }
 
-        // Fetch workload data with the correct project ID and excluded statuses
         const workloadData = await getWorkloadByWeek(projectIdForFilter, excludedStatuses);
         
         setChartData({
@@ -89,7 +89,7 @@ export default function WorkloadChart() {
     };
 
     fetchData();
-  }, [selectedProject, excludedStatuses]); // Add selectedProject to the dependency array
+  }, [selectedProject, excludedStatuses]);
 
   const options = {
     responsive: true,

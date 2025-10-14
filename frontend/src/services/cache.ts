@@ -1,153 +1,105 @@
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db } from '@/config/firebase';
-import { ProjectData, TaskData, SubtaskData } from '@/types/task';
+// frontend/src/services/cache.ts
 
-interface CacheItem<T> {
+// แก้ไข: import ชื่อฟังก์ชันโดยตรงโดยไม่ใช้ alias เพื่อความชัดเจน
+import { getProjectDetails, getTasksForProject, getSubtasksForTask } from './firebase';
+import { Project, Task, Subtask } from '@/types/database';
+
+interface CacheEntry<T> {
   data: T;
   timestamp: number;
-  expiresAt: number;
-}
-
-interface CacheConfig {
-  ttl: number;
-  maxSize?: number;
 }
 
 class CacheService {
-  private cache: Map<string, CacheItem<any>>;
-  private config: CacheConfig;
+  private cache = new Map<string, CacheEntry<any>>();
+  private ttl: number; // Time to live in milliseconds
 
-  constructor(config: CacheConfig) {
-    this.cache = new Map();
-    this.config = config;
+  constructor(ttl = 5 * 60 * 1000) { // Default cache time: 5 minutes
+    this.ttl = ttl;
   }
 
-  private generateKey(projectId: string, type: string, params?: Record<string, any>): string {
-    const base = `${projectId}:${type}`;
-    if (!params) return base;
-    
-    const paramString = Object.entries(params)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => `${key}:${value}`)
-      .join('_');
-    
-    return `${base}_${paramString}`;
-  }
-
-  private isExpired(item: CacheItem<any>): boolean {
-    return Date.now() > item.expiresAt;
-  }
-
-  private set<T>(key: string, data: T): void {
-    const timestamp = Date.now();
-    const expiresAt = timestamp + this.config.ttl;
-    
-    this.cache.set(key, {
-      data,
-      timestamp,
-      expiresAt
-    });
-
-    if (this.config.maxSize && this.cache.size > this.config.maxSize) {
-      const oldestKey = Array.from(this.cache.entries())
-        .sort(([, a], [, b]) => a.timestamp - b.timestamp)[0][0];
-      this.cache.delete(oldestKey);
-    }
-  }
-
-  private get<T>(key: string): T | null {
-    const item = this.cache.get(key);
-    if (!item || this.isExpired(item)) {
-      if (item) this.cache.delete(key);
+  get<T>(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry) {
       return null;
     }
-    return item.data as T;
+    const isExpired = (Date.now() - entry.timestamp) > this.ttl;
+    if (isExpired) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.data as T;
   }
 
-  async getProjectData(projectId: string, forceRefresh = false): Promise<ProjectData> {
-    const key = this.generateKey(projectId, 'project-data');
-    
+  set<T>(key: string, data: T): void {
+    const entry: CacheEntry<T> = {
+      data,
+      timestamp: Date.now(),
+    };
+    this.cache.set(key, entry);
+  }
+
+  invalidate(key: string): void {
+    this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+
+  // --- Project Data ---
+  async getProjectData(projectId: string, forceRefresh = false): Promise<Project | null> {
+    const key = `project_${projectId}`;
     if (!forceRefresh) {
-      const cached = this.get<ProjectData>(key);
+      const cached = this.get<Project>(key);
       if (cached) return cached;
     }
 
-    const projectDoc = await getDoc(doc(db, 'projects', projectId));
-    if (!projectDoc.exists()) {
-      throw new Error('Project not found');
+    const projects = await getProjectDetails();
+    // แก้ไข: เพิ่ม Type (p: Project) เพื่อให้ TypeScript รู้จัก
+    const data = projects.find((p: Project) => p.id === projectId);
+
+    if (!data) {
+      return null; // คืนค่า null ถ้าไม่เจอโปรเจกต์
     }
-
-    const projectData = {
-      id: projectId,
-      ...projectDoc.data()
-    } as ProjectData;
-
-    this.set(key, projectData);
-    return projectData;
+    this.set(key, data);
+    return data;
   }
 
-  async getProjectTasks(projectId: string, forceRefresh = false): Promise<TaskData[]> {
-    const key = this.generateKey(projectId, 'tasks');
-    
+  // --- Task Data ---
+  async getProjectTasks(projectId: string, forceRefresh = false): Promise<Task[]> {
+    const key = `tasks_for_project_${projectId}`;
     if (!forceRefresh) {
-      const cached = this.get<TaskData[]>(key);
+      const cached = this.get<Task[]>(key);
       if (cached) return cached;
     }
 
-    const tasksRef = collection(db, 'tasks');
-    const tasksQuery = query(tasksRef, where('projectId', '==', projectId));
-    const snapshot = await getDocs(tasksQuery);
-    
-    const tasks = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as TaskData[];
+    const rawTasks = await getTasksForProject(projectId);
+    // แก้ไข: เพิ่ม Type (task: Task) เพื่อให้ TypeScript รู้จัก
+    const tasks = rawTasks.map((task: Task) => ({
+      ...task,
+    })) as Task[];
 
     this.set(key, tasks);
     return tasks;
   }
 
-  async getTaskSubtasks(projectId: string, taskId: string, forceRefresh = false): Promise<SubtaskData[]> {
-    const key = this.generateKey(projectId, 'subtasks', { taskId });
-    
+  // --- Subtask Data ---
+  async getTaskSubtasks(projectId: string, taskId: string, forceRefresh = false): Promise<Subtask[]> {
+    const key = `subtasks_for_task_${taskId}`;
     if (!forceRefresh) {
-      const cached = this.get<SubtaskData[]>(key);
+      const cached = this.get<Subtask[]>(key);
       if (cached) return cached;
     }
 
-    const subtasksRef = collection(db, 'subtasks');
-    const subtasksQuery = query(
-      subtasksRef,
-      where('projectId', '==', projectId),
-      where('taskId', '==', taskId)
-    );
-    const snapshot = await getDocs(subtasksQuery);
+    const rawSubtasks = await getSubtasksForTask(projectId, taskId);
+    // แก้ไข: เพิ่ม Type (subtask: Subtask) เพื่อให้ TypeScript รู้จัก
+    const subtasks = rawSubtasks.map((subtask: Subtask) => ({
+      ...subtask,
+    })) as Subtask[];
     
-    const subtasks = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as SubtaskData[];
-
     this.set(key, subtasks);
     return subtasks;
   }
-
-  clearProjectCache(projectId: string): void {
-    for (const key of this.cache.keys()) {
-      if (key.startsWith(`${projectId}:`)) {
-        this.cache.delete(key);
-      }
-    }
-  }
-
-  clearAllCache(): void {
-    this.cache.clear();
-  }
 }
 
-const cache = new CacheService({
-  ttl: 5 * 60 * 1000, // 5 minutes
-  maxSize: 100 // Maximum 100 items in cache
-});
-
-export default cache;
+export const cacheService = new CacheService();

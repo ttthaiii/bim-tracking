@@ -71,7 +71,7 @@ export default function TaskList({ projectId }: TaskListProps) {
                 {task.taskCategory}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {task.taskAssignee}
+                {task.assignedTo?.join(', ') || 'N/A'}
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="relative pt-1">

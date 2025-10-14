@@ -1,6 +1,29 @@
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 import { Task } from '@/types/database';
+
+export const STATUS_COLORS: Record<TaskStatusCategory, string> = {
+  'เสร็จสิ้น': 'rgba(16, 185, 129, 0.8)',
+  'รออนุมัติจาก CM': 'rgba(239, 68, 68, 0.8)',
+  'รอตรวจสอบหน้างาน': 'rgba(245, 158, 11, 0.8)',
+  'รอแก้ไขแบบ BIM': 'rgba(249, 115, 22, 0.8)',
+  'กำลังดำเนินการ-BIM': 'rgba(211, 211, 211, 0.8)',
+  'วางแผนแล้ว-BIM': 'rgba(169, 169, 169, 0.8)',
+  'ยังไม่วางแผน-BIM': 'rgba(105, 105, 105, 0.8)',
+};
+
+// สร้างและ export STATUS_CATEGORIES จาก keys ของ STATUS_COLORS
+export const STATUS_CATEGORIES = Object.keys(STATUS_COLORS) as TaskStatusCategory[];
+
+// สร้างและ export interface สำหรับข้อมูล Dashboard
+export interface DashboardStats {
+  projectCount: number;
+  activeTaskCount: number;
+  teamMemberCount: number;
+  completionRate: number;
+  documentStatus: Record<TaskStatusCategory, number>; // key คือชื่อ status, value คือจำนวน
+  totalDocuments: number;
+}
 
 function parseDate(dateInput: any): Date {
     if (!dateInput) return new Date(NaN);
@@ -94,7 +117,7 @@ export async function getTeamMemberCount() {
   return snapshot.size;
 }
 
-export async function getDashboardStats(projectId?: string) {
+export async function getDashboardStats(projectId?: string): Promise<DashboardStats> {
   try {
     const [projectCount, activeTaskCount, teamMemberCount] = await Promise.all([
       getProjectCount(),
@@ -108,36 +131,50 @@ export async function getDashboardStats(projectId?: string) {
       : tasksRef;
     const snapshot = await getDocs(q);
     
-    let totalTasks = 0;
+    // Initialize document status counter
+    const documentStatus = {} as Record<TaskStatusCategory, number>;
+    STATUS_CATEGORIES.forEach(cat => documentStatus[cat] = 0);
+    
     let completedTasks = 0;
     snapshot.forEach(doc => {
       const task = doc.data() as Task;
-      totalTasks++;
-      if (task.currentStep === 'APPROVED' || task.currentStep === 'APPROVED_WITH_COMMENTS') {
+      const status = getTaskStatusCategory(task);
+      if (documentStatus[status] !== undefined) {
+        documentStatus[status]++;
+      }
+      if (status === 'เสร็จสิ้น') {
         completedTasks++;
       }
     });
 
+    const totalTasks = snapshot.size;
     const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
 
     return {
       projectCount,
       activeTaskCount,
       teamMemberCount,
-      completionRate: Math.round(completionRate)
+      completionRate: Math.round(completionRate),
+      documentStatus,
+      totalDocuments: totalTasks,
     };
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
+    // Return a default structure on error
+    const documentStatus = {} as Record<TaskStatusCategory, number>;
+    STATUS_CATEGORIES.forEach(cat => documentStatus[cat] = 0);
     return {
       projectCount: 0,
       activeTaskCount: 0,
       teamMemberCount: 0,
-      completionRate: 0
+      completionRate: 0,
+      documentStatus,
+      totalDocuments: 0,
     };
   }
 }
 
-export async function getRecentActivities(): Promise<RecentActivity[]> {
+export async function getRecentActivities(limit?: number): Promise<RecentActivity[]> { 
   try {
     const tasksRef = collection(db, 'tasks');
     const snapshot = await getDocs(tasksRef);
@@ -149,28 +186,31 @@ export async function getRecentActivities(): Promise<RecentActivity[]> {
       projectsMap.set(doc.id, doc.data().name);
     });
 
-    const activities = snapshot.docs
+    let activities = snapshot.docs
       .map(doc => {
         const task = doc.data() as Task;
         
+        // 2. แก้ไข object ที่ return ให้เรียกใช้ property ได้โดยตรง
         return {
           id: doc.id,
-          date: parseDate(task.lastUpdate),
-          dueDate: parseDate((task as any).dueDate), // Use any to bypass incorrect type
+          date: parseDate(task.lastUpdate), // เอา (task as any) ออก
+          dueDate: parseDate(task.dueDate), // แก้ให้ตรงกับ property ที่มีอยู่
           projectId: task.projectId,
           projectName: projectsMap.get(task.projectId) || 'Unknown Project',
           activityType: 'Document Updated',
           documentNumber: task.documentNumber || '',
           status: getTaskStatusCategory(task),
           currentStep: task.currentStep,
-          subtaskCount: task.subtaskCount,
-          totalMH: task.totalMH,
+          subtaskCount: task.subtaskCount,   // เอา (task as any) ออก
+          totalMH: task.totalMH,             // เอา (task as any) ออก
           description: getActivityDescription(task),
-          revNo: task.rev || '' // ดึงค่า rev จาก task เข้ามาใน RecentActivity
+          revNo: task.rev || ''
         };
       })
       .sort((a, b) => b.date.getTime() - a.date.getTime());
-
+      if (limit) {
+        activities = activities.slice(0, limit);
+      }
     return activities;
   } catch (error) {
     console.error('Error fetching recent activities:', error);

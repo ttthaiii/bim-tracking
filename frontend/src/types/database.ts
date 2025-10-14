@@ -27,7 +27,7 @@ export interface Task {
   taskName: string;
   taskCategory: string;
   status: string;
-  planStartDate?: Timestamp;
+  planStartDate?: Timestamp; // มีอยู่แล้ว
   dueDate?: Timestamp;
   assignedTo?: string[];
   currentStep?: string;
@@ -36,6 +36,16 @@ export interface Task {
   rev?: string;
   taskStatus?: string;
   deletedAt?: Timestamp;
+  lastUpdate?: Timestamp;
+  subtaskCount?: number;
+  totalMH?: number;
+
+  // ===== เพิ่ม property ทั้งหมดที่ขาดหายไปตรงนี้ครับ =====
+  taskNumber?: string;      // สำหรับ TaskList.tsx
+  progress?: number;        // สำหรับ TaskList.tsx และ firebase.ts
+  startDate?: Timestamp;    // สำหรับ firebase.ts
+  endDate?: Timestamp;      // สำหรับ firebase.ts
+  estWorkload?: number;     // สำหรับ firebase.ts และ taskStatus.ts
 }
 
 // Interface for Subtask (from tasks > subtasks collection)

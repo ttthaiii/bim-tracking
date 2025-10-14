@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { ProjectData, TaskData, SubtaskData } from '@/types/task';
+import { useState, useEffect, useCallback } from 'react';
+import { Project, Task, Subtask } from '@/types/database';
 import { db } from '@/config/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 
 interface LoadingState {
   project: boolean;
@@ -12,9 +12,9 @@ interface LoadingState {
 }
 
 export function useProjectData() {
-  const [projectData, setProjectData] = useState<ProjectData | null>(null);
-  const [tasks, setTasks] = useState<TaskData[]>([]);
-  const [subtasks, setSubtasks] = useState<SubtaskData[]>([]);
+  const [projectData, setProjectData] = useState<Project | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [loading, setLoading] = useState<LoadingState>({
     project: false,
     tasks: false,
@@ -31,18 +31,15 @@ export function useProjectData() {
 
     try {
       setLoading(prev => ({ ...prev, project: true }));
-      const projectRef = collection(db, 'projects');
-      const projectQuery = query(projectRef, where('id', '==', projectId));
-      const snapshot = await getDocs(projectQuery);
+      // แก้ไข: Firestore ไม่มี query 'id' โดยตรง, ต้องใช้ getDoc
+      const projectRef = doc(db, 'projects', projectId);
+      const projectDoc = await getDoc(projectRef);
       
-      if (!snapshot.empty) {
-        const projectDoc = snapshot.docs[0];
-        setProjectData({
-          id: projectDoc.id,
-          name: projectDoc.data().name || '',
-          abbr: projectDoc.data().abbr || '',
-          ...projectDoc.data()
-        });
+      if (projectDoc.exists()) {
+        // แก้ไข: Cast ข้อมูลที่ได้มาให้เป็น Type ที่ถูกต้องโดยตรง
+        setProjectData({ id: projectDoc.id, ...projectDoc.data() } as Project);
+      } else {
+        setProjectData(null);
       }
     } catch (error) {
       console.error('Error loading project data:', error);
@@ -65,12 +62,11 @@ export function useProjectData() {
       
       const tasksData = snapshot.docs.map(doc => ({
         id: doc.id,
-        taskName: doc.data().taskName || '',
-        taskCategory: doc.data().taskCategory || doc.data().category || '',
         ...doc.data()
       }));
       
-      setTasks(tasksData);
+      // แก้ไข: Cast ข้อมูลที่ได้มาให้เป็น Type ที่ถูกต้องโดยตรง
+      setTasks(tasksData as Task[]);
     } catch (error) {
       console.error('Error loading project tasks:', error);
     } finally {
@@ -88,11 +84,11 @@ export function useProjectData() {
       
       const subtasksData = snapshot.docs.map(doc => ({
         id: doc.id,
-        taskId,
         ...doc.data()
       }));
       
-      setSubtasks(prev => [...prev, ...subtasksData]);
+      // แก้ไข: Cast ข้อมูลที่ได้มาให้เป็น Type ที่ถูกต้องโดยตรง
+      setSubtasks(prev => [...prev, ...subtasksData as Subtask[]]);
     } catch (error) {
       console.error('Error loading task subtasks:', error);
     } finally {

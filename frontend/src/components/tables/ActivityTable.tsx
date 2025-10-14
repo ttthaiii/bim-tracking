@@ -87,7 +87,7 @@ export default function ActivityTable() {
   const { selectedStatus, selectedProject, excludedStatuses } = useDashboard();
   const [allActivities, setAllActivities] = useState<RecentActivity[]>([]);
   const [order, setOrder] = useState<Order>('desc');
-  const [orderBy, setOrderBy] = useState<keyof RecentActivity>('dueDate');
+  const [orderBy, setOrderBy] = useState<keyof RecentActivity | 'runningNumber'>('date');
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [displayedActivities, setDisplayedActivities] = useState<RecentActivity[]>([]);
 

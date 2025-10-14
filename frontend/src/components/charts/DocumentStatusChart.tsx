@@ -8,6 +8,9 @@ import {
   Title,
   Tooltip,
   Legend,
+  ChartData,
+  Point,
+  BubbleDataPoint,
 } from 'chart.js';
 import { getTasksByStatus, TaskStatusCount } from '@/services/taskStatus';
 import { useDashboard } from '@/context/DashboardContext';
@@ -34,12 +37,17 @@ const STATUS_COLORS: Record<keyof Omit<TaskStatusCount, 'total' | 'totalEstWorkl
 
 const ALL_STATUSES = Object.keys(STATUS_COLORS) as (keyof typeof STATUS_COLORS)[];
 
+// --- แก้ไข: ระบุ Type ของ Label ให้เป็น string ---
+type BarChartData = ChartData<'bar', (number | [number, number] | Point | BubbleDataPoint | null)[], string>;
+type BarChart = ChartJS<'bar', (number | [number, number] | Point | BubbleDataPoint | null)[], string>;
+
+
 export default function DocumentStatusChart() {
-  const [chartData, setChartData] = useState<any>({ labels: [], datasets: [] });
+  const [chartData, setChartData] = useState<BarChartData>({ labels: [], datasets: [] });
   const [loading, setLoading] = useState(true);
-  // Using selectedProject from the context
   const { selectedProject, setSelectedProject, excludedStatuses, toggleStatus, selectOnlyStatus, setExcludedStatuses } = useDashboard();
-  const chartRef = useRef<ChartJS>(null);
+  
+  const chartRef = useRef<BarChart>(null);
   const legendClickTimeout = useRef<number | null>(null);
 
   useEffect(() => {
@@ -48,7 +56,6 @@ export default function DocumentStatusChart() {
       try {
         let summaries = await getTasksByStatus();
 
-        // Filter summaries by selectedProject from context
         if (selectedProject && selectedProject !== 'all') {
           summaries = summaries.filter(s => s.projectName === selectedProject);
         }
@@ -60,11 +67,12 @@ export default function DocumentStatusChart() {
             label: status,
             data: summaries.map(s => s.taskCounts[status] || 0),
             backgroundColor: STATUS_COLORS[status],
-            // The `hidden` property is the correct way to toggle visibility in Chart.js
             hidden: excludedStatuses.includes(status)
           }));
 
           setChartData({ labels, datasets });
+        } else {
+            setChartData({ labels: [], datasets: [] });
         }
       } catch (error) {
         console.error('Error processing chart data:', error);
@@ -74,7 +82,7 @@ export default function DocumentStatusChart() {
     };
 
     fetchData();
-  }, [selectedProject, excludedStatuses]); // Added selectedProject to dependency array
+  }, [selectedProject, excludedStatuses]);
 
   const handleChartClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!chartRef.current) return;
@@ -82,9 +90,12 @@ export default function DocumentStatusChart() {
 
     if (elements.length > 0) {
       const { index } = elements[0];
-      const projectName = chartData.labels[index];
-      // Toggle project selection in the context
-      setSelectedProject(prev => (prev === projectName ? null : projectName));
+      const labels = chartData.labels;
+      if (labels) {
+        const projectName = labels[index];
+        const newValue = selectedProject === projectName ? null : projectName;
+        setSelectedProject(newValue);
+      }
     }
   };
 
@@ -100,13 +111,13 @@ export default function DocumentStatusChart() {
         !excludedStatuses.includes(status);
 
       if (isAlreadySingleSelected) {
-        setExcludedStatuses([]); // Show all
+        setExcludedStatuses([]);
       } else {
-        selectOnlyStatus(status); // Show only this one
+        selectOnlyStatus(status);
       }
     } else {
       legendClickTimeout.current = window.setTimeout(() => {
-        toggleStatus(status); // Toggle visibility
+        toggleStatus(status);
         legendClickTimeout.current = null;
       }, 250);
     }
@@ -150,12 +161,12 @@ export default function DocumentStatusChart() {
           autoSkip: false,
           maxRotation: 45,
           minRotation: 45,
-          callback: function(value: any) {
+          callback: function(this: any, value: any): string {
             const label = this.getLabelForValue(value);
             if (typeof label === 'string' && label.length > 15) {
               return label.substring(0, 15) + '...';
             }
-            return label;
+            return label || '';
           }
         }
       },

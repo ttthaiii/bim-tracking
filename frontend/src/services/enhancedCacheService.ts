@@ -1,6 +1,7 @@
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/config/firebase';
-import { ProjectData, TaskData, SubtaskData, TaskFormData } from '@/types/task';
+import { Project, Task, Subtask } from '@/types/database';
+import { TaskFormData } from '@/types/task';
 
 interface CacheItem<T> {
   data: T;
@@ -51,24 +52,19 @@ class EnhancedCacheService {
     return item.data as T;
   }
 
-  // Project-related methods
-  async getProjectData(projectId: string): Promise<ProjectData | null> {
+  // --- Project-related methods ---
+  // แก้ไข: เปลี่ยน ProjectData -> Project
+  async getProjectData(projectId: string): Promise<Project | null> {
     const cacheKey = this.generateKey('project', { id: projectId });
-    const cached = this.get<ProjectData>(cacheKey);
+    const cached = this.get<Project>(cacheKey);
     if (cached) return cached;
 
-    const projectRef = collection(db, 'projects');
-    const projectQuery = query(projectRef, where('id', '==', projectId));
-    const projectSnapshot = await getDocs(projectQuery);
+    // แก้ไข: ใช้ getDoc เพื่อประสิทธิภาพที่ดีกว่า
+    const projectRef = doc(db, 'projects', projectId);
+    const projectDoc = await getDoc(projectRef);
     
-    if (!projectSnapshot.empty) {
-      const projectDoc = projectSnapshot.docs[0];
-      const projectData = {
-        id: projectDoc.id,
-        name: projectDoc.data().name,
-        abbr: projectDoc.data().abbr,
-        ...projectDoc.data()
-      };
+    if (projectDoc.exists()) {
+      const projectData = { id: projectDoc.id, ...projectDoc.data() } as Project;
       this.set(cacheKey, projectData);
       return projectData;
     }
@@ -76,9 +72,10 @@ class EnhancedCacheService {
     return null;
   }
 
-  async getProjectTasks(projectId: string): Promise<TaskData[]> {
+  // แก้ไข: เปลี่ยน TaskData -> Task
+  async getProjectTasks(projectId: string): Promise<Task[]> {
     const cacheKey = this.generateKey('tasks', { projectId });
-    const cached = this.get<TaskData[]>(cacheKey);
+    const cached = this.get<Task[]>(cacheKey);
     if (cached) return cached;
 
     const tasksRef = collection(db, 'tasks');
@@ -87,18 +84,17 @@ class EnhancedCacheService {
     
     const tasks = tasksSnapshot.docs.map(doc => ({
       id: doc.id,
-      taskName: doc.data().taskName,
-      taskCategory: doc.data().taskCategory,
       ...doc.data()
-    }));
+    })) as Task[];
 
     this.set(cacheKey, tasks);
     return tasks;
   }
 
-  async getTaskSubtasks(taskId: string): Promise<SubtaskData[]> {
+  // แก้ไข: เปลี่ยน SubtaskData -> Subtask
+  async getTaskSubtasks(taskId: string): Promise<Subtask[]> {
     const cacheKey = this.generateKey('subtasks', { taskId });
-    const cached = this.get<SubtaskData[]>(cacheKey);
+    const cached = this.get<Subtask[]>(cacheKey);
     if (cached) return cached;
 
     const subtasksRef = collection(db, 'tasks', taskId, 'subtasks');
@@ -106,9 +102,8 @@ class EnhancedCacheService {
     
     const subtasks = subtasksSnapshot.docs.map(doc => ({
       id: doc.id,
-      taskId,
       ...doc.data()
-    }));
+    })) as Subtask[];
 
     this.set(cacheKey, subtasks);
     return subtasks;
