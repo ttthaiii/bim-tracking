@@ -72,8 +72,13 @@ export async function getCachedTasks(
     setCache,
     async () => {
       const tasksCol = collection(db, 'tasks');
-      const q = query(tasksCol, where('projectId', '==', projectId));
+      const q = query(
+        tasksCol,
+        where('projectId', '==', projectId),
+        where('taskStatus', '!=', 'DELETED')  // ⬅️ เพิ่มบรรทัดนี้
+      );
       const snapshot = await getDocs(q);
+      console.log('Tasks loaded from Firestore:', snapshot.size); // ⬅️ เพิ่ม log
       return snapshot.docs.map(doc => ({
         id: doc.id,
         taskName: doc.data().taskName || '',
@@ -108,6 +113,11 @@ export async function getCachedSubtasks(
           
           subtasksSnapshot.docs.forEach(subtaskDoc => {
             const data = subtaskDoc.data();
+                        // ✅ กรอง Subtasks ที่ถูกลบออก
+            if (data.subTaskStatus === 'DELETED') {
+              console.log('🗑️ Filtered out DELETED subtask:', subtaskDoc.id);
+              return; // ข้ามไป
+            }
             allSubtasks.push({
               id: subtaskDoc.id,
               subTaskNumber: data.subTaskNumber || '',

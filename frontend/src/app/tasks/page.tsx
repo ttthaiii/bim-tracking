@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { collection, setDoc, doc, Timestamp, getDoc, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, setDoc, doc, Timestamp, getDoc } from 'firebase/firestore'; // ✅ เพิ่ม getDoc
 import { db } from '@/config/firebase';
 import Navbar from '@/components/shared/Navbar';
 import Select from '@/components/ui/Select';
@@ -57,10 +57,14 @@ interface ExistingSubtask {
     bgColor: string;
     isOverdue: boolean;
   };
-    subTaskFiles?: Array<{    // ⬅️ เพิ่มนี้
+  subTaskFiles?: Array<{    // ⬅️ เพิ่มนี้
     fileName: string;
     fileUrl: string;
   }> | null;
+  // 🔧 เพิ่มข้อมูลเหล่านี้
+  activity?: string;
+  relateDrawing?: string;
+  _isEdited?: boolean; // ✅ เพิ่มบรรทัดนี้
 }
 
 export default function TaskAssignment() {
@@ -100,6 +104,15 @@ export default function TaskAssignment() {
     fileUrl: string;
   } | null>(null);
 
+  // ✅ เพิ่ม State สำหรับ Delete Confirmation
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [deletingSubtask, setDeletingSubtask] = useState<{
+    id: string;
+    subTaskNumber: string;
+    taskName: string;
+    subTaskCategory: string;
+  } | null>(null);
+
    // ✅ เพิ่ม State สำหรับ Edit Confirmation
   const [showEditConfirmModal, setShowEditConfirmModal] = useState(false);
   const [editConfirmData, setEditConfirmData] = useState<{
@@ -127,7 +140,7 @@ export default function TaskAssignment() {
   } | null>(null);
 
   // ✅ เพิ่ม State สำหรับเก็บข้อมูลที่แก้ไขแล้ว (ยังไม่บันทึกลงฐานข้อมูล)
-  const [editedSubtasks, setEditedSubtasks] = useState<{[key: string]: ExistingSubtask}>({});
+  const [editedSubtasks, setEditedSubtasks] = useState<{[key: string]: any}>({});
 
   // ✅ Function บันทึกการแก้ไขใน State เท่านั้น (ไม่บันทึกลงฐานข้อมูล)
   const handleSaveEditToState = () => {
@@ -156,6 +169,7 @@ export default function TaskAssignment() {
     setEditedSubtasks(prev => ({
       ...prev,
       [editingSubtaskId]: {
+        ...existingSubtasks.find(s => s.id === editingSubtaskId), // ✅ เพิ่มข้อมูลเดิม
         id: editingSubtaskId,
         subTaskNumber: existingSubtasks.find(s => s.id === editingSubtaskId)?.subTaskNumber || '',
         taskName: editingData.relateDrawingName,
@@ -192,101 +206,121 @@ export default function TaskAssignment() {
     loadProjects();
   }, []); // ⬅️ Empty deps = ทำงานครั้งเดียวตอน mount
 
-// ✅ โค้ดใหม่
-  useEffect(() => {
-    const fetchProjectData = async () => {
-      if (!selectedProject) {
-        setTasks([]);
-        setExistingSubtasks([]);
-        setRows([{
-          id: '1',
-          subtaskId: '',
-          relateDrawing: '',
-          relateDrawingName: '',
-          activity: '',
-          relateWork: '',
-          item: '',
-          internalRev: null,
-          workScale: 'S',
-          assignee: '',
-          deadline: '',
-          progress: 0
-        }]);
-        return;
-      }
+useEffect(() => {
+  const fetchProjectData = async () => {
+    if (!selectedProject) {
+      setTasks([]);
+      setExistingSubtasks([]);
+      setRows([{
+        id: '1',
+        subtaskId: '',
+        relateDrawing: '',
+        relateDrawingName: '',
+        activity: '',
+        relateWork: '',
+        item: '',
+        internalRev: null,
+        workScale: 'S',
+        assignee: '',
+        deadline: '',
+        progress: 0
+      }]);
+      return;
+    }
 
-      try {
-        // ✅ 1. โหลด Tasks (พร้อม dueDate)
-        const tasksCol = collection(db, 'tasks');
-        const tasksSnapshot = await getDocs(tasksCol);
-        const taskList = tasksSnapshot.docs
-          .filter(doc => doc.data().projectId === selectedProject)
-          .map(doc => ({
-            id: doc.id,
-            taskName: doc.data().taskName || '',
-            taskCategory: doc.data().taskCategory || '',
-            dueDate: doc.data().dueDate || null // ⬅️ เพิ่ม dueDate
-          }));
-        
-        setTasks(taskList);
-
-        // ✅ 2. โหลด Subtasks
-        const taskIds = taskList.map(t => t.id);
-        const allSubtasks = await getCachedSubtasks(selectedProject, taskIds, getCache, setCache);
-
-        // ✅ 3. คำนวณ Deadline Status สำหรับแต่ละ Subtask
-        const subtasksWithDeadline = allSubtasks.map(subtask => {
-          // หา Task ที่ taskName ตรงกัน
-          const task = taskList.find(t => t.taskName === subtask.taskName);
+    try {
+      // ✅ 1. โหลด Tasks (where ตัวเดียว - ไม่ต้อง Index)
+      const tasksCol = collection(db, 'tasks');
+      const q = query(tasksCol, where('projectId', '==', selectedProject));
+      const tasksSnapshot = await getDocs(q);
+      
+      // ✅ 2. กรองใน JavaScript
+      const taskList = tasksSnapshot.docs
+        .filter(doc => {
+          const data = doc.data();
+          const status = data.taskStatus;
           
-          if (!task || !task.dueDate) {
-            return {
-              ...subtask,
-              deadlineStatus: {
-                text: '-',
-                bgColor: '',
-                isOverdue: false
-              }
-            };
+          // กรอง DELETED ออก (แต่เก็บ Tasks ที่ไม่มี taskStatus)
+          if (status === 'DELETED') {
+            console.log('🗑️ Filtered out DELETED task:', doc.id);
+            return false;
           }
-
-          // คำนวณ Deadline Status
-          const deadlineStatus = calculateDeadlineStatus(
-            subtask.subTaskProgress,
-            task.dueDate,
-            subtask.endDate
-          );
-
+          
+          return true;
+        })
+        .map(doc => {
+          const data = doc.data();
+          
+          console.log('✅ Task loaded:', doc.id, 'Status:', data.taskStatus || '(no status)');
+          
           return {
-            ...subtask,
-            deadlineStatus
+            id: doc.id,
+            taskName: data.taskName || '',
+            taskCategory: data.taskCategory || '',
+            dueDate: data.dueDate || null
           };
         });
+      
+      setTasks(taskList);
 
-        setExistingSubtasks(subtasksWithDeadline);
+      // ✅ 3. โหลด Subtasks
+      const taskIds = taskList.map(t => t.id);
+      
+      console.log('📊 Loading subtasks for', taskIds.length, 'tasks');
+      
+      const allSubtasks = await getCachedSubtasks(selectedProject, taskIds, getCache, setCache);
 
-        setRows([{
-          id: '1',
-          subtaskId: '',
-          relateDrawing: '',
-          relateDrawingName: '',
-          activity: '',
-          relateWork: '',
-          item: '',
-          internalRev: null,
-          workScale: 'S',
-          assignee: '',
-          deadline: '',
-          progress: 0
-        }]);
+      // ✅ 4. คำนวณ Deadline Status
+      const subtasksWithDeadline = allSubtasks.map(subtask => {
+        const task = taskList.find(t => t.taskName === subtask.taskName);
+        
+        if (!task || !task.dueDate) {
+          return {
+            ...subtask,
+            deadlineStatus: {
+              text: '-',
+              bgColor: '',
+              isOverdue: false
+            }
+          };
+        }
 
-      } catch (error) {
-        console.error('Error fetching project data:', error);
-      }
-    };
+        const deadlineStatus = calculateDeadlineStatus(
+          subtask.subTaskProgress,
+          task.dueDate,
+          subtask.endDate
+        );
 
-    fetchProjectData();
-  }, [selectedProject]);
+        return {
+          ...subtask,
+          deadlineStatus
+        };
+      });
+
+      setExistingSubtasks(subtasksWithDeadline);
+
+      setRows([{
+        id: '1',
+        subtaskId: '',
+        relateDrawing: '',
+        relateDrawingName: '',
+        activity: '',
+        relateWork: '',
+        item: '',
+        internalRev: null,
+        workScale: 'S',
+        assignee: '',
+        deadline: '',
+        progress: 0
+      }]);
+
+    } catch (error) {
+      console.error('❌ Error fetching project data:', error);
+    }
+  };
+
+  fetchProjectData();
+}, [selectedProject]);
 
   const updateRow = (id: string, field: keyof SubtaskRow, value: any): void => {
   console.log('🔄 updateRow called:', { id, field, value });
@@ -498,6 +532,65 @@ export default function TaskAssignment() {
     }
   };
 
+  // ✅ Function สำหรับลบ Task
+  const handleDeleteTask = async (taskId: string) => {
+    if (!confirm('คุณต้องการลบ Task นี้หรือไม่?')) return;
+
+    try {
+      setIsSaving(true);
+
+      // อัพเดท taskStatus เป็น DELETED
+      await setDoc(
+        doc(db, 'tasks', taskId),
+        {
+          taskStatus: 'DELETED',
+          lastUpdate: Timestamp.now()
+        },
+        { merge: true }
+      );
+
+      // ✅ Invalidate Cache ทันที
+      const cacheKey = `tasks_projectId:${selectedProject}`;
+      invalidateCache(cacheKey);
+
+      // Reload ข้อมูล
+      const tasksCol = collection(db, 'tasks');
+      const q = query(
+        tasksCol,
+        where('projectId', '==', selectedProject),
+        where('taskStatus', '!=', 'DELETED')
+      );
+      const tasksSnapshot = await getDocs(q);
+      
+      const taskList = tasksSnapshot.docs.map(doc => ({
+        id: doc.id,
+        taskName: doc.data().taskName || '',
+        taskCategory: doc.data().taskCategory || '',
+        dueDate: doc.data().dueDate || null
+      }));
+      
+      setTasks(taskList);
+
+      // Reload Subtasks
+      const taskIds = taskList.map(t => t.id);
+      const updatedSubtasks = await getCachedSubtasks(
+        selectedProject,
+        taskIds,
+        getCache,
+        setCache
+      );
+      setExistingSubtasks(updatedSubtasks);
+
+      alert('ลบ Task สำเร็จ!');
+
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      alert('เกิดข้อผิดพลาดในการลบ');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleConfirmSave = async () => {
     setIsSaving(true);
     try {
@@ -646,7 +739,8 @@ export default function TaskAssignment() {
       
     } catch (error) {
       console.error('Error saving subtasks:', error);
-      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + error.message);
+      const errorMessage = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ';
+      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + errorMessage);
     } finally {
       setIsSaving(false);
     } 
@@ -885,6 +979,76 @@ export default function TaskAssignment() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // ✅ Function เตรียมลบ Subtask
+  const handlePrepareDelete = (subtask: ExistingSubtask) => {
+    setDeletingSubtask({
+      id: subtask.id,
+      subTaskNumber: subtask.subTaskNumber,
+      taskName: subtask.taskName,
+      subTaskCategory: subtask.subTaskCategory
+    });
+    setShowDeleteConfirmModal(true);
+  };
+
+  // ✅ Function ยืนยันการลบ
+  const handleConfirmDelete = async () => {
+    if (!deletingSubtask) return;
+
+    setIsSaving(true);
+    try {
+      // หา Task ID จาก taskName
+      const task = tasks.find(t => t.taskName === deletingSubtask.taskName);
+      if (!task) {
+        alert('ไม่พบ Task ที่เกี่ยวข้อง');
+        return;
+      }
+
+      // อัพเดท subTaskStatus เป็น DELETED (Soft Delete)
+      await setDoc(
+        doc(db, 'tasks', task.id, 'subtasks', deletingSubtask.subTaskNumber),
+        {
+          subTaskStatus: 'DELETED',
+          lastUpdate: Timestamp.now()
+        },
+        { merge: true }
+      );
+
+      console.log('✅ Soft deleted subtask:', deletingSubtask.subTaskNumber);
+
+      // Invalidate Cache
+      const cacheKey = `subtasks_projectId:${selectedProject}`;
+      invalidateCache(cacheKey);
+
+      // รีเฟรชข้อมูล
+      const taskIds = tasks.map(t => t.id);
+      const updatedSubtasks = await getCachedSubtasks(
+        selectedProject,
+        taskIds,
+        getCache,
+        setCache
+      );
+      setExistingSubtasks(updatedSubtasks);
+
+      // ปิด Modal
+      setShowDeleteConfirmModal(false);
+      setDeletingSubtask(null);
+
+      alert('ลบ Subtask สำเร็จ!');
+
+    } catch (error) {
+      console.error('❌ Error deleting subtask:', error);
+      alert('เกิดข้อผิดพลาดในการลบ');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ✅ Function ยกเลิกการลบ
+  const handleCancelDelete = () => {
+    setShowDeleteConfirmModal(false);
+    setDeletingSubtask(null);
   };
 
   // ✅ ตรวจสอบว่ากรอกข้อมูลครบหรือยัง
@@ -1288,7 +1452,7 @@ export default function TaskAssignment() {
             onClick={() => handleOpenFile(subtask.subTaskFiles![0])}
             className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200 flex items-center gap-1 mx-auto"
           >
-            📎 VIEW
+            📎 
           </button>
         ) : (
           <span className="text-gray-400 text-xs">-</span>
@@ -1341,15 +1505,17 @@ export default function TaskAssignment() {
               </button>
               <span className="text-gray-300">|</span>
               {/* ปุ่ม Delete */}
-              <button 
-                onClick={() => alert(`Delete: ${subtask.id}`)}
-                className="p-1 text-gray-600 hover:text-red-600 transition-colors"
-                title="Delete"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
+              {/* ปุ่ม Delete */}
+            <button 
+              onClick={() => handlePrepareDelete(subtask)}
+              className="p-1 text-gray-600 hover:text-red-600 transition-colors"
+              title="Delete"
+              disabled={isEditing}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
             </>
           )}
         </div>
@@ -1539,6 +1705,73 @@ export default function TaskAssignment() {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+            {/* ✅ Delete Confirmation Modal */}
+      <Modal
+        isOpen={showDeleteConfirmModal}
+        onClose={handleCancelDelete}
+        title="ยืนยันการลบ Subtask"
+        size="md"
+        footer={
+          <div className="flex justify-end space-x-3">
+            <Button 
+              variant="outline" 
+              onClick={handleCancelDelete}
+              disabled={isSaving}
+            >
+              ยกเลิก
+            </Button>
+            <Button 
+              variant="danger"
+              onClick={handleConfirmDelete}
+              disabled={isSaving}
+            >
+              {isSaving ? 'กำลังลบ...' : 'ยืนยันการลบ'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {/* ⚠️ Warning Icon */}
+          <div className="flex justify-center">
+            <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
+              <svg className="w-10 h-10 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+          </div>
+
+          {/* ข้อความเตือน */}
+          <div className="text-center">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              คุณต้องการลบ Subtask นี้หรือไม่?
+            </h3>
+            <p className="text-sm text-gray-600">
+              การลบจะไม่สามารถกู้คืนได้
+            </p>
+          </div>
+
+          {/* รายละเอียด Subtask */}
+          {deletingSubtask && (
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Subtask ID:</span>
+                  <span className="text-sm text-gray-900">{deletingSubtask.subTaskNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Task Name:</span>
+                  <span className="text-sm text-gray-900">{deletingSubtask.taskName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Category:</span>
+                  <span className="text-sm text-gray-900">{deletingSubtask.subTaskCategory}</span>
+                </div>
+              </div>
             </div>
           )}
         </div>
