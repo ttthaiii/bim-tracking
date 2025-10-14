@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DailyReportEntry } from '@/types/database';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
+import { UploadPopup } from './UploadPopup';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
@@ -13,6 +14,13 @@ interface RecheckPopupProps {
   dailyReportEntries: DailyReportEntry[];
   workDate: string;
   onEdit?: () => void;
+  debug?: {
+    title: string;
+    selectedDate: string;
+    currentSystemDate: string;
+    entriesToSubmitDates: string[];
+    timestamp: string;
+  };
 }
 
 export const RecheckPopup: React.FC<RecheckPopupProps> = ({
@@ -21,12 +29,14 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   onConfirm,
   dailyReportEntries,
   workDate,
-  onEdit
+  onEdit,
+  debug
 }) => {
   // แปลง workDate string เป็น Date object
   // แปลงวันที่จาก input type="date" (YYYY-MM-DD) เป็น Date object
   const initialDate = workDate ? new Date(workDate.replace(/-/g, '/')) : new Date();
   const [selectedDate, setSelectedDate] = useState<Value>(initialDate);
+  const [showUploadPopup, setShowUploadPopup] = useState(false);
 
   // อัพเดท selectedDate เมื่อ workDate เปลี่ยน
   useEffect(() => {
@@ -54,6 +64,28 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   };
 
   const totalHours = calculateTotalHours();
+
+  // กรอง tasks ที่มี progress 100%
+  const completedTasks = dailyReportEntries.filter(task => 
+    parseInt(task.progress.replace('%', '')) === 100
+  );
+
+  // จัดการการยืนยันข้อมูล
+  const handleConfirmData = () => {
+    if (completedTasks.length > 0) {
+      // ถ้ามี task ที่เสร็จ 100% ให้แสดง Upload Popup
+      setShowUploadPopup(true);
+    } else {
+      // ถ้าไม่มี task ที่เสร็จ 100% ให้ confirm ตรงไป
+      onConfirm();
+    }
+  };
+
+  // จัดการเมื่อ Upload เสร็จ
+  const handleUploadComplete = () => {
+    setShowUploadPopup(false);
+    onConfirm(); // เรียก onConfirm หลังจาก upload เสร็จ
+  };
 
   return (
     <>
@@ -251,7 +283,14 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
                           ? 'bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 border border-amber-300'
                           : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800 border border-gray-300'
                       }`}>
-                        {task.progress}
+                        {task.oldProgress && task.oldProgress !== task.progress ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-sm text-gray-500 line-through">{task.oldProgress}</span>
+                            <span className="text-green-600">{task.progress}</span>
+                          </div>
+                        ) : (
+                          task.progress
+                        )}
                       </div>
                     </td>
                     <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.note || '-'}</td>
@@ -283,6 +322,35 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
             </table>
           </div>
 
+          {/* Debug Information Section */}
+          {debug && (
+            <div className="mt-6 p-4 bg-gray-100 rounded-xl border border-gray-300 text-sm space-y-2">
+              <h3 className="font-bold text-gray-700">{debug.title}</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-gray-600">Selected Date:</p>
+                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.selectedDate}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">System Date:</p>
+                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.currentSystemDate}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-gray-600">Entry Dates:</p>
+                  <div className="font-mono bg-white px-2 py-1 rounded">
+                    {debug.entriesToSubmitDates.map((date: string, i: number) => (
+                      <span key={i} className="inline-block mr-2">{date}</span>
+                    ))}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-gray-600">Timestamp:</p>
+                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.timestamp}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end space-x-6 mt-8">
             <button
               onClick={() => {
@@ -294,14 +362,27 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
               แก้ไขข้อมูล
             </button>
             <button
-              onClick={onConfirm}
+              onClick={handleConfirmData}
               className="px-8 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
             >
               ยืนยันข้อมูล
+              {completedTasks.length > 0 && (
+                <span className="ml-2 bg-white text-indigo-600 px-2 py-1 rounded-full text-sm font-bold">
+                  {completedTasks.length}
+                </span>
+              )}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Upload Popup */}
+      <UploadPopup
+        isOpen={showUploadPopup}
+        onClose={() => setShowUploadPopup(false)}
+        onComplete={handleUploadComplete}
+        completedTasks={completedTasks}
+      />
     </div>
     </>
   );
