@@ -780,7 +780,7 @@ export default function DailyReport() {
           </div>
             <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
               <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-blue-500 mr-2"></div><span>วันที่เลือก</span></div>
-              <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-sm mr-2" style={{ backgroundColor: '#ff4d00' }}></div><span>วันที่ปัจจุบัน</span></div>
               <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>วันที่ยังไม่มีการลงข้อมูล</span></div>
               <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-400 mr-2"></span><span>วันที่มีการแก้ไข</span></div>
             </div>
@@ -830,7 +830,7 @@ export default function DailyReport() {
               <div className="flex flex-col h-[calc(100vh-300px)]">
                 <div className="flex-grow overflow-x-auto overflow-y-auto">
                   <table className="w-full border-collapse text-xs">
-                    <thead className="sticky top-0 bg-orange-500">
+                    <thead className="sticky top-0" style={{ backgroundColor: '#ff4d00' }}> 
                       <tr className="text-white">
                         <th className="p-2 font-semibold text-left w-10">No</th>
                         <th className="p-2 font-semibold text-left w-1/3">Relate Drawing</th>
@@ -1019,7 +1019,8 @@ export default function DailyReport() {
                 <button 
                   type="button" 
                   onClick={handleAddRow} 
-                  className="bg-orange-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-orange-600 text-sm" 
+                  className="text-white font-semibold py-2 px-4 rounded-md hover:opacity-90 text-sm"
+                  style={{ backgroundColor: '#ff4d00' }}
                   disabled={isReadOnly}
                 >
                   Add Row

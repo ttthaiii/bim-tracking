@@ -1,37 +1,40 @@
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/config/firebase';
 
-export interface RelateWork {
-  id: string;
-  activityName: string;
-  relatedWorks: { [key: string]: string };
-}
-
-export interface ActivityOption {
-  value: string; // document ID
-  label: string; // activityName
-}
-
-export interface RelateWorkOption {
-  value: string; // work name
-  label: string; // work name
+export interface SelectOption {
+  value: string;
+  label: string;
 }
 
 /**
- * ดึงข้อมูล Activities ทั้งหมดจาก Collection relateWorks
+ * ดึงรายการ Activities ทั้งหมดจาก Firestore
  */
-export const getActivities = async (): Promise<ActivityOption[]> => {
+export const getActivities = async (): Promise<SelectOption[]> => {
   try {
     const relateWorksCol = collection(db, 'relateWorks');
     const snapshot = await getDocs(relateWorksCol);
     
-    return snapshot.docs.map(doc => {
-      const data = doc.data() as RelateWork;
-      return {
-        value: doc.id,
-        label: data.activityName || doc.id
-      };
+    // ดึง activityName ที่ไม่ซ้ำกัน
+    const activitiesSet = new Set<string>();
+    
+    snapshot.docs.forEach(doc => {
+      const activityName = doc.data().activityName;
+      if (activityName) {
+        activitiesSet.add(activityName);
+      }
     });
+    
+    // แปลงเป็น SelectOption และเรียงลำดับ
+    const activities = Array.from(activitiesSet)
+      .map(name => ({
+        value: name,
+        label: name
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    
+    console.log('📋 Activities loaded:', activities.length);
+    return activities;
+    
   } catch (error) {
     console.error('Error fetching activities:', error);
     return [];
@@ -39,48 +42,37 @@ export const getActivities = async (): Promise<ActivityOption[]> => {
 };
 
 /**
- * ดึงข้อมูล Relate Works ตาม Activity ที่เลือก
+ * ดึงรายการ Relate Works ตาม Activity Name
  */
-export const getRelateWorksByActivity = async (
-  activityId: string
-): Promise<RelateWorkOption[]> => {
+export const getRelateWorksByActivity = async (activityName: string): Promise<SelectOption[]> => {
   try {
-    if (!activityId) return [];
+    if (!activityName) return [];
     
     const relateWorksCol = collection(db, 'relateWorks');
-    const snapshot = await getDocs(relateWorksCol);
+    const q = query(relateWorksCol, where('activityName', '==', activityName));
+    const snapshot = await getDocs(q);
     
-    const doc = snapshot.docs.find(d => d.id === activityId);
-    if (!doc) return [];
+    if (snapshot.empty) {
+      console.log('No relate works found for:', activityName);
+      return [];
+    }
     
-    const data = doc.data() as RelateWork;
+    const doc = snapshot.docs[0];
+    const data = doc.data();
     const relatedWorks = data.relatedWorks || {};
     
-    // แปลง object เป็น array of options
-    return Object.values(relatedWorks).map(work => ({
-      value: work,
-      label: work
-    }));
+    const options = Object.values(relatedWorks)
+      .map((work: any) => ({
+        value: work,
+        label: work
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    
+    console.log('📋 Relate works loaded for', activityName, ':', options.length);
+    return options;
+    
   } catch (error) {
     console.error('Error fetching relate works:', error);
-    return [];
-  }
-};
-
-/**
- * ดึงข้อมูล RelateWork document ทั้งหมด
- */
-export const getAllRelateWorks = async (): Promise<RelateWork[]> => {
-  try {
-    const relateWorksCol = collection(db, 'relateWorks');
-    const snapshot = await getDocs(relateWorksCol);
-    
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as RelateWork));
-  } catch (error) {
-    console.error('Error fetching all relate works:', error);
     return [];
   }
 };

@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from '@/context/AuthContext'; // Import AuthProvider
 import PageLayout from '@/components/shared/PageLayout'; // Import PageLayout
 import { DashboardProvider } from '@/context/DashboardContext';
+import { FirestoreCacheProvider } from '@/contexts/FirestoreCacheContext'; // Import FirestoreCacheProvider
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,9 +33,11 @@ export default function RootLayout({
       >
         <AuthProvider> {/* Wrap children with AuthProvider */}
           <DashboardProvider>
-            <PageLayout> {/* Wrap children with PageLayout */}
-              {children}
-            </PageLayout>
+            <FirestoreCacheProvider> {/* Wrap children with FirestoreCacheProvider */}
+              <PageLayout> {/* Wrap children with PageLayout */}
+                {children}
+              </PageLayout>
+            </FirestoreCacheProvider>
           </DashboardProvider>
         </AuthProvider>
       </body>

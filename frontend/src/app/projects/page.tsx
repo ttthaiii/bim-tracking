@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-// ลบการ import Navbar ออก เพราะ PageLayout render ให้แล้ว
+import { Timestamp } from "firebase/firestore";
 import CreateProjectModal from "@/components/modals/CreateProjectModal";
 import ProjectListModal from "@/components/modals/ProjectListModal";
 import { createProject, updateProjectLeader } from "@/services/firebase";
@@ -817,7 +817,7 @@ const ProjectsPage = () => {
       {/* ลบส่วน Navbar ออก เพราะ PageLayout render ให้แล้ว */}
       
       {/* ลบ padding: "40px 40px" ออก ให้ PageLayout จัดการ margin-top แทน */}
-      <div style={{ maxWidth: "100%", margin: "30px auto 0 auto" }}>
+      <div style={{ maxWidth: "100%", margin: "35px auto 0 auto" }}>
         <div style={{ marginBottom: "24px", display: "flex", gap: "16px", alignItems: "center" }}>
           <button 
             onClick={() => setIsCreateModalOpen(true)}
