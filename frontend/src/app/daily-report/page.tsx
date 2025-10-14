@@ -13,7 +13,6 @@ import { getEmployeeByID } from '@/services/employeeService';
 import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee, UploadedFile } from '@/services/taskAssignService';
 import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
-import { useDashboard } from '@/context/DashboardContext';
 import { DailyReportEntry, Subtask } from '@/types/database';
 import type { Project } from '@/lib/projects';
 import { getProjects } from '@/lib/projects';
@@ -110,7 +109,6 @@ const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[])
 
 export default function DailyReport() {
   const { appUser } = useAuth();
-  const { setHasUnsavedChanges } = useDashboard();
   const baseId = useId();
   const [date, setDate] = useState<Value>(null);
   // เก็บ workDate ในรูปแบบ YYYY-MM-DD โดยตรง
@@ -187,19 +185,7 @@ export default function DailyReport() {
     setShowHistoryModal(true);
   };
   
-  useEffect(() => {
-    const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
-    const currentData = tempDataCache[workDate];
-    
-    const normalize = (entries: DailyReportEntry[] = []) => 
-      entries.map(({ id, relateDrawing, ...rest }) => ({ ...rest, id: id.startsWith('temp-') ? '' : id }));
 
-    if (originalData.length === 0 && currentData && currentData.some((d: DailyReportEntry) => d.subtaskId)) {
-        setHasUnsavedChanges(true);
-    } else {
-        setHasUnsavedChanges(!isEqual(normalize(originalData), normalize(currentData)));
-    }
-  }, [workDate, allDailyEntries, setHasUnsavedChanges, tempDataCache]);
 
   const fetchAllData = useCallback(async (eid: string) => {
     setLoading(true);
@@ -240,6 +226,8 @@ export default function DailyReport() {
       fetchAllData(appUser.employeeId);
     }
   }, [appUser, employeeId, fetchAllData]);
+
+
 
   // Set initial date after component mounts
   useEffect(() => {
@@ -504,8 +492,7 @@ export default function DailyReport() {
       return newEntries;
     });
 
-    // Update unsaved changes state
-    setHasUnsavedChanges(true);
+
   };
   
   const handleAddRow = () => {
@@ -707,7 +694,6 @@ export default function DailyReport() {
       await saveDailyReportEntries(employeeId, entriesToSave);
       
       alert('บันทึกข้อมูล Daily Report สำเร็จ!');
-      setHasUnsavedChanges(false);
       
       // เคลียร์ cache และ flag ว่าเพิ่ง submit
       setTempDataCache({});
@@ -808,7 +794,7 @@ export default function DailyReport() {
 
           {/* Form Section */}
           <div className="flex-1">
-            <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[80vh]">
+            <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[60vh]">
               {/* Header Info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
                 <div>
@@ -827,7 +813,7 @@ export default function DailyReport() {
               {employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
 
               {/* Table Section */}
-              <div className="flex flex-col h-[calc(100vh-300px)]">
+              <div className="flex flex-col h-[calc(100vh-380px)]">
                 <div className="flex-grow overflow-x-auto overflow-y-auto">
                   <table className="w-full border-collapse text-xs">
                     <thead className="sticky top-0" style={{ backgroundColor: '#ff4d00' }}> 
@@ -987,8 +973,8 @@ export default function DailyReport() {
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                           </svg>
                                         ) : (
-                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
                                           </svg>
                                         )}
                                       </button>

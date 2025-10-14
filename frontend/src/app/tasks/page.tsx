@@ -1098,7 +1098,7 @@ useEffect(() => {
       <Navbar />
       
       <div className="flex-1 flex flex-col px-4 py-6 overflow-hidden">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6">Task Assignment</h1>
+        <h1 className="text-3xl font-bold text-gray-900 mb-6 mt-4">Task Assignment</h1>
 
         <div className="bg-white rounded-lg shadow p-6 mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">
