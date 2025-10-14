@@ -4,10 +4,24 @@ export interface Project {
   id: string;
   name: string;
   abbr: string;
+<<<<<<< HEAD
   status: string;
   description?: string;
   startDate?: Timestamp;
   dueDate?: Timestamp;
+=======
+  createdAt: Timestamp;
+  projectAssignee?: string;  // ← เพิ่มบรรทัดนี้
+}
+
+export interface User {
+  Name: string;
+  ตำแหน่ง: string;
+  Email: string;
+  โครงการ: string;
+  Password: string;
+  รหัสพนักงาน: string;
+>>>>>>> feature/TaskOverview
 }
 
 export interface Task {
@@ -23,6 +37,12 @@ export interface Task {
   lastRev?: string;
   documentNumber?: string;
   rev?: string;
+<<<<<<< HEAD
+=======
+  currentStep?: string;
+  taskStatus?: string;      // ← เพิ่ม
+  deletedAt?: Timestamp;    // ← เพิ่ม
+>>>>>>> feature/TaskOverview
 }
 
 // Interface for Subtask (from tasks > subtasks collection)
@@ -41,6 +61,7 @@ export interface Subtask {
   startDate: Timestamp;
   subTaskAssignee: string;
   subTaskCategory: string;
+<<<<<<< HEAD
   subTaskFiles: string[];
   subTaskName: string;
   subTaskNumber: string;
@@ -95,3 +116,19 @@ export interface Employee {
   employeeId: string;
   fullName: string;
 }
+=======
+  remark?: string;
+  project: string;
+  subTaskFiles: Array<{
+    fileName: string;
+    fileUrl: string;
+  }>;
+  subtaskStatus?: string;   // ← เพิ่ม
+  deletedAt?: Timestamp;    // ← เพิ่ม
+}
+
+export interface RelateWork {
+  activityName: string;
+  relatedWorks?: any[];
+}
+>>>>>>> feature/TaskOverview
