@@ -19,6 +19,7 @@ import {
 import { Project, Task } from "@/types/database";
 import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
 import SuccessModal from "@/components/modals/SuccessModal";
+import ErrorModal from '@/components/modals/ErrorModal';
 import AddRevisionModal from "@/components/modals/AddRevisionModal";
 import DeleteConfirmModal from "@/components/modals/DeleteConfirmModal";
 import ExportModal from "@/components/modals/ExportModal";
@@ -129,9 +130,30 @@ const generateTaskId = (projectAbbr: string, activityName: string, existingRows:
   return `TTS-BIM-${projectAbbr}-${activityOrder}-${runningNo}`;
 };
 
-const translateStatus = (status: string): string => {
-  const statusMap: { [key: string]: string } = { 'PENDING_REVIEW': 'รอตรวจสอบ', 'PENDING_CM_APPROVAL': 'ส่ง CM', 'REVISION_REQUIRED': 'แก้ไข', 'APPROVED': 'อนุมัติ', 'APPROVED_WITH_COMMENTS': 'อนุมัติตามคอมเมนต์ (ไม่แก้ไข)', 'APPROVED_REVISION_REQUIRED': 'อนุมัติตามคอมเมนต์ (ต้องแก้ไข)', 'REJECTED': 'ไม่อนุมัติ' };
-  return statusMap[status] || status;
+const translateStatus = (status: string, isWorkRequest: boolean = false): string => {
+  if (isWorkRequest) {
+    // สถานะสำหรับ Work Request
+    const workRequestStatusMap: { [key: string]: string } = {
+      'PENDING_BIM': 'รอ BIM รับงาน',
+      'IN_PROGRESS': 'กำลังดำเนินการ',
+      'PENDING_ACCEPTANCE': 'รอตรวจรับ',
+      'REVISION_REQUESTED': '⚠️ ขอแก้ไข (ต้องสร้าง Rev.)',
+      'COMPLETED': 'เสร็จสิ้น'
+    };
+    return workRequestStatusMap[status] || status;
+  } else {
+    // สถานะสำหรับเอกสาร RFA
+    const rfaStatusMap: { [key: string]: string } = {
+      'PENDING_REVIEW': 'รอตรวจสอบ',
+      'PENDING_CM_APPROVAL': 'ส่ง CM',
+      'REVISION_REQUIRED': 'แก้ไข',
+      'APPROVED': 'อนุมัติ',
+      'APPROVED_WITH_COMMENTS': 'อนุมัติตามคอมเมนต์ (ไม่แก้ไข)',
+      'APPROVED_REVISION_REQUIRED': 'อนุมัติตามคอมเมนต์ (ต้องแก้ไข)',
+      'REJECTED': 'ไม่อนุมัติ'
+    };
+    return rfaStatusMap[status] || status;
+  }
 };
 
 const ProjectsPage = () => {
@@ -165,6 +187,8 @@ const ProjectsPage = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [pendingRevCount, setPendingRevCount] = useState(0);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     const loadActivities = async () => {
@@ -199,6 +223,24 @@ const ProjectsPage = () => {
   }, [projects, cacheLoaded]);
 
   useEffect(() => {
+    if (!cacheLoaded || allTasksCache.length === 0) return;
+    
+    let filteredTasks = allTasksCache;
+    if (selectedProject !== "all") {
+      filteredTasks = filteredTasks.filter(t => t.projectId === selectedProject);
+    }
+    if (filterActivity) {
+      filteredTasks = filteredTasks.filter(t => t.taskCategory === filterActivity);
+    }
+    if (filterStatus) {
+      filteredTasks = filteredTasks.filter(t => t.currentStep === filterStatus);
+    }
+    
+    const taskRows = filteredTasks.map(task => convertTaskToRow(task));
+    setRows([...taskRows, ...initialRows]);
+  }, [cacheLoaded, allTasksCache, selectedProject, filterActivity, filterStatus]);
+  
+  useEffect(() => {
     const loadProjects = async () => {
       try {
         setLoading(true);
@@ -215,78 +257,88 @@ const ProjectsPage = () => {
 
   useEffect(() => {
     if (!cacheLoaded || allTasksCache.length === 0) return;
-    const filterTasks = () => {
-      let tasksData = selectedProject === "all" ? allTasksCache : allTasksCache.filter(t => t.projectId === selectedProject);
-      if (filterActivity) {
-        tasksData = tasksData.filter(t => t.taskCategory === filterActivity);
-      }
-      if (filterStatus) {
-        tasksData = tasksData.filter(t => t.currentStep === filterStatus);
-      }
-      if (tasksData.length > 0) {
-        let taskRows = tasksData.map(convertTaskToRow);
-        const currentProject = projects.find(p => selectedProject === "all" ? false : p.id === selectedProject);
-        if (currentProject && currentProject.abbr) {
-          let counter = 1;
-          taskRows = taskRows.map(row => {
-            if (row.id) return row;
-            const newId = generateTaskId(currentProject.abbr, row.activity, taskRows, activities, counter);
-            counter++;
-            return { ...row, id: newId };
-          });
-        }
-        setRows([...taskRows, initialRows[0]]);
-        setTouchedRows(new Set());
-      } else {
-        setRows(initialRows);
-        setTouchedRows(new Set());
-      }
-    };
-    filterTasks();
-  }, [selectedProject, allTasksCache, cacheLoaded, projects, activities, filterActivity, filterStatus]);
-
-  useEffect(() => {
-    if (!cacheLoaded || allTasksCache.length === 0) return;
+    
     let tasksToCheck = allTasksCache;
     if (selectedProject !== "all") {
       tasksToCheck = allTasksCache.filter(t => t.projectId === selectedProject);
     }
+    
     const needsRevision = tasksToCheck.filter(t => {
-      if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED') return false;
+      const isWorkRequest = t.taskCategory === 'Work Request';
+      
+      // ✅ เงื่อนไข 1: เช็คสถานะตามประเภทเอกสาร
+      if (isWorkRequest) {
+        // Work Request: ต้องเป็นสถานะ REVISION_REQUESTED
+        if (t.currentStep !== 'REVISION_REQUESTED') {
+          return false;
+        }
+      } else {
+        // เอกสาร RFA: ต้องเป็นสถานะ APPROVED_REVISION_REQUIRED หรือ REJECTED
+        if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED') {
+          return false;
+        }
+      }
+      
+      // ✅ เงื่อนไข 2: เช็คว่ามี Rev. ถัดไปในระบบแล้วหรือยัง
       const baseName = t.taskName.replace(/\s+REV\.\d+$/i, '');
       const currentRev = parseInt(t.rev || '0');
       const nextRev = String(currentRev + 1).padStart(2, '0');
       const nextRevName = `${baseName} REV.${nextRev}`;
-      const hasNextRev = tasksToCheck.some(task => task.taskName === nextRevName || task.taskName.replace(/\s+REV\.\d+$/i, '') === baseName && parseInt(task.rev || '0') > currentRev);
+      
+      const hasNextRev = tasksToCheck.some(task => 
+        task.taskName === nextRevName || 
+        (task.taskName.replace(/\s+REV\.\d+$/i, '') === baseName && 
+         parseInt(task.rev || '0') > currentRev)
+      );
+      
       return !hasNextRev;
     });
+    
     setPendingRevCount(needsRevision.length);
   }, [allTasksCache, cacheLoaded, selectedProject]);
 
   const handleCreateProject = async (projectData: { name: string; code: string; leader: string }) => {
-    try {
-      await createProject(projectData);
-      setIsCreateModalOpen(false);
-      const projectsData = await getProjectDetails();
-      setProjects(projectsData);
-      alert('สร้างโปรเจกต์สำเร็จ');
-    } catch (error) {
-      console.error('Error creating project:', error);
-      alert('เกิดข้อผิดพลาดในการสร้างโปรเจกต์');
-    }
-  };
+      try {
+        await createProject(projectData);
+        setIsCreateModalOpen(false);
+        const projectsData = await getProjectDetails();
+        setProjects(projectsData);
+        
+        // --- ส่วนที่แก้ไข: เรียกใช้ SuccessModal ---
+        setSuccessMessage('สร้างโปรเจกต์สำเร็จ');
+        setShowSuccessModal(true);
+        // ------------------------------------
 
-  const handleUpdateLeader = async (projectId: string, newLeader: string) => {
-    try {
-      await updateProjectLeader(projectId, newLeader);
-      const projectsData = await getProjectDetails();
-      setProjects(projectsData);
-      alert('อัพเดท Leader สำเร็จ');
-    } catch (error) {
-      console.error('Error updating leader:', error);
-      alert('เกิดข้อผิดพลาดในการอัพเดท');
-    }
-  };
+      } catch (error) {
+        console.error('Error creating project:', error);
+    
+        // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
+        setErrorMessage('เกิดข้อผิดพลาดในการสร้างโปรเจกต์');
+        setShowErrorModal(true);
+        // ------------------------------------
+      }
+    };
+
+    const handleUpdateLeader = async (projectId: string, newLeader: string) => {
+      try {
+        await updateProjectLeader(projectId, newLeader);
+        const projectsData = await getProjectDetails();
+        setProjects(projectsData);
+  
+        // --- ส่วนที่แก้ไข ---
+        setSuccessMessage('อัพเดท Leader สำเร็จ');
+        setShowSuccessModal(true);
+        // --------------------
+  
+      } catch (error) {
+        console.error('Error updating leader:', error);
+  
+        // --- ส่วนที่แก้ไข ---
+        setErrorMessage('เกิดข้อผิดพลาดในการอัพเดท Leader');
+        setShowErrorModal(true);
+        // --------------------
+      }
+    };
 
   const handleRowChange = (idx: number, field: keyof TaskRow, value: string | boolean) => {
     setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
@@ -311,26 +363,30 @@ const ProjectsPage = () => {
   const handleDelete = (idx: number) => {
     const rowToDelete = rows[idx];
     
-    // ✅ เช็คว่าเป็น Work Request หรือไม่
+    const showError = (message: string) => {
+      setErrorMessage(message);
+      setShowErrorModal(true);
+    };
+
     if (rowToDelete.activity === 'Work Request') {
-      alert('⚠️ ไม่สามารถลบงาน Work Request ได้');
+      showError('ไม่สามารถลบงานที่เป็น Work Request ได้');
       return;
     }
     
     const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
     
     if (isEmptyRow && idx === rows.length - 1) {
-      alert('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
+      showError('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
       return;
     }
     
     if (rowToDelete.statusDwg) {
-      alert('ไม่สามารถลบแถวที่มีสถานะเอกสารได้');
+      showError('ไม่สามารถลบแถวที่มีสถานะเอกสารแล้วได้');
       return;
     }
     
     if (rowToDelete.progress && rowToDelete.progress > 0) {
-      alert('ไม่สามารถลบงานที่มีความคืบหน้าแล้ว');
+      showError('ไม่สามารถลบงานที่มีความคืบหน้าแล้วได้');
       return;
     }
     
@@ -359,7 +415,8 @@ const ProjectsPage = () => {
       setOriginalRows(prev => { const newMap = new Map(prev); newMap.delete(idx); return newMap; });
     } catch (error) {
       console.error('❌ Error deleting:', error);
-      alert('เกิดข้อผิดพลาดในการลบ');
+      setErrorMessage('เกิดข้อผิดพลาดในการลบข้อมูล');
+      setShowErrorModal(true);
     } finally {
       setShowDeleteModal(false);
       setDeleteTarget(null);
@@ -367,13 +424,18 @@ const ProjectsPage = () => {
   };
 
   const handleSave = async () => {
+    const showError = (message: string) => {
+      setErrorMessage(message);
+      setShowErrorModal(true);
+    };
+
     if (!selectedProject || selectedProject === "all") {
-      alert('กรุณาเลือกโครงการก่อน');
+      showError('กรุณาเลือกโครงการก่อนทำการบันทึก');
       return;
     }
     const currentProject = projects.find(p => p.id === selectedProject);
     if (!currentProject || !currentProject.abbr) {
-      alert('ไม่พบข้อมูลโครงการ');
+      showError('ไม่พบข้อมูลโครงการที่เลือก');
       return;
     }
     const rowsToUpdate: TaskRow[] = [];
@@ -387,7 +449,7 @@ const ProjectsPage = () => {
       }
     });
     if (rowsToUpdate.length === 0 && rowsToCreate.length === 0) {
-      alert('ไม่มีข้อมูลที่ต้องบันทึก');
+      showError('ไม่มีข้อมูลใหม่หรือการเปลี่ยนแปลงที่จะบันทึก');
       return;
     }
     const modalData = {
@@ -451,20 +513,20 @@ const ProjectsPage = () => {
       setOriginalRows(new Map());
     } catch (error) {
       console.error('❌ Error saving:', error);
-      alert('❌ เกิดข้อผิดพลาดในการบันทึก: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setErrorMessage('เกิดข้อผิดพลาดในการบันทึก: ' + errorMessage);
+      setShowErrorModal(true);
     }
   };
 
   // ========== ✅ MERGED: เพิ่มการป้องกันแก้ไข Work Request ==========
   const handleEdit = (idx: number) => {
     const row = rows[idx];
-    
-    // ✅ เช็คว่าเป็น Work Request หรือไม่
     const isWorkRequest = row.activity === 'Work Request';
     
-    // ✅ ถ้าเป็น Work Request และไม่ใช่สถานะ PENDING_BIM → ห้ามแก้ไข
+    // ✅ Work Request: แก้ไขได้เฉพาะสถานะ PENDING_BIM
     if (isWorkRequest && row.statusDwg !== 'PENDING_BIM') {
-      alert('⚠️ แก้ไข Work Request ได้เฉพาะสถานะ PENDING_BIM เท่านั้น');
+      alert('⚠️ แก้ไข Work Request ได้เฉพาะสถานะ "รอ BIM รับงาน" เท่านั้น\n\nถ้าสถานะเป็น "ขอแก้ไข" → กรุณาคลิกปุ่ม "Add new Rev." เพื่อสร้างแถวใหม่');
       return;
     }
     
@@ -488,6 +550,10 @@ const ProjectsPage = () => {
   };
 
   const handleExport = async (options: any) => {
+    const showError = (message: string) => {
+      setErrorMessage(message);
+      setShowErrorModal(true);
+    };
     try {
       if (options.exportType === 'gantt') {
         const project = projects.find(p => p.id === (options.projectId === 'all' ? selectedProject : options.projectId));
@@ -495,7 +561,7 @@ const ProjectsPage = () => {
         const projectLead = project?.projectAssignee || 'N/A';
         let filteredRows = rows.filter(r => r.relateDrawing && r.relateDrawing.trim() !== '' && r.startDate && r.dueDate);
         if (filteredRows.length === 0) {
-          alert('❌ ไม่มีข้อมูลที่จะ Export\n\nกรุณาตรวจสอบว่ามีงานที่มีวันเริ่มและวันสิ้นสุดครบถ้วน');
+          showError('ไม่มีข้อมูลที่จะ Export\n\nกรุณาตรวจสอบว่ามีงานที่มีวันเริ่มและวันสิ้นสุดครบถ้วน');
           return;
         }
         let start: Date, end: Date;
@@ -509,7 +575,7 @@ const ProjectsPage = () => {
             return taskStart <= end && taskEnd >= start;
           });
           if (filteredRows.length === 0) {
-            alert(`❌ ไม่มีงานในช่วง ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`);
+            showError(`ไม่มีงานในช่วง ${start.toLocaleDateString()} - ${end.toLocaleDateString()}`);
             return;
           }
         } else {
@@ -518,13 +584,16 @@ const ProjectsPage = () => {
           end = new Date(Math.max(...dates));
         }
         await exportGanttChart(filteredRows.map(r => ({ id: r.id, relateDrawing: r.relateDrawing, activity: r.activity, startDate: r.startDate, dueDate: r.dueDate, progress: r.progress || 0, statusDwg: r.statusDwg || '' })), projectName, projectLead, start, end);
-        alert(`✅ Export สำเร็จ! (${filteredRows.length} tasks)`);
+        setSuccessMessage(`Export Gantt Chart สำเร็จ! (${filteredRows.length} tasks)`);
+        setShowSuccessModal(true);
       } else {
-        alert('Simple export coming soon!');
+        // สำหรับ 'Simple export coming soon!' อาจจะใช้ Modal หรือคง alert ไว้ก็ได้ถ้าต้องการให้ดูเป็น temporary
+        showError('ฟังก์ชัน Export แบบทั่วไปยังไม่เปิดให้บริการ');
       }
     } catch (error) {
       console.error('❌ Export error:', error);
-      alert('เกิดข้อผิดพลาดในการ Export:\n' + (error instanceof Error ? error.message : String(error)));
+      const message = error instanceof Error ? error.message : String(error);
+      showError('เกิดข้อผิดพลาดในการ Export:\n' + message);
     }
   };
 
@@ -548,9 +617,12 @@ const ProjectsPage = () => {
     try {
       const allTasks = await getTasksForProject();
       setAllTasksCache(allTasks);
-      alert('✅ รีโหลดข้อมูลสำเร็จ');
+      setSuccessMessage('รีโหลดข้อมูลที่ถูกลบเรียบร้อยแล้ว');
+      setShowSuccessModal(true);
     } catch (error) {
       console.error('Error reloading tasks:', error);
+      setErrorMessage('เกิดข้อผิดพลาดในการรีโหลดข้อมูล');
+      setShowErrorModal(true);
     }
   };
 
@@ -604,15 +676,33 @@ const ProjectsPage = () => {
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                         <span>STATUS DWG.</span>
-                        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} onClick={e => e.stopPropagation()} style={{ width: "20px", padding: "0", fontSize: "10px", border: "1px solid #fff", borderRadius: "3px", background: "#fff", color: "#000", cursor: "pointer" }}>
+                          <select 
+                          value={filterStatus} 
+                          onChange={e => setFilterStatus(e.target.value)}
+                          onClick={e => e.stopPropagation()}
+                          style={{ width: "20px", padding: "0", fontSize: "10px", border: "1px solid #fff", borderRadius: "3px", background: "#fff", color: "#000", cursor: "pointer" }}
+                        >
                           <option value="">ทั้งหมด</option>
-                          <option value="PENDING_REVIEW">รอตรวจสอบ</option>
-                          <option value="PENDING_CM_APPROVAL">ส่ง CM</option>
-                          <option value="REVISION_REQUIRED">แก้ไข</option>
-                          <option value="APPROVED">อนุมัติ</option>
-                          <option value="APPROVED_WITH_COMMENTS">อนุมัติตามคอมเมนต์ (ไม่แก้ไข)</option>
-                          <option value="APPROVED_REVISION_REQUIRED">อนุมัติตามคอมเมนต์ (ต้องแก้ไข)</option>
-                          <option value="REJECTED">ไม่อนุมัติ</option>
+                          
+                          {/* ✅ สถานะ Work Request */}
+                          <optgroup label="Work Request">
+                            <option value="PENDING_BIM">รอ BIM รับงาน</option>
+                            <option value="IN_PROGRESS">กำลังดำเนินการ</option>
+                            <option value="PENDING_ACCEPTANCE">รอตรวจรับ</option>
+                            <option value="REVISION_REQUESTED">ขอแก้ไข</option>
+                            <option value="COMPLETED">เสร็จสิ้น</option>
+                          </optgroup>
+                          
+                          {/* ✅ สถานะเอกสาร RFA */}
+                          <optgroup label="เอกสาร RFA">
+                            <option value="PENDING_REVIEW">รอตรวจสอบ</option>
+                            <option value="PENDING_CM_APPROVAL">ส่ง CM</option>
+                            <option value="REVISION_REQUIRED">แก้ไข</option>
+                            <option value="APPROVED">อนุมัติ</option>
+                            <option value="APPROVED_WITH_COMMENTS">อนุมัติตามคอมเมนต์ (ไม่แก้ไข)</option>
+                            <option value="APPROVED_REVISION_REQUIRED">อนุมัติตามคอมเมนต์ (ต้องแก้ไข)</option>
+                            <option value="REJECTED">ไม่อนุมัติ</option>
+                          </optgroup>
                         </select>
                       </div>
                     </th>
@@ -649,7 +739,7 @@ const ProjectsPage = () => {
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
                         <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
                           <input type="text" value={row.relateDrawing} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
-                        </td>
+                        </td>                      
                         <td style={{ padding: "6px 10px", fontSize: 10 }}>
                           {isWorkRequest ? (
                             <div style={{ width: "100%", padding: "4px 6px", fontSize: 10, color: "#92400e", fontWeight: 600, backgroundColor: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "4px" }}>
@@ -669,7 +759,7 @@ const ProjectsPage = () => {
                           <input type="date" value={row.dueDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "dueDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
                         </td>
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
-                          {row.statusDwg ? translateStatus(row.statusDwg) : ""}
+                          {row.statusDwg ? translateStatus(row.statusDwg, isWorkRequest) : ""}
                         </td>
                         <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
                           {row.link ? (<a href={row.link} target="_blank" rel="noopener noreferrer" style={{ color: "#3b82f6", textDecoration: "none", fontSize: "16px" }} title="คลิกเพื่อดูไฟล์">📎</a>) : (<span style={{ color: "#9ca3af" }}>-</span>)}
@@ -678,19 +768,44 @@ const ProjectsPage = () => {
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
                           {row.lastRev || "00"}
                         </td>
-                        <td style={{ padding: "2px 3px", fontSize: 10, textAlign: "center" }}>
+                        <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
                           {isWorkRequest && row.statusDwg !== 'PENDING_BIM' ? (
-                            <span style={{ fontSize: 10, color: "#dc2626", fontWeight: 600, padding: "3px 8px", background: "#fee2e2", borderRadius: "3px" }}>
+                            // Work Request ที่ไม่ใช่ PENDING_BIM → แสดง "🔒 ล็อค"
+                            <span style={{ 
+                              fontSize: 10, 
+                              color: "#dc2626",
+                              fontWeight: 600,
+                              padding: "3px 8px",
+                              background: "#fee2e2",
+                              borderRadius: "3px"
+                            }}>
                               🔒 ล็อค
                             </span>
                           ) : row.statusDwg && !isWorkRequest ? (
+                            // เอกสาร RFA ที่มีสถานะแล้ว → แสดง "-"
                             <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
                           ) : isNewRow ? (
+                            // แถวใหม่ → แสดง "ใหม่"
                             <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
                           ) : isEditing ? (
-                            <button onClick={() => handleCancelEdit(idx)} style={{ padding: "3px 10px", background: "#10b981", border: "none", borderRadius: "3px", fontSize: 10, cursor: "pointer", color: "white", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)", margin: "0 auto", display: "block" }}>บันทึก</button>
+                            // กำลังแก้ไข → ปุ่มบันทึก
+                            <button 
+                              onClick={() => handleCancelEdit(idx)}
+                              style={{ padding: "3px 10px", background: "#10b981", border: "none", borderRadius: "3px", fontSize: 10, cursor: "pointer", color: "white", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)", margin: "0 auto", display: "block" }}
+                            >
+                              บันทึก
+                            </button>
                           ) : (
-                            <button onClick={() => handleEdit(idx)} style={{ padding: "4px", background: "none", border: "none", borderRadius: "3px", cursor: "pointer", color: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }} title="แก้ไข"><svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg></button>
+                            // ปกติ → ปุ่ม Edit
+                            <button 
+                              onClick={() => handleEdit(idx)}
+                              style={{ padding: "4px", background: "none", border: "none", borderRadius: "3px", cursor: "pointer", color: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}
+                              title="แก้ไข"
+                            >
+                              <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                              </svg>
+                            </button>
                           )}
                         </td>
                         <td style={{ padding: "2px 4px", fontSize: 10, textAlign: "center" }}>
@@ -705,6 +820,7 @@ const ProjectsPage = () => {
                             return (<button onClick={() => handleDelete(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: "#ef4444", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }} title="ลบ"><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg></button>);
                           })()}
                         </td>
+
                       </tr>
                     );
                   })}
@@ -732,6 +848,11 @@ const ProjectsPage = () => {
       <ExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} onExport={handleExport} projects={projects} currentProjectId={selectedProject} />
       <ImportExcelModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} projectName={projects.find(p => p.id === selectedProject)?.name || 'Project'} activities={activities.map(a => a.activityName)} onImport={(tasks) => { console.log('Imported tasks:', tasks); setShowImportModal(false); }} />
       <ViewDeletedModal isOpen={showDeletedModal} onClose={() => setShowDeletedModal(false)} onRestore={handleRestoreComplete} currentProjectId={selectedProject} />
+      <ErrorModal
+        isOpen={showErrorModal}
+        message={errorMessage}
+        onClose={() => setShowErrorModal(false)}
+      />   
     </div>
   );
 };

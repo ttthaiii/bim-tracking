@@ -1,4 +1,4 @@
-'use client';
+/*'use client';
 
 import Link from 'next/link';
 import PageLayout from '@/components/shared/PageLayout';
@@ -49,5 +49,32 @@ export default function LandingPage() {
         ))}
       </div>
     </PageLayout>
+  );
+}
+*/
+// frontend/src/app/page.tsx
+
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function HomePage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace('/dashboard');
+  }, [router]);
+
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      fontFamily: 'sans-serif'
+    }}>
+      <p>กำลังเปลี่ยนเส้นทางไปยังแดชบอร์ด...</p>
+    </div>
   );
 }

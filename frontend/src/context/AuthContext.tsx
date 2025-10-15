@@ -5,11 +5,11 @@ import { useRouter, usePathname } from 'next/navigation';
 import { User as AppUser } from '@/types/database';
 
 interface AuthContextType {
-  currentUser: boolean; 
+  currentUser: boolean;
   appUser: AppUser | null;
   loading: boolean;
-  logout: () => void; 
-  loginUser: (userData: AppUser) => void; 
+  logout: () => void;
+  loginUser: (userData: AppUser) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('loggedInUser', JSON.stringify(userData));
     setCurrentUser(true);
     setAppUser(userData);
-    router.push('/'); // Changed redirect to home page
+    router.push('/dashboard'); // Changed redirect to home page
   };
 
   // Redirect logic
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!currentUser && pathname !== '/login') {
         router.push('/login');
       } else if (currentUser && pathname === '/login') {
-        router.push('/'); // Changed redirect to home page
+        router.push('/dashboard');
       }
     }
   }, [currentUser, loading, pathname, router]);

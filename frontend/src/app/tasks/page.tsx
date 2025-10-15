@@ -12,6 +12,7 @@ import Badge from '@/components/ui/Badge';
 import ProgressBar from '@/components/ui/ProgressBar';
 import Modal from '@/components/ui/Modal';
 import SuccessModal from '@/components/ui/SuccessModal';
+import ErrorModal from '@/components/modals/ErrorModal';
 import RelateWorkSelect from './components/RelateWorkSelect';
 import AssigneeSelect from './components/AssigneeSelect';
 import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
@@ -81,6 +82,9 @@ export default function TaskAssignment() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successNewCount, setSuccessNewCount] = useState(0);
   const [successUpdateCount, setSuccessUpdateCount] = useState(0);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [rows, setRows] = useState<SubtaskRow[]>([
    
     {
@@ -147,16 +151,16 @@ export default function TaskAssignment() {
   // ✅ Function บันทึกการแก้ไขใน State เท่านั้น (ไม่บันทึกลงฐานข้อมูล)
   const handleSaveEditToState = () => {
     if (!editingSubtaskId || !editingData) return;
-
+  
     const subtaskIndex = existingSubtasks.findIndex(s => s.id === editingSubtaskId);
     if (subtaskIndex === -1) return;
-
+  
     // อัพเดท existing subtasks โดยตรง
     setExistingSubtasks(prev => {
       const updated = [...prev];
       updated[subtaskIndex] = {
         ...updated[subtaskIndex],
-        // อัพเดทข้อมูลที่แก้ไข
+        // ❌ ไม่อัพเดท activity - คงค่าเดิมไว้
         subTaskCategory: editingData.relateWork,
         item: editingData.item || '',
         internalRev: editingData.internalRev ? String(editingData.internalRev) : '',
@@ -166,12 +170,12 @@ export default function TaskAssignment() {
       };
       return updated;
     });
-
+  
     // เก็บข้อมูลที่แก้ไขสำหรับการบันทึกภายหลัง
     setEditedSubtasks(prev => ({
       ...prev,
       [editingSubtaskId]: {
-        ...existingSubtasks.find(s => s.id === editingSubtaskId), // ✅ เพิ่มข้อมูลเดิม
+        ...existingSubtasks.find(s => s.id === editingSubtaskId),
         id: editingSubtaskId,
         subTaskNumber: existingSubtasks.find(s => s.id === editingSubtaskId)?.subTaskNumber || '',
         taskName: editingData.relateDrawingName,
@@ -180,13 +184,13 @@ export default function TaskAssignment() {
         internalRev: editingData.internalRev ? String(editingData.internalRev) : '',
         subTaskScale: editingData.workScale,
         subTaskAssignee: editingData.assignee,
-        // 🔧 เพิ่มข้อมูลเหล่านี้
-        activity: editingData.activity,
+        // ❌ ไม่รวม activity ในข้อมูลที่แก้ไข
+        // activity: editingData.activity, // ลบบรรทัดนี้ออก
         relateDrawing: editingData.relateDrawing,
         _isEdited: true
       }
     }));
-
+  
     // ออกจาก Edit Mode
     handleCancelEdit();
   };
@@ -476,18 +480,22 @@ useEffect(() => {
     const hasNewItems = getValidRows().length > 0;
     const hasEditedItems = Object.keys(editedSubtasks).length > 0;
     
+    // --- 3. แก้ไข Alert ---
     if (!hasNewItems && !hasEditedItems) {
-      alert('กรุณากรอกข้อมูลใหม่หรือแก้ไขข้อมูลเดิมอย่างน้อย 1 รายการ');
-      return;
+        setErrorMessage('กรุณากรอกข้อมูลใหม่หรือแก้ไขข้อมูลเดิมอย่างน้อย 1 รายการ');
+        setShowErrorModal(true);
+        return;
     }
 
     if (!validation.valid && hasNewItems) {
-      alert(validation.message);
-      return;
+        setErrorMessage(validation.message || 'ข้อมูลไม่ถูกต้อง');
+        setShowErrorModal(true);
+        return;
     }
+    // --------------------
     
     setShowConfirmModal(true);
-  };
+};
 
   const getValidRows = () => {
   return rows.filter(row => {
@@ -536,6 +544,7 @@ useEffect(() => {
 
   // ✅ Function สำหรับลบ Task
   const handleDeleteTask = async (taskId: string) => {
+    // confirm() เป็น pop-up สำหรับ "ยืนยัน" ไม่ใช่ "แจ้งเตือน" จะคงไว้ตามเดิม
     if (!confirm('คุณต้องการลบ Task นี้หรือไม่?')) return;
 
     try {
@@ -551,11 +560,11 @@ useEffect(() => {
         { merge: true }
       );
 
-      // ✅ Invalidate Cache ทันที
+      // Invalidate Cache ทันที
       const cacheKey = `tasks_projectId:${selectedProject}`;
       invalidateCache(cacheKey);
 
-      // Reload ข้อมูล
+      // --- Reload ข้อมูล (โค้ดส่วนนี้เหมือนเดิม) ---
       const tasksCol = collection(db, 'tasks');
       const q = query(
         tasksCol,
@@ -583,11 +592,16 @@ useEffect(() => {
       );
       setExistingSubtasks(updatedSubtasks);
 
-      alert('ลบ Task สำเร็จ!');
+      setSuccessMessage('ลบ Task สำเร็จ!');
+      setShowSuccessModal(true);
+      // ------------------------------------
 
     } catch (error) {
       console.error('Error deleting task:', error);
-      alert('เกิดข้อผิดพลาดในการลบ');
+      // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
+      setErrorMessage('เกิดข้อผิดพลาดในการลบ Task');
+      setShowErrorModal(true);
+      // -----------------------------------
     } finally {
       setIsSaving(false);
     }
@@ -643,7 +657,7 @@ useEffect(() => {
         await setDoc(doc(db, 'tasks', row.relateDrawing, 'subtasks', subTaskNumber), docData);
       }
 
-      // 🔧 แก้ไขการบันทึกรายการที่แก้ไข - วิธีใหม่ที่ถูกต้อง
+      // แก้ไขการบันทึกรายการที่แก้ไข
       for (const editedSubtask of editedItems) {
         const originalSubtask = existingSubtasks.find(s => s.id === editedSubtask.id);
         if (!originalSubtask) {
@@ -651,13 +665,6 @@ useEffect(() => {
           continue;
         }
 
-        console.log('🔍 Processing edited subtask:', {
-          originalSubtask: originalSubtask,
-          editedSubtask: editedSubtask,
-          originalId: originalSubtask.id
-        });
-
-        // 🔧 หา taskId ที่ถูกต้องจาก editedSubtask.relateDrawing
         const taskId = editedSubtask.relateDrawing;
         
         if (!taskId) {
@@ -666,8 +673,6 @@ useEffect(() => {
         }
 
         const docPath = `tasks/${taskId}/subtasks/${originalSubtask.subTaskNumber}`;
-        console.log('📍 Document path:', docPath);
-
         try {
           const docData = {
             taskName: editedSubtask.taskName,
@@ -679,57 +684,36 @@ useEffect(() => {
             subTaskAssignee: editedSubtask.subTaskAssignee,
             lastUpdate: Timestamp.now()
           };
-
-          console.log('💾 Saving document with data:', docData);
-
           await setDoc(
             doc(db, 'tasks', taskId, 'subtasks', originalSubtask.subTaskNumber),
             docData,
             { merge: true }
           );
-          
-          console.log('✅ บันทึก editedSubtask สำเร็จ:', docPath);
         } catch (docError) {
           console.error('❌ เกิดข้อผิดพลาดในการบันทึก editedSubtask:', docError);
-          console.error('Document path:', docPath);
-          console.error('TaskId used:', taskId);
           throw docError;
         }
       }
 
-      // เก็บจำนวนรายการที่บันทึก
       const newItemsCount = rowsToSave.length;
       const updateItemsCount = editedItems.length;
 
-      // Invalidate Cache
-      const cacheKey = `subtasks_projectId:${selectedProject}`;
-      invalidateCache(cacheKey);
+      invalidateCache(`subtasks_projectId:${selectedProject}`);
       
       setShowConfirmModal(false);
       
-      // รีเซ็ต State
       setRows([{
-        id: '1',
-        subtaskId: '',
-        relateDrawing: '',
-        relateDrawingName: '',
-        activity: '',
-        relateWork: '',
-        item: '',
-        internalRev: null,
-        workScale: 'S',
-        assignee: '',
-        deadline: '',
-        progress: 0
+        id: '1', subtaskId: '', relateDrawing: '', relateDrawingName: '', activity: '',
+        relateWork: '', item: '', internalRev: null, workScale: 'S',
+        assignee: '', deadline: '', progress: 0
       }]);
       
-      setEditedSubtasks({}); // รีเซ็ตข้อมูลที่แก้ไข
+      setEditedSubtasks({});
       
       setSuccessNewCount(newItemsCount);
       setSuccessUpdateCount(updateItemsCount);
       setShowSuccessModal(true);
       
-      // Reload ข้อมูล Subtasks ใหม่
       const taskIds = tasks.map(t => t.id);
       const updatedSubtasks = await getCachedSubtasks(
         selectedProject, 
@@ -742,7 +726,10 @@ useEffect(() => {
     } catch (error) {
       console.error('Error saving subtasks:', error);
       const errorMessage = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ';
-      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + errorMessage);
+      // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
+      setErrorMessage('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + errorMessage);
+      setShowErrorModal(true);
+      // ------------------------------------
     } finally {
       setIsSaving(false);
     } 
@@ -845,7 +832,8 @@ useEffect(() => {
     
     setEditingSubtaskId(subtask.id);
     setEditingData({
-      activity: task?.taskCategory || '',
+      // ❌ ไม่ใส่ activity เพื่อป้องกันการแก้ไข
+      activity: '', // หรือจะใส่ task?.taskCategory || '' ก็ได้ แต่ไม่ควรให้แก้ไขได้
       relateDrawing: task?.id || '',
       relateDrawingName: subtask.taskName,
       relateWork: subtask.subTaskCategory,
@@ -865,19 +853,25 @@ useEffect(() => {
   // ✅ Function อัพเดทข้อมูลใน Edit Mode
   const handleUpdateEditData = (field: string, value: any) => {
     if (!editingData) return;
-
+  
+    // ✅ เพิ่มการตรวจสอบ: ถ้าพยายามแก้ไข activity ให้ return ทันที
+    if (field === 'activity') {
+      console.warn('Cannot edit Activity field - it is locked');
+      return;
+    }
+  
     setEditingData(prev => {
       if (!prev) return prev;
       
       const updated = { ...prev, [field]: value };
       
-      // ถ้าเปลี่ยน Activity → รีเซ็ต Relate Drawing และ Relate Work
-      if (field === 'activity') {
-        updated.relateDrawing = '';
-        updated.relateDrawingName = '';
-        updated.relateWork = '';
-        updated.assignee = '';
-      }
+      // ❌ ลบส่วนนี้ออก เพราะ activity ไม่ควรเปลี่ยนแปลงได้
+      // if (field === 'activity') {
+      //   updated.relateDrawing = '';
+      //   updated.relateDrawingName = '';
+      //   updated.relateWork = '';
+      //   updated.assignee = '';
+      // }
       
       // ถ้าเปลี่ยน Relate Drawing
       if (field === 'relateDrawing') {
@@ -889,9 +883,12 @@ useEffect(() => {
         const selectedProjectData = projects.find(p => p.id === selectedProject);
         const projectName = selectedProjectData?.name || '';
         
+        // ใช้ task?.taskCategory แทน updated.activity
+        const taskCategory = tasks.find(t => t.taskName === editingData.relateDrawingName)?.taskCategory || '';
+        
         if (
           projectName === "Bim room" &&
-          updated.activity === "ลางาน" &&
+          taskCategory === "ลางาน" &&
           task?.taskName === "ลางาน"
         ) {
           updated.assignee = 'all';
@@ -932,12 +929,11 @@ useEffect(() => {
       const subtask = existingSubtasks.find(s => s.id === editingSubtaskId);
       if (!subtask) return;
 
-      // 🔧 แก้ไขตรงนี้: ใช้ Task ID ที่ถูกต้อง
-      const taskId = editingData.relateDrawing; // นี่คือ Task ID ที่ถูกต้องแล้ว
+      const taskId = editingData.relateDrawing;
       
       // บันทึกลง Firestore
       await setDoc(
-        doc(db, 'tasks', taskId, 'subtasks', subtask.subTaskNumber), // ✅ ใช้ taskId แทน
+        doc(db, 'tasks', taskId, 'subtasks', subtask.subTaskNumber),
         {
           taskName: editingData.relateDrawingName,
           subTaskName: editingData.relateWork,
@@ -952,8 +948,7 @@ useEffect(() => {
       );
 
       // Invalidate Cache
-      const cacheKey = `subtasks_projectId:${selectedProject}`;
-      invalidateCache(cacheKey);
+      invalidateCache(`subtasks_projectId:${selectedProject}`);
 
       // รีเฟรชข้อมูล
       const taskIds = tasks.map(t => t.id);
@@ -977,7 +972,10 @@ useEffect(() => {
 
     } catch (error) {
       console.error('Error saving edit:', error);
-      alert('เกิดข้อผิดพลาดในการบันทึก');
+      // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
+      setErrorMessage('เกิดข้อผิดพลาดในการบันทึกข้อมูลที่แก้ไข');
+      setShowErrorModal(true);
+      // -----------------------------------
     } finally {
       setIsSaving(false);
     }
@@ -1003,7 +1001,10 @@ useEffect(() => {
       // หา Task ID จาก taskName
       const task = tasks.find(t => t.taskName === deletingSubtask.taskName);
       if (!task) {
-        alert('ไม่พบ Task ที่เกี่ยวข้อง');
+        // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
+        setErrorMessage('ไม่พบ Task ที่เกี่ยวข้องกับ Subtask นี้');
+        setShowErrorModal(true);
+        // -----------------------------------
         return;
       }
 
@@ -1020,8 +1021,7 @@ useEffect(() => {
       console.log('✅ Soft deleted subtask:', deletingSubtask.subTaskNumber);
 
       // Invalidate Cache
-      const cacheKey = `subtasks_projectId:${selectedProject}`;
-      invalidateCache(cacheKey);
+      invalidateCache(`subtasks_projectId:${selectedProject}`);
 
       // รีเฟรชข้อมูล
       const taskIds = tasks.map(t => t.id);
@@ -1037,11 +1037,17 @@ useEffect(() => {
       setShowDeleteConfirmModal(false);
       setDeletingSubtask(null);
 
-      alert('ลบ Subtask สำเร็จ!');
+      // --- ส่วนที่แก้ไข: เรียกใช้ SuccessModal ---
+      setSuccessMessage('ลบ Subtask สำเร็จ!');
+      setShowSuccessModal(true);
+      // ------------------------------------
 
     } catch (error) {
       console.error('❌ Error deleting subtask:', error);
-      alert('เกิดข้อผิดพลาดในการลบ');
+      // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
+      setErrorMessage('เกิดข้อผิดพลาดในการลบ Subtask');
+      setShowErrorModal(true);
+      // -----------------------------------
     } finally {
       setIsSaving(false);
     }
@@ -1297,15 +1303,26 @@ useEffect(() => {
       {/* ACTIVITY - แก้ไขได้ */}
       <td className="px-2 py-2 text-xs">
         {isEditing ? (
-          <Select
-            options={uniqueCategories.map(cat => ({ value: cat, label: cat }))}
-            value={editingData?.activity || ''}
-            onChange={(value) => handleUpdateEditData('activity', value)}
-            placeholder="Select"
-          />
+          // แสดงเป็น text ธรรมดาพร้อม lock icon แทนที่จะเป็น Select
+          <div className="flex items-center space-x-1 text-gray-500">
+            <svg 
+              className="w-3 h-3 text-gray-400" 
+              fill="none" 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              strokeWidth="2" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <span className="text-gray-600" title="ไม่สามารถแก้ไข Activity ได้">
+              {task?.taskCategory || '-'}
+            </span>
+          </div>
         ) : (
           <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-900'}`} title={task?.taskCategory || ''}>
-            {/* 🔧 แก้ไขตรงนี้: แสดงข้อมูลที่แก้ไขแล้ว */}
+            {/* แสดงข้อมูลที่แก้ไขแล้ว */}
             {isEdited && editedSubtasks[subtask.id]?.activity 
               ? editedSubtasks[subtask.id].activity
               : task?.taskCategory || '-'

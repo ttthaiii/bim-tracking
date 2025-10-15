@@ -20,23 +20,34 @@ export default function AddRevisionModal({ isOpen, tasks, onSelect, onClose }: A
 
   // กรองเฉพาะเอกสารที่ต้องแก้ไข
 // กรองเฉพาะเอกสารที่ต้องแก้ไข และยังไม่มี Rev. ถัดไปในตาราง
+// ✅ กรองเฉพาะเอกสารที่ต้องแก้ไข และยังไม่มี Rev. ถัดไปในตาราง
 const needsRevision = tasks.filter(t => {
-  // ต้องมีสถานะที่ต้องแก้ไข
-  if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED') {
-    return false;
+  const isWorkRequest = t.taskCategory === 'Work Request';
+  
+  // ✅ เงื่อนไข 1: เช็คสถานะตามประเภทเอกสาร
+  if (isWorkRequest) {
+    // Work Request: ต้องเป็นสถานะ REVISION_REQUESTED
+    if (t.currentStep !== 'REVISION_REQUESTED') {
+      return false;
+    }
+  } else {
+    // เอกสาร RFA: ต้องเป็นสถานะ APPROVED_REVISION_REQUIRED หรือ REJECTED
+    if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED') {
+      return false;
+    }
   }
   
-  // ชื่อเอกสารต้นฉบับ (ลบ REV.xx ออก)
+  // ✅ เงื่อนไข 2: ชื่อเอกสารต้นฉบับ (ลบ REV.xx ออก)
   const baseName = t.taskName.replace(/\s+REV\.\d+$/i, '');
   const currentRev = parseInt(t.rev || '0');
   const nextRev = String(currentRev + 1).padStart(2, '0');
   const nextRevName = `${baseName} REV.${nextRev}`;
   
-  // เช็คว่ามี Rev. ถัดไปในตารางแล้วหรือยัง
+  // ✅ เงื่อนไข 3: เช็คว่ามี Rev. ถัดไปในตารางแล้วหรือยัง
   const hasNextRev = tasks.some(task => 
     task.taskName === nextRevName || 
-    task.taskName.replace(/\s+REV\.\d+$/i, '') === baseName && 
-    parseInt(task.rev || '0') > currentRev
+    (task.taskName.replace(/\s+REV\.\d+$/i, '') === baseName && 
+     parseInt(task.rev || '0') > currentRev)
   );
   
   return !hasNextRev;
@@ -154,12 +165,24 @@ const needsRevision = tasks.filter(t => {
                         display: 'inline-block',
                         padding: '3px 8px',
                         borderRadius: '4px',
-                        background: task.currentStep === 'REJECTED' ? '#fee2e2' : '#fef3c7',
-                        color: task.currentStep === 'REJECTED' ? '#991b1b' : '#92400e',
+                        background: task.currentStep === 'REJECTED' 
+                          ? '#fee2e2' 
+                          : task.currentStep === 'REVISION_REQUESTED' 
+                          ? '#fef9c3' 
+                          : '#fef3c7',
+                        color: task.currentStep === 'REJECTED' 
+                          ? '#991b1b' 
+                          : task.currentStep === 'REVISION_REQUESTED' 
+                          ? '#92400e' 
+                          : '#92400e',
                         fontSize: '10px',
                         fontWeight: 500
                       }}>
-                        {task.currentStep === 'REJECTED' ? 'ไม่อนุมัติ' : 'ต้องแก้ไข'}
+                        {task.currentStep === 'REJECTED' 
+                          ? 'ไม่อนุมัติ' 
+                          : task.currentStep === 'REVISION_REQUESTED' 
+                          ? 'ขอแก้ไข' 
+                          : 'ต้องแก้ไข'}
                       </span>
                     </div>
                   </div>

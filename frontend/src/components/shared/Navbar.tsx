@@ -8,7 +8,7 @@ import { ConfirmationPopup } from '@/components/ConfirmationPopup'; // Import Co
 import { useState } from 'react';
 
 const navItems = [
-  { name: 'Home', path: '/' },
+  //{ name: 'Home', path: '/' },
   { name: 'Projects Planing', path: '/projects' },
   { name: 'Task Assignment', path: '/tasks' }, 
   { name: 'Daily Report', path: '/daily-report' },

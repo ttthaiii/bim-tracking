@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import SuccessModal from './SuccessModal';
+import ErrorModal from './ErrorModal';
 
 interface ImportExcelModalProps {
   isOpen: boolean;
@@ -20,8 +22,60 @@ export default function ImportExcelModal({
   const [step, setStep] = useState(1);
   // const [parsedTasks, setParsedTasks] = useState<any[]>([]); // Warning: Not used
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   if (!isOpen) return null;
+  
+  const handleImport = async () => {
+    if (!selectedFile) {
+      setErrorMessage('กรุณาเลือกไฟล์ Excel ที่ต้องการนำเข้าก่อน');
+      setShowErrorModal(true);
+      return;
+    }
+
+    try {
+      const reader = new FileReader();
+      reader.readAsArrayBuffer(selectedFile);
+      reader.onload = async () => {
+        const buffer = reader.result as ArrayBuffer;
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+        const worksheet = workbook.worksheets[0];
+        
+        const tasks: any[] = [];
+        worksheet.eachRow((row, rowNumber) => {
+          if (rowNumber > 7) { // สมมติว่าข้อมูลเริ่มที่แถว 8 (หลังตัวอย่าง 3 แถว)
+            const taskName = row.getCell(1).value?.toString() || '';
+            const activity = row.getCell(2).value?.toString() || '';
+            const startDate = row.getCell(3).value;
+            const dueDate = row.getCell(4).value;
+
+            if (taskName && activity && startDate && dueDate) {
+              tasks.push({
+                relateDrawing: taskName,
+                activity: activity,
+                startDate: new Date(startDate as string).toISOString().split('T')[0],
+                dueDate: new Date(dueDate as string).toISOString().split('T')[0],
+              });
+            }
+          }
+        });
+        
+        onImport(tasks);
+        setSuccessMessage(`นำเข้าข้อมูลจำนวน ${tasks.length} รายการสำเร็จ!`);
+        setShowSuccessModal(true);
+        // onClose(); // ปิด modal ทันทีที่ import สำเร็จ
+      };
+    } catch (error) {
+      console.error("Error parsing Excel file:", error);
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      setErrorMessage('เกิดข้อผิดพลาดในการอ่านไฟล์ Excel: ' + message);
+      setShowErrorModal(true);
+    }
+  };
 
   const handleDownloadTemplate = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -183,194 +237,241 @@ export default function ImportExcelModal({
   };
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 50,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)'
-    }}>
+    <>
       <div style={{
-        background: '#fff',
-        borderRadius: '8px',
-        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
-        width: '90%',
-        maxWidth: '600px',
-        maxHeight: '80vh',
-        overflow: 'hidden',
+        position: 'fixed',
+        inset: 0,
         display: 'flex',
-        flexDirection: 'column'
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)'
       }}>
         <div style={{
-          padding: '20px 24px',
-          borderBottom: '1px solid #e5e7eb',
-          background: '#f9fafb'
-        }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#111827', margin: 0 }}>
-            📥 Import Excel
-          </h2>
-          <p style={{ fontSize: '14px', color: '#6b7280', margin: '8px 0 0 0' }}>
-            Step {step} of 3
-          </p>
-        </div>
-
-        <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
-          {step === 1 && (
-            <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>
-                ขั้นตอนที่ 1: ดาวน์โหลด Template
-              </h3>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
-                กรุณาดาวน์โหลด Excel Template และกรอกข้อมูลตามรูปแบบที่กำหนด
-              </p>
-              
-              <button
-                onClick={handleDownloadTemplate}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  background: '#059669',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  marginBottom: '16px'
-                }}
-              >
-                📥 ดาวน์โหลด Template
-              </button>
-
-              <div style={{
-                padding: '16px',
-                background: '#fef3c7',
-                borderRadius: '6px',
-                border: '1px solid #fbbf24'
-              }}>
-                <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>
-                  {/* --- แก้ไข: เปลี่ยน "" เป็น &ldquo;&rdquo; --- */}
-                  💡 <strong>หมายเหตุ:</strong> หลังจากดาวน์โหลดแล้ว กรุณากรอกข้อมูลใน Excel และกลับมากดปุ่ม &ldquo;ถัดไป&rdquo;
-                </p>
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>
-                ขั้นตอนที่ 2: อัปโหลดไฟล์
-              </h3>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
-                เลือกไฟล์ Excel ที่กรอกข้อมูลแล้ว
-              </p>
-              
-              <div style={{
-                border: '2px dashed #d1d5db',
-                borderRadius: '8px',
-                padding: '40px',
-                textAlign: 'center',
-                background: '#f9fafb'
-              }}>
-                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
-                  {selectedFile ? `✅ ${selectedFile.name}` : '📄 ลากไฟล์มาวางที่นี่ หรือ'}
-                </p>
-                <input 
-                  type="file" 
-                  accept=".xlsx"
-                  onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
-                  style={{ display: 'none' }}
-                  id="file-upload"
-                />
-                <label htmlFor="file-upload" style={{ cursor: 'pointer' }}>
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      padding: '10px 20px',
-                      background: '#3b82f6',
-                      color: 'white',
-                      borderRadius: '6px',
-                      fontSize: '14px',
-                      fontWeight: 500,
-                      transition: 'background 0.2s'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#2563eb'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = '#3b82f6'}
-                  >
-                    เลือกไฟล์
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div>
-              <h3>ขั้นตอนที่ 3: ตรวจสอบข้อมูล</h3>
-              <p>Preview จะแสดงที่นี่</p>
-            </div>
-          )}
-        </div>
-
-        <div style={{
-          padding: '16px 24px',
-          borderTop: '1px solid #e5e7eb',
-          background: '#f9fafb',
+          background: '#fff',
+          borderRadius: '8px',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+          width: '90%',
+          maxWidth: '600px',
+          maxHeight: '80vh',
+          overflow: 'hidden',
           display: 'flex',
-          justifyContent: 'space-between'
+          flexDirection: 'column'
         }}>
-          <button onClick={onClose} style={{
-            padding: '10px 20px',
-            border: '1px solid #d1d5db',
-            borderRadius: '6px',
-            fontSize: '14px',
-            fontWeight: 500,
-            color: '#374151',
-            background: '#fff',
-            cursor: 'pointer'
+          <div style={{
+            padding: '20px 24px',
+            borderBottom: '1px solid #e5e7eb',
+            background: '#f9fafb'
           }}>
-            ยกเลิก
-          </button>
-          
-          <div style={{ display: 'flex', gap: '12px' }}>
-            {step > 1 && (
-              <button onClick={() => setStep(step - 1)} style={{
-                padding: '10px 20px',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontWeight: 500,
-                color: '#374151',
-                background: '#fff',
-                cursor: 'pointer'
-              }}>
-                ← ย้อนกลับ
-              </button>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#111827', margin: 0 }}>
+              📥 Import Excel
+            </h2>
+            <p style={{ fontSize: '14px', color: '#6b7280', margin: '8px 0 0 0' }}>
+              Step {step} of 3
+            </p>
+          </div>
+
+          <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+            {step === 1 && (
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>
+                  ขั้นตอนที่ 1: ดาวน์โหลด Template
+                </h3>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
+                  กรุณาดาวน์โหลด Excel Template และกรอกข้อมูลตามรูปแบบที่กำหนด
+                </p>
+                
+                <button
+                  onClick={handleDownloadTemplate}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: '#059669',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    marginBottom: '16px'
+                  }}
+                >
+                  📥 ดาวน์โหลด Template
+                </button>
+
+                <div style={{
+                  padding: '16px',
+                  background: '#fef3c7',
+                  borderRadius: '6px',
+                  border: '1px solid #fbbf24'
+                }}>
+                  <p style={{ fontSize: '13px', color: '#92400e', margin: 0 }}>
+                    💡 <strong>หมายเหตุ:</strong> หลังจากดาวน์โหลดแล้ว กรุณากรอกข้อมูลใน Excel และกลับมากดปุ่ม &ldquo;ถัดไป&rdquo;
+                  </p>
+                </div>
+              </div>
             )}
+
+            {step === 2 && (
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>
+                  ขั้นตอนที่ 2: อัปโหลดไฟล์
+                </h3>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
+                  เลือกไฟล์ Excel ที่กรอกข้อมูลแล้ว
+                </p>
+                
+                <div style={{
+                  border: '2px dashed #d1d5db',
+                  borderRadius: '8px',
+                  padding: '40px',
+                  textAlign: 'center',
+                  background: '#f9fafb'
+                }}>
+                  <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
+                    {selectedFile ? `✅ ${selectedFile.name}` : '📄 ลากไฟล์มาวางที่นี่ หรือ'}
+                  </p>
+                  <input 
+                    type="file" 
+                    accept=".xlsx"
+                    onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+                    style={{ display: 'none' }}
+                    id="file-upload"
+                  />
+                  <label htmlFor="file-upload" style={{ cursor: 'pointer' }}>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '10px 20px',
+                        background: '#3b82f6',
+                        color: 'white',
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        fontWeight: 500,
+                        transition: 'background 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#2563eb'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = '#3b82f6'}
+                    >
+                      เลือกไฟล์
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>ขั้นตอนที่ 3: ยืนยันการนำเข้าข้อมูล</h3>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
+                  คุณได้เลือกไฟล์: <strong>{selectedFile?.name || 'ไม่มีไฟล์'}</strong>
+                </p>
+                <p style={{ fontSize: '14px', color: '#6b7280' }}>
+                  เมื่อกดปุ่ม ยืนยันการนำเข้า ข้อมูลจากไฟล์จะถูกเพิ่มเข้าไปในโปรเจกต์
+                </p>
+                 <div style={{
+                  marginTop: '24px',
+                  padding: '16px',
+                  background: '#fefce8',
+                  borderRadius: '6px',
+                  border: '1px solid #facc15'
+                }}>
+                  <p style={{ fontSize: '13px', color: '#854d0e', margin: 0 }}>
+                    ⚠️ <strong>คำเตือน:</strong> กรุณาตรวจสอบข้อมูลในไฟล์ให้ถูกต้องก่อนดำเนินการต่อ
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{
+            padding: '16px 24px',
+            borderTop: '1px solid #e5e7eb',
+            background: '#f9fafb',
+            display: 'flex',
+            justifyContent: 'space-between'
+          }}>
+            <button onClick={onClose} style={{
+              padding: '10px 20px',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: 500,
+              color: '#374151',
+              background: '#fff',
+              cursor: 'pointer'
+            }}>
+              ยกเลิก
+            </button>
             
-            {step < 3 && (
-              <button
-                onClick={() => setStep(step + 1)}
-                disabled={step === 2 && !selectedFile}
-                style={{
+            <div style={{ display: 'flex', gap: '12px' }}>
+              {step > 1 && (
+                <button onClick={() => setStep(step - 1)} style={{
                   padding: '10px 20px',
-                  border: 'none',
+                  border: '1px solid #d1d5db',
                   borderRadius: '6px',
                   fontSize: '14px',
                   fontWeight: 500,
-                  color: '#fff',
-                  background: (step === 2 && !selectedFile) ? '#9ca3af' : '#3b82f6',
-                  cursor: (step === 2 && !selectedFile) ? 'not-allowed' : 'pointer'
-                }}
-              >
-                ถัดไป →
-              </button>
-            )}
+                  color: '#374151',
+                  background: '#fff',
+                  cursor: 'pointer'
+                }}>
+                  ← ย้อนกลับ
+                </button>
+              )}
+              
+              {step < 3 ? (
+                <button
+                  onClick={() => setStep(step + 1)}
+                  disabled={step === 2 && !selectedFile}
+                  style={{
+                    padding: '10px 20px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: '#fff',
+                    background: (step === 2 && !selectedFile) ? '#9ca3af' : '#3b82f6',
+                    cursor: (step === 2 && !selectedFile) ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  ถัดไป →
+                </button>
+              ) : (
+                 <button
+                  onClick={handleImport}
+                  style={{
+                    padding: '10px 20px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: '#fff',
+                    background: '#059669',
+                    cursor: 'pointer'
+                  }}
+                >
+                  ยืนยันการนำเข้า
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      <SuccessModal 
+        isOpen={showSuccessModal} 
+        message={successMessage} 
+        onClose={() => {
+          setShowSuccessModal(false);
+          onClose();
+        }} 
+      />
+      <ErrorModal 
+        isOpen={showErrorModal} 
+        message={errorMessage} 
+        onClose={() => setShowErrorModal(false)} 
+      />
+    </>
   );
 }

@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import dynamic from 'next/dynamic';
 
+import SuccessModal from '@/components/modals/SuccessModal';
+import ErrorModal from '@/components/modals/ErrorModal';
+
 // Dynamic import Calendar with no SSR
 const Calendar = dynamic(
   () => import('react-calendar'),
@@ -143,6 +146,10 @@ export default function DailyReport() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   // historyLogs will now be grouped by timestamp
   const [historyLogsGrouped, setHistoryLogsGrouped] = useState<Record<string, DailyReportEntry[]>>({});
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const handleShowHistory = () => {
     // กรองข้อมูลสำหรับประวัติ: ใช้ assignDate เป็นหลัก
@@ -624,25 +631,20 @@ export default function DailyReport() {
       return;
     }
 
-    // ตรวจสอบว่าวันที่ที่เลือกเป็นวันที่อนาคตหรือไม่
     const selectedDate = workDate;
     const today = formatDateToYYYYMMDD(new Date());
-    
-    console.log('Submitting data check:', {
-      selectedDate,
-      today,
-      isFutureDate: selectedDate > today
-    });
 
     if (selectedDate > today) {
-      alert('ไม่สามารถลงข้อมูลล่วงหน้าได้');
+      setErrorMessage('ไม่สามารถบันทึกข้อมูลล่วงหน้าได้');
+      setShowErrorModal(true);
       return;
     }
 
     const validEntries = dailyReportEntries.filter(entry => entry.subtaskId);
 
     if (validEntries.length === 0) {
-      alert('กรุณาเลือก Task อย่างน้อย 1 รายการ');
+      setErrorMessage('กรุณาเลือก Task อย่างน้อย 1 รายการก่อนบันทึก');
+      setShowErrorModal(true);
       return;
     }
 
@@ -668,6 +670,7 @@ export default function DailyReport() {
         oldProgress, // Progress ล่าสุดของ Subtask ในวันที่นี้ก่อนแก้ไข
       };
     });
+    
 
     console.log('Entries to submit:', {
       workDate: selectedDate,
@@ -684,43 +687,35 @@ export default function DailyReport() {
     setLoading(true);
     setError('');
     try {
-      // ใช้วันที่จาก workDate โดยตรง (ที่ถูกตั้งค่าตอนเลือกวันที่)
       const selectedDate = workDate;
       
-      // เช็คอีกครั้งว่าวันที่ถูกต้อง
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(selectedDate)) {
         throw new Error(`Invalid date format: ${selectedDate}`);
       }
 
-      console.log('Confirming submission:', {
-        selectedDate,
-        entriesCount: entriesToSubmit.length
-      });
-
       const entriesToSave = entriesToSubmit.map(entry => ({
         ...entry,
-        assignDate: selectedDate, // ใช้วันที่ที่เลือกไว้
+        assignDate: selectedDate,
       }));
-
-      console.log('Saving entries with date:', {
-        workDate,
-        entriesAssignDates: entriesToSave.map(e => e.assignDate)
-      });
 
       await saveDailyReportEntries(employeeId, entriesToSave);
       
-      alert('บันทึกข้อมูล Daily Report สำเร็จ!');
+      setSuccessMessage('บันทึกข้อมูล Daily Report สำเร็จ!');
+      setShowSuccessModal(true);
+      
       setHasUnsavedChanges(false);
       
-      // เคลียร์ cache และ flag ว่าเพิ่ง submit
       setTempDataCache({});
       prevWorkDateRef.current = workDate;
       await fetchAllData(employeeId);
-      // The useEffect will handle resetting the dailyReportEntries correctly
+      
     } catch (err) {
       console.error('Error submitting daily report:', err);
-      setError('เกิดข้อผิดพลาดในการบันทึกข้อมูล Daily Report');
+      // --- 3. เพิ่ม ErrorModal สำหรับ catch block ---
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setErrorMessage('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + message);
+      setShowErrorModal(true);
     } finally {
       setLoading(false);
     }
@@ -756,6 +751,7 @@ export default function DailyReport() {
   };
 
   return (
+  <>
     <PageLayout>
       <div className="container-fluid mx-auto p-4 md:p-8 bg-gray-50 min-h-screen">
         {/* Main Content */}
@@ -1057,6 +1053,18 @@ export default function DailyReport() {
         dailyReportEntries={entriesToSubmit}
         workDate={workDate}
       />
+      
     </PageLayout>
+    <SuccessModal
+        isOpen={showSuccessModal}
+        message={successMessage}
+        onClose={() => setShowSuccessModal(false)}
+      />
+      <ErrorModal
+        isOpen={showErrorModal}
+        message={errorMessage}
+        onClose={() => setShowErrorModal(false)}
+      />
+    </>
   );
 }
