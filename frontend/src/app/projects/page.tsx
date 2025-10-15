@@ -1,5 +1,7 @@
 // frontend/src/app/projects/page.tsx
 
+'use client'; // <--- เพิ่มบรรทัดนี้เข้ามาครับ!
+
 import dynamic from 'next/dynamic';
 import React from 'react';
 
