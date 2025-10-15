@@ -1,20 +1,19 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useState, useEffect, useCallback, useId, useRef } from 'react';
-import dynamicImport from 'next/dynamic'; 
+import dynamic from 'next/dynamic';
 
-const Calendar = dynamicImport(
+// Dynamic import Calendar with no SSR
+const Calendar = dynamic(
   () => import('react-calendar'),
-  { ssr: false }
+  { ssr: false } // This ensures the component only renders on client-side
 );
-
 import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
 import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee, UploadedFile } from '@/services/taskAssignService';
 import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useDashboard } from '@/context/DashboardContext';
 import { DailyReportEntry, Subtask } from '@/types/database';
 import type { Project } from '@/lib/projects';
 import { getProjects } from '@/lib/projects';
@@ -22,6 +21,7 @@ import { SubtaskAutocomplete } from '@/components/SubtaskAutocomplete';
 import Select from '@/components/ui/Select';
 import { RecheckPopup } from '@/components/RecheckPopup';
 import { HistoryModal } from '@/components/HistoryModal'; // Import the new modal
+import isEqual from 'lodash.isequal';
 import { Timestamp } from 'firebase/firestore';
 
 type ValuePiece = Date | null;
@@ -100,7 +100,7 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
   if (!entry.subtaskId) return '';
   const project = projects.find(p => p.id === entry.project);
-  const parts = [];
+  const parts = [];  // ✅ เปลี่ยนเป็น const
   if (project) parts.push(project.abbr);
   if (entry.taskName) parts.push(entry.taskName);
   if (entry.subTaskName) parts.push(entry.subTaskName);
@@ -110,6 +110,7 @@ const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[])
 
 export default function DailyReport() {
   const { appUser } = useAuth();
+  const { setHasUnsavedChanges } = useDashboard();
   const baseId = useId();
   const [date, setDate] = useState<Value>(null);
   // เก็บ workDate ในรูปแบบ YYYY-MM-DD โดยตรง
@@ -186,7 +187,22 @@ export default function DailyReport() {
     setShowHistoryModal(true);
   };
   
+  useEffect(() => {
+    const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
+    const currentData = tempDataCache[workDate];
+    
+    const normalize = (entries: DailyReportEntry[] = []) => 
+      entries.map(({ id, relateDrawing: _relateDrawing, ...rest }) => ({ 
+        ...rest, 
+        id: id.startsWith('temp-') ? '' : id 
+      }));
 
+    if (originalData.length === 0 && currentData && currentData.some((d: DailyReportEntry) => d.subtaskId)) {
+        setHasUnsavedChanges(true);
+    } else {
+        setHasUnsavedChanges(!isEqual(normalize(originalData), normalize(currentData)));
+    }
+  }, [workDate, allDailyEntries, setHasUnsavedChanges, tempDataCache]);
 
   const fetchAllData = useCallback(async (eid: string) => {
     setLoading(true);
@@ -227,8 +243,6 @@ export default function DailyReport() {
       fetchAllData(appUser.employeeId);
     }
   }, [appUser, employeeId, fetchAllData]);
-
-
 
   // Set initial date after component mounts
   useEffect(() => {
@@ -388,8 +402,8 @@ export default function DailyReport() {
       if (!relateDrawing && subtask) {
         // ค้นหา project
         const project = allProjects.find(p => p.id === subtask.projectId) ||
-                          allProjects.find(p => p.id === subtask.project) ||
-                          allProjects.find(p => p.name === subtask.project);
+                       allProjects.find(p => p.id === subtask.project) ||
+                       allProjects.find(p => p.name === subtask.project);
 
         // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
         const abbr = project?.abbr || subtask.project || 'N/A';
@@ -493,7 +507,8 @@ export default function DailyReport() {
       return newEntries;
     });
 
-
+    // Update unsaved changes state
+    setHasUnsavedChanges(true);
   };
   
   const handleAddRow = () => {
@@ -632,7 +647,7 @@ export default function DailyReport() {
 
     // Prepare data for RecheckPopup with old progress info
     const entriesForRecheck = validEntries.map(entry => {
-      // --- แก้ไข: ลบตัวแปรที่ไม่ได้ใช้ออก ---
+      const fullTaskName = generateRelateDrawingText(entry, allProjects);
       // หา progress เดิมจาก allDailyEntries (Progress ล่าสุดของ Subtask ในวันที่นี้)
       const existingEntry = allDailyEntries.find(e => 
         e.assignDate === selectedDate && 
@@ -647,7 +662,7 @@ export default function DailyReport() {
       return {
         ...entry,
         assignDate: selectedDate, // กำหนดวันที่ที่เลือกไว้
-        relateDrawing: generateRelateDrawingText(entry, allProjects), // สร้าง relateDrawing ที่นี่
+        relateDrawing: fullTaskName,
         progress: newProgress,
         oldProgress, // Progress ล่าสุดของ Subtask ในวันที่นี้ก่อนแก้ไข
       };
@@ -695,6 +710,7 @@ export default function DailyReport() {
       await saveDailyReportEntries(employeeId, entriesToSave);
       
       alert('บันทึกข้อมูล Daily Report สำเร็จ!');
+      setHasUnsavedChanges(false);
       
       // เคลียร์ cache และ flag ว่าเพิ่ง submit
       setTempDataCache({});
@@ -749,7 +765,6 @@ export default function DailyReport() {
 
   return (
     <PageLayout>
-      <h1 className="text-3xl font-bold ml-8 my-auto text-gray-900">Daily Task Tracking</h1>
       <div className="container-fluid mx-auto p-4 md:p-8 bg-gray-50 min-h-screen">
         {/* Main Content */}
         <div className="flex flex-col md:flex-row gap-6">
@@ -767,7 +782,7 @@ export default function DailyReport() {
           </div>
             <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
               <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-blue-500 mr-2"></div><span>วันที่เลือก</span></div>
-              <div className="flex items-center"><div className="w-3 h-3 rounded-sm mr-2" style={{ backgroundColor: '#ff4d00' }}></div><span>วันที่ปัจจุบัน</span></div>
+              <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
               <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>วันที่ยังไม่มีการลงข้อมูล</span></div>
               <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-400 mr-2"></span><span>วันที่มีการแก้ไข</span></div>
             </div>
@@ -795,7 +810,7 @@ export default function DailyReport() {
 
           {/* Form Section */}
           <div className="flex-1">
-            <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[60vh]">
+            <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[80vh]">
               {/* Header Info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
                 <div>
@@ -814,10 +829,10 @@ export default function DailyReport() {
               {employeeData && <p className="mb-4 text-sm font-semibold text-gray-800">ชื่อ-นามสกุล: {employeeData.fullName}</p>}
 
               {/* Table Section */}
-              <div className="flex flex-col h-[calc(100vh-380px)]">
+              <div className="flex flex-col h-[calc(100vh-300px)]">
                 <div className="flex-grow overflow-x-auto overflow-y-auto">
                   <table className="w-full border-collapse text-xs">
-                    <thead className="sticky top-0" style={{ backgroundColor: '#ff4d00' }}> 
+                    <thead className="sticky top-0 bg-orange-500">
                       <tr className="text-white">
                         <th className="p-2 font-semibold text-left w-10">No</th>
                         <th className="p-2 font-semibold text-left w-1/3">Relate Drawing</th>
@@ -831,8 +846,10 @@ export default function DailyReport() {
                     </thead>
                     <tbody>
                       {dailyReportEntries.map((entry, index) => {
-                        const relevantFile = uploadedFiles.find(file => file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate);
-                        
+                        const relevantFile = uploadedFiles.find(file => 
+                          file.subtaskId === entry.subtaskId && 
+                          file.workDate === entry.assignDate
+                        );
                         return (
                           <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
                             <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
@@ -974,8 +991,8 @@ export default function DailyReport() {
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                           </svg>
                                         ) : (
-                                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                           </svg>
                                         )}
                                       </button>
@@ -1006,8 +1023,7 @@ export default function DailyReport() {
                 <button 
                   type="button" 
                   onClick={handleAddRow} 
-                  className="text-white font-semibold py-2 px-4 rounded-md hover:opacity-90 text-sm"
-                  style={{ backgroundColor: '#ff4d00' }}
+                  className="bg-orange-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-orange-600 text-sm" 
                   disabled={isReadOnly}
                 >
                   Add Row
