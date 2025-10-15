@@ -21,7 +21,7 @@ import { SubtaskAutocomplete } from '@/components/SubtaskAutocomplete';
 import Select from '@/components/ui/Select';
 import { RecheckPopup } from '@/components/RecheckPopup';
 import { HistoryModal } from '@/components/HistoryModal'; // Import the new modal
-import isEqual from 'lodash.isequal';
+import { isEqual } from 'lodash';
 import { Timestamp } from 'firebase/firestore';
 
 type ValuePiece = Date | null;
