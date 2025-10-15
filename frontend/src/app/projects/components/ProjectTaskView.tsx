@@ -6,7 +6,6 @@ import React, { useEffect, useState } from "react";
 import { Timestamp } from "firebase/firestore";
 import CreateProjectModal from "@/components/modals/CreateProjectModal";
 import ProjectListModal from "@/components/modals/ProjectListModal";
-// 1. แก้ไข: import ชื่อฟังก์ชันที่ถูกต้องทั้งหมดในที่เดียว
 import {
   createProject,
   updateProjectLeader,
@@ -187,7 +186,6 @@ const ProjectsPage = () => {
       if (cacheLoaded || projects.length === 0) return;
       try {
         setTasksLoading(true);
-        // 2. แก้ไข: เรียกใช้ฟังก์ชันด้วยชื่อใหม่
         const allTasks = await getTasksForProject();
         setAllTasksCache(allTasks);
         setCacheLoaded(true);
@@ -204,7 +202,6 @@ const ProjectsPage = () => {
     const loadProjects = async () => {
       try {
         setLoading(true);
-        // 3. แก้ไข: เรียกใช้ฟังก์ชันด้วยชื่อใหม่
         const projectsData = await getProjectDetails();
         setProjects(projectsData);
       } catch (error) {
@@ -270,7 +267,6 @@ const ProjectsPage = () => {
     try {
       await createProject(projectData);
       setIsCreateModalOpen(false);
-      // 4. แก้ไข: เรียกใช้ฟังก์ชันด้วยชื่อใหม่
       const projectsData = await getProjectDetails();
       setProjects(projectsData);
       alert('สร้างโปรเจกต์สำเร็จ');
@@ -283,7 +279,6 @@ const ProjectsPage = () => {
   const handleUpdateLeader = async (projectId: string, newLeader: string) => {
     try {
       await updateProjectLeader(projectId, newLeader);
-      // 5. แก้ไข: เรียกใช้ฟังก์ชันด้วยชื่อใหม่
       const projectsData = await getProjectDetails();
       setProjects(projectsData);
       alert('อัพเดท Leader สำเร็จ');
@@ -312,21 +307,33 @@ const ProjectsPage = () => {
     }
   };
 
+  // ========== ✅ MERGED: เพิ่มการป้องกันลบ Work Request ==========
   const handleDelete = (idx: number) => {
     const rowToDelete = rows[idx];
+    
+    // ✅ เช็คว่าเป็น Work Request หรือไม่
+    if (rowToDelete.activity === 'Work Request') {
+      alert('⚠️ ไม่สามารถลบงาน Work Request ได้');
+      return;
+    }
+    
     const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
+    
     if (isEmptyRow && idx === rows.length - 1) {
       alert('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
       return;
     }
+    
     if (rowToDelete.statusDwg) {
       alert('ไม่สามารถลบแถวที่มีสถานะเอกสารได้');
       return;
     }
+    
     if (rowToDelete.progress && rowToDelete.progress > 0) {
       alert('ไม่สามารถลบงานที่มีความคืบหน้าแล้ว');
       return;
     }
+    
     setDeleteTarget({ idx, row: rowToDelete });
     setShowDeleteModal(true);
   };
@@ -448,7 +455,19 @@ const ProjectsPage = () => {
     }
   };
 
+  // ========== ✅ MERGED: เพิ่มการป้องกันแก้ไข Work Request ==========
   const handleEdit = (idx: number) => {
+    const row = rows[idx];
+    
+    // ✅ เช็คว่าเป็น Work Request หรือไม่
+    const isWorkRequest = row.activity === 'Work Request';
+    
+    // ✅ ถ้าเป็น Work Request และไม่ใช่สถานะ PENDING_BIM → ห้ามแก้ไข
+    if (isWorkRequest && row.statusDwg !== 'PENDING_BIM') {
+      alert('⚠️ แก้ไข Work Request ได้เฉพาะสถานะ PENDING_BIM เท่านั้น');
+      return;
+    }
+    
     setOriginalRows(prev => {
       const newMap = new Map(prev);
       if (!prev.has(idx)) {
@@ -527,7 +546,6 @@ const ProjectsPage = () => {
 
   const handleRestoreComplete = async () => {
     try {
-      // 6. แก้ไข: เรียกใช้ฟังก์ชันด้วยชื่อใหม่
       const allTasks = await getTasksForProject();
       setAllTasksCache(allTasks);
       alert('✅ รีโหลดข้อมูลสำเร็จ');
@@ -609,24 +627,46 @@ const ProjectsPage = () => {
                   {rows.map((row, idx) => {
                     const isNewRow = !row.id;
                     const isEditing = editingRows.has(idx);
-                    const isEditable = isNewRow || isEditing;
+                    const isWorkRequest = row.activity === 'Work Request';
+                    const isWorkRequestEditable = isWorkRequest && row.statusDwg === 'PENDING_BIM';
+                    const isEditable = isNewRow || (isEditing && (!isWorkRequest || isWorkRequestEditable));
+                    
                     return (
-                      <tr key={row.firestoreId || `row-${idx}`} style={{ borderBottom: "1px solid #e5e7eb", background: highlightedRow === idx ? "#fef08a" : isEditing ? "#fff7ed" : idx % 2 === 0 ? "#f9fafb" : "#fff", transition: "background-color 0.15s ease-out", cursor: "pointer" }} onMouseEnter={(e) => { if (highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = "#e0f2fe"; } }} onMouseLeave={(e) => { if (highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#f9fafb" : "#fff"; } }}>
+                      <tr key={row.firestoreId || `row-${idx}`} style={{ 
+                        borderBottom: "1px solid #e5e7eb", 
+                        background: highlightedRow === idx 
+                          ? "#fef08a" 
+                          : isWorkRequest 
+                          ? "#fef9c3"
+                          : isEditing 
+                          ? "#fff7ed" 
+                          : idx % 2 === 0 
+                          ? "#f9fafb" 
+                          : "#fff",
+                        transition: "background-color 0.15s ease-out",
+                        cursor: "pointer"
+                      }} onMouseEnter={(e) => { if (highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = "#e0f2fe"; } }} onMouseLeave={(e) => { if (highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff"; } }}>
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
                         <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
-                          <input type="text" value={row.relateDrawing} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
+                          <input type="text" value={row.relateDrawing} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
                         </td>
                         <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                          <select value={row.activity} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "activity", e.target.value)} disabled={activitiesLoading || !isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff", cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer" }}>
-                            <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
-                            {activities.map(act => (<option key={act.id} value={act.activityName}>{act.activityName}</option>))}
-                          </select>
+                          {isWorkRequest ? (
+                            <div style={{ width: "100%", padding: "4px 6px", fontSize: 10, color: "#92400e", fontWeight: 600, backgroundColor: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "4px" }}>
+                              Work Request
+                            </div>
+                          ) : (
+                            <select value={row.activity} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "activity", e.target.value)} disabled={activitiesLoading || !isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff", cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer" }}>
+                              <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
+                              {activities.map(act => (<option key={act.id} value={act.activityName}>{act.activityName}</option>))}
+                            </select>
+                          )}
                         </td>
                         <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                          <input type="date" value={row.startDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "startDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
+                          <input type="date" value={row.startDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "startDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
                         </td>
                         <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                          <input type="date" value={row.dueDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "dueDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
+                          <input type="date" value={row.dueDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "dueDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
                         </td>
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
                           {row.statusDwg ? translateStatus(row.statusDwg) : ""}
@@ -639,7 +679,19 @@ const ProjectsPage = () => {
                           {row.lastRev || "00"}
                         </td>
                         <td style={{ padding: "2px 3px", fontSize: 10, textAlign: "center" }}>
-                          {row.statusDwg ? (<span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>) : isNewRow ? (<span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>) : isEditing ? (<button onClick={() => handleCancelEdit(idx)} style={{ padding: "3px 10px", background: "#10b981", border: "none", borderRadius: "3px", fontSize: 10, cursor: "pointer", color: "white", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)", margin: "0 auto", display: "block" }}>บันทึก</button>) : (<button onClick={() => handleEdit(idx)} style={{ padding: "4px", background: "none", border: "none", borderRadius: "3px", cursor: "pointer", color: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }} title="แก้ไข"><svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg></button>)}
+                          {isWorkRequest && row.statusDwg !== 'PENDING_BIM' ? (
+                            <span style={{ fontSize: 10, color: "#dc2626", fontWeight: 600, padding: "3px 8px", background: "#fee2e2", borderRadius: "3px" }}>
+                              🔒 ล็อค
+                            </span>
+                          ) : row.statusDwg && !isWorkRequest ? (
+                            <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
+                          ) : isNewRow ? (
+                            <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
+                          ) : isEditing ? (
+                            <button onClick={() => handleCancelEdit(idx)} style={{ padding: "3px 10px", background: "#10b981", border: "none", borderRadius: "3px", fontSize: 10, cursor: "pointer", color: "white", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)", margin: "0 auto", display: "block" }}>บันทึก</button>
+                          ) : (
+                            <button onClick={() => handleEdit(idx)} style={{ padding: "4px", background: "none", border: "none", borderRadius: "3px", cursor: "pointer", color: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }} title="แก้ไข"><svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg></button>
+                          )}
                         </td>
                         <td style={{ padding: "2px 4px", fontSize: 10, textAlign: "center" }}>
                           {(() => {
