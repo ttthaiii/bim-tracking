@@ -280,18 +280,12 @@ export default function DailyReport() {
 
   // Effect สำหรับจัดการ cache และ validate workDate เมื่อมีการเปลี่ยนวันที่
   useEffect(() => {
-    // Validate workDate format
     if (workDate) {
-      console.log('Validating workDate:', workDate);
-      // ตรวจสอบว่า workDate เป็น YYYY-MM-DD format
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(workDate)) {
-        console.error('Invalid workDate format:', workDate);
-        // ถ้าไม่ใช่ format ที่ถูกต้อง ให้แปลงใหม่
         const date = new Date(workDate);
         if (!isNaN(date.getTime())) {
           const correctedDate = formatDateToYYYYMMDD(date);
-          console.log('Correcting workDate to:', correctedDate);
           setWorkDate(correctedDate);
           return;
         }
@@ -300,11 +294,18 @@ export default function DailyReport() {
 
     if (!dailyReportEntries.length) return;
     
-    // บันทึกข้อมูลลง cache เมื่อมีการเปลี่ยนวันที่
-    setTempDataCache(prev => ({
-      ...prev,
-      [workDate]: dailyReportEntries
-    }));
+    // ✅ เพิ่มเงื่อนไข: update cache เฉพาะเมื่อข้อมูลเปลี่ยนจริงๆ
+    setTempDataCache(prev => {
+      const currentCache = prev[workDate];
+      // ถ้า cache เหมือนเดิม ไม่ต้อง update
+      if (currentCache && isEqual(currentCache, dailyReportEntries)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [workDate]: dailyReportEntries
+      };
+    });
     
     prevWorkDateRef.current = workDate;
   }, [workDate, dailyReportEntries]);
@@ -426,7 +427,7 @@ export default function DailyReport() {
   console.log('entriesToShow', entriesToShow);
   setDailyReportEntries(entriesToShow);
     setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
-  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects, tempDataCache]);
+  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
     setDailyReportEntries((currentEntries: DailyReportEntry[]) => {
@@ -728,33 +729,24 @@ export default function DailyReport() {
   const tileClassName = ({ date, view }: { date: Date; view: string }) => {
     if (view === 'month') {
       const classes = [];
-      
-      // แปลงเป็น string YYYY-MM-DD โดยตรง
       const tileDate = formatDateToYYYYMMDD(date);
       const today = formatDateToYYYYMMDD(new Date());
 
-      console.log('🔍 Tile date check:', {
-        date: tileDate,
-        today,
-        comparison: tileDate < today
-      });
-
-      // Check if the day is Sunday (getDay() returns 0 for Sunday)
+      // ✅ ลบ console.log ออก
       const isSunday = date.getDay() === 0;
 
       if (tileDate < today) {
         const entriesForDate = allDailyEntries.filter(entry => entry.assignDate === tileDate);
 
-        // Only add 'has-missing-data-marker' if it's not a Sunday and there are no entries
         if (entriesForDate.length === 0 && !isSunday) {
-            classes.push('has-missing-data-marker');
+          classes.push('has-missing-data-marker');
         } else {
-            const uniqueTimestamps = new Set(
-                entriesForDate.map(e => Math.floor((e.timestamp?.toMillis() || 0) / 1000))
-            );
-            if (uniqueTimestamps.size > 1) {
-                classes.push('has-edit-marker');
-            }
+          const uniqueTimestamps = new Set(
+            entriesForDate.map(e => Math.floor((e.timestamp?.toMillis() || 0) / 1000))
+          );
+          if (uniqueTimestamps.size > 1) {
+            classes.push('has-edit-marker');
+          }
         }
       }
       
