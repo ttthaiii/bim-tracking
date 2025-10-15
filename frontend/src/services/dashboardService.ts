@@ -1,5 +1,5 @@
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { db } from '@/lib/firebase';
 import { Task } from '@/types/database';
 
 export const STATUS_COLORS: Record<TaskStatusCategory, string> = {

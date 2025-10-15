@@ -1,7 +1,7 @@
-import { collection, getDocs, query, where, Timestamp, doc, updateDoc, setDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/config/firebase';
-import { Project, Task, Subtask, RelateWork } from '@/types/database';
-import { getTaskStatusCategory } from './dashboardService';
+import { db } from '../lib/firebase';
+import { collection, getDocs, doc, updateDoc, serverTimestamp, setDoc, Timestamp, query, where, addDoc } from 'firebase/firestore';
+import { Project, Task, RelateWork, Subtask } from '../types/database';
+import { getTaskStatusCategory } from './taskStatus'; // ✅ ให้ import เข้ามาแบบนี้
 
 // =================================================================
 // 1. เปลี่ยนชื่อและ Export ฟังก์ชันให้ไฟล์อื่นเรียกใช้ได้

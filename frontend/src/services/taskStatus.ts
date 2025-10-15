@@ -1,5 +1,5 @@
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { db } from '../lib/firebase';
 import { Task } from '@/types/database';
 import { getTaskStatusCategory, TaskStatusCategory } from './dashboardService'; // Import for consistency
 
@@ -79,3 +79,6 @@ export async function getTasksByStatus(): Promise<ProjectTaskSummary[]> {
     return [];
   }
 }
+
+export { getTaskStatusCategory } from './dashboardService';
+export type { TaskStatusCategory } from './dashboardService';

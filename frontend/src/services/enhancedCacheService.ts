@@ -1,5 +1,5 @@
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { db } from '@/lib/firebase';
 import { Project, Task, Subtask } from '@/types/database';
 import { TaskFormData } from '@/types/task';
 

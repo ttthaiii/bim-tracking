@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { db } from '@/lib/firebase';
 import { Task } from '@/types/database';
 import { useDashboard } from '@/context/DashboardContext';
 import { getTaskStatusCategory, TaskStatusCategory } from '@/services/dashboardService';

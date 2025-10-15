@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Project, Task, Subtask } from '@/types/database';
-import { db } from '@/config/firebase';
+import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 
 interface LoadingState {

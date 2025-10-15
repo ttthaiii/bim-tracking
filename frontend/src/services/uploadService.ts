@@ -1,6 +1,6 @@
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc, addDoc, collection } from 'firebase/firestore';
-import { storage, db, ensureAuthenticated } from '../config/firebase';
+import { storage, db, ensureAuthenticated } from '../lib/firebase'; // เพิ่ม ensureAuthenticated
 
 export const uploadFileToSubtask = async (
   file: File,

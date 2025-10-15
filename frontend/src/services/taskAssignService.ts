@@ -10,7 +10,7 @@ import {
   arrayUnion,
   Timestamp
 } from 'firebase/firestore';
-import { db } from '../config/firebase'; 
+import { db } from '../lib/firebase';
 import { DailyReportEntry, Subtask } from '../types/database';
 import { getEmployeeByID } from './employeeService';
 

@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, useMemo } from 'react';
 import { collection, query, where, getDocs, setDoc, doc, Timestamp, getDoc } from 'firebase/firestore'; // ✅ เพิ่ม getDoc
-import { db } from '@/config/firebase';
+import { db } from '@/lib/firebase';
 import Navbar from '@/components/shared/Navbar';
 import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';

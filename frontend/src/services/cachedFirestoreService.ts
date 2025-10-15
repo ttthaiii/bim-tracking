@@ -1,5 +1,5 @@
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { db } from '@/lib/firebase';
 
 export const generateCacheKey = (collectionName: string, filters?: Record<string, any>): string => {
   if (!filters) return collectionName;

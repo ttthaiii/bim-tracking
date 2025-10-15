@@ -5,7 +5,7 @@
 
       import { useState } from 'react';
       import { useRouter } from 'next/navigation';
-      import { db } from '@/lib/firebase'; 
+      import { db } from '@/lib/firebase';
       import { collection, query, where, getDocs } from 'firebase/firestore';
       import { useAuth } from '@/context/AuthContext'; // Import useAuth hook
       import { User as AppUser } from '@/types/database'; // Import AppUser type

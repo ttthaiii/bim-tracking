@@ -12,7 +12,7 @@ import WorkloadChart from '@/components/charts/WorkloadChart';
 import ActivityTable from '@/components/tables/ActivityTable';
 
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/config/firebase';
+import { db } from '@/lib/firebase';
 
 interface Project {
   id: string;
