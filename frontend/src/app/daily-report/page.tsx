@@ -320,12 +320,17 @@ export default function DailyReport() {
   // Filter subtasks based on whether the date is in the future
   useEffect(() => {
     if (isFutureDate) {
+      // วันในอนาคต: แสดงเฉพาะงานลา
       const leaveTasks = availableSubtasks.filter(
         subtask => (subtask.taskName || '').includes('ลา') || (subtask.subTaskName || '').includes('ลา')
       );
       setFilteredSubtasks(leaveTasks);
     } else {
-      setFilteredSubtasks(availableSubtasks);
+      // วันปัจจุบัน/อดีต: กรองงานที่เสร็จแล้วออก (progress === 100)
+      const incompleteTasks = availableSubtasks.filter(
+        subtask => (subtask.subTaskProgress || 0) < 100
+      );
+      setFilteredSubtasks(incompleteTasks);
     }
   }, [isFutureDate, availableSubtasks]);
 
