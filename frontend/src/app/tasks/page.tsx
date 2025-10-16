@@ -832,8 +832,8 @@ useEffect(() => {
     
     setEditingSubtaskId(subtask.id);
     setEditingData({
-      // ❌ ไม่ใส่ activity เพื่อป้องกันการแก้ไข
-      activity: '', // หรือจะใส่ task?.taskCategory || '' ก็ได้ แต่ไม่ควรให้แก้ไขได้
+      // ✅ ใส่ค่า activity เพื่อให้ Relate Work ใช้งานได้
+      activity: task?.taskCategory || '',
       relateDrawing: task?.id || '',
       relateDrawingName: subtask.taskName,
       relateWork: subtask.subTaskCategory,
@@ -854,9 +854,9 @@ useEffect(() => {
   const handleUpdateEditData = (field: string, value: any) => {
     if (!editingData) return;
   
-    // ✅ เพิ่มการตรวจสอบ: ถ้าพยายามแก้ไข activity ให้ return ทันที
-    if (field === 'activity') {
-      console.warn('Cannot edit Activity field - it is locked');
+    // ✅ เพิ่มการตรวจสอบ: ถ้าพยายามแก้ไข activity หรือ relateDrawing ให้ return ทันที
+    if (field === 'activity' || field === 'relateDrawing') {
+      console.warn(`Cannot edit ${field} field - it is locked`);
       return;
     }
   
@@ -865,35 +865,7 @@ useEffect(() => {
       
       const updated = { ...prev, [field]: value };
       
-      // ❌ ลบส่วนนี้ออก เพราะ activity ไม่ควรเปลี่ยนแปลงได้
-      // if (field === 'activity') {
-      //   updated.relateDrawing = '';
-      //   updated.relateDrawingName = '';
-      //   updated.relateWork = '';
-      //   updated.assignee = '';
-      // }
-      
-      // ถ้าเปลี่ยน Relate Drawing
-      if (field === 'relateDrawing') {
-        const task = tasks.find(t => t.id === value);
-        updated.relateDrawingName = task?.taskName || '';
-        updated.relateWork = '';
-        
-        // เช็คเงื่อนไขพิเศษ (Bim room + ลางาน)
-        const selectedProjectData = projects.find(p => p.id === selectedProject);
-        const projectName = selectedProjectData?.name || '';
-        
-        // ใช้ task?.taskCategory แทน updated.activity
-        const taskCategory = tasks.find(t => t.taskName === editingData.relateDrawingName)?.taskCategory || '';
-        
-        if (
-          projectName === "Bim room" &&
-          taskCategory === "ลางาน" &&
-          task?.taskName === "ลางาน"
-        ) {
-          updated.assignee = 'all';
-        }
-      }
+      // ❌ ลบการรีเซ็ตออก เพราะ activity และ relateDrawing ไม่เปลี่ยนแปลง
       
       return updated;
     });
@@ -1134,18 +1106,18 @@ useEffect(() => {
               <table className="w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
                 <thead className="bg-orange-600 sticky top-0 z-10 shadow-sm">
                   <tr>
-                    <th className="w-[15%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Subtask ID</th>
-                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Activity</th>
-                    <th className="w-[12%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Drawing</th>
-                    <th className="w-[10%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Work</th>
+                    <th className="w-[10%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Subtask ID</th>
+                    <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Activity</th>
+                    <th className="w-[14%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Drawing</th>
+                    <th className="w-[12%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Work</th>
                     <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Item</th>
-                    <th className="w-[5%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Internal Rev.</th>
-                    <th className="w-[5%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Work Scale</th>
-                    <th className="w-[9%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Assignee</th>
-                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Deadline</th>
-                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Progress</th>
-                    <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Link File</th>
-                    <th className="w-[7%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Correct</th>
+                    <th className="w-[5%] px-2 py-3 text-center text-xs font-semibold text-white uppercase">Internal Rev.</th>
+                    <th className="w-[5%] px-2 py-3 text-center text-xs font-semibold text-white uppercase">Work Scale</th>
+                    <th className="w-[10%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Assignee</th>
+                    <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Deadline</th>
+                    <th className="w-[10%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Progress</th>
+                    <th className="w-[6%] px-2 py-3 text-center text-xs font-semibold text-white uppercase">Link File</th>
+                    <th className="w-[4%] px-2 py-3 text-center text-xs font-semibold text-white uppercase">Correct</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -1220,18 +1192,19 @@ useEffect(() => {
                           onChange={(value) => updateRow(row.id, 'workScale', value)}
                         />
                       </td>
-                       <td className="px-2 py-2">
-  {isSpecialLeaveCase(row) ? (
-    <div className="px-3 py-2 bg-gray-100 border border-gray-300 rounded text-sm text-gray-900">
-      all
-    </div>
-  ) : (
-    <AssigneeSelect
-      value={row.assignee}
-      onChange={(value) => updateRow(row.id, 'assignee', value)}
-    />
-  )}
-</td>
+                      <td className="px-2 py-2">
+                        {isSpecialLeaveCase(row) ? (
+                          <div className="px-3 py-2 bg-gray-100 border border-gray-300 rounded text-sm text-gray-900">
+                            all
+                          </div>
+                        ) : (
+                          <AssigneeSelect
+                            projectName={projects.find(p => p.id === selectedProject)?.name || ''} // ✅ เพิ่มบรรทัดนี้
+                            value={row.assignee}
+                            onChange={(value) => updateRow(row.id, 'assignee', value)}
+                          />
+                        )}
+                      </td>
                       <td className="px-2 py-2 text-center">
                         <span className="text-gray-400 text-xs">-</span>
                       </td>
@@ -1300,10 +1273,9 @@ useEffect(() => {
         )}
       </td>
 
-      {/* ACTIVITY - แก้ไขได้ */}
+      {/* ACTIVITY - ล็อคด้วย UI */}
       <td className="px-2 py-2 text-xs">
         {isEditing ? (
-          // แสดงเป็น text ธรรมดาพร้อม lock icon แทนที่จะเป็น Select
           <div className="flex items-center space-x-1 text-gray-500">
             <svg 
               className="w-3 h-3 text-gray-400" 
@@ -1321,8 +1293,7 @@ useEffect(() => {
             </span>
           </div>
         ) : (
-          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-900'}`} title={task?.taskCategory || ''}>
-            {/* แสดงข้อมูลที่แก้ไขแล้ว */}
+          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-900'}`}>
             {isEdited && editedSubtasks[subtask.id]?.activity 
               ? editedSubtasks[subtask.id].activity
               : task?.taskCategory || '-'
@@ -1331,33 +1302,43 @@ useEffect(() => {
         )}
       </td>
 
-      {/* RELATE DRAWING - แก้ไขได้ */}
+      {/* RELATE DRAWING - ล็อคด้วย disabled */}
       <td className="px-2 py-2 text-xs">
         {isEditing ? (
-          <Select
-            options={tasks
-              .filter(t => !editingData?.activity || t.taskCategory === editingData.activity)
-              .map(t => ({ value: t.id, label: t.taskName }))}
-            value={editingData?.relateDrawing || ''}
-            onChange={(value) => handleUpdateEditData('relateDrawing', value)}
-            placeholder="Select"
-            disabled={!editingData?.activity}
-          />
+          <div className="flex items-center space-x-1 text-gray-500">
+            <svg 
+              className="w-3 h-3 text-gray-400" 
+              fill="none" 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              strokeWidth="2" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+            >
+              <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            <span className="text-gray-600" title="ไม่สามารถแก้ไข Relate Drawing ได้">
+              {editingData?.relateDrawingName || '-'}
+            </span>
+          </div>
         ) : (
-          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`} title={subtask.taskName}>
+          <span 
+            className={`whitespace-normal break-words ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`} 
+            title={subtask.taskName}
+          >
             {subtask.taskName}
           </span>
         )}
       </td>
 
-      {/* RELATE WORK - แก้ไขได้ */}
+      {/* RELATE WORK - ✅ ไม่ล็อค แต่ต้องการ activity */}
       <td className="px-2 py-2 text-xs">
         {isEditing ? (
           <RelateWorkSelect
             activityId={editingData?.activity || ''}
             value={editingData?.relateWork || ''}
             onChange={(value) => handleUpdateEditData('relateWork', value)}
-            disabled={!editingData?.activity}
+            disabled={false}  // ✅ ไม่ล็อค
           />
         ) : (
           <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`} title={subtask.subTaskCategory}>
@@ -1421,25 +1402,17 @@ useEffect(() => {
       </td>
 
       {/* ASSIGNEE - แก้ไขได้ */}
-      <td className="px-2 py-2">
+      <td className="px-2 py-2 text-xs">
         {isEditing ? (
           <AssigneeSelect
+            projectName={projects.find(p => p.id === selectedProject)?.name || ''} // ✅ เพิ่มบรรทัดนี้
             value={editingData?.assignee || ''}
             onChange={(value) => handleUpdateEditData('assignee', value)}
           />
         ) : (
-          <div className="flex items-center space-x-2">
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
-              isEdited ? 'bg-blue-600' : 'bg-blue-500'
-            }`}>
-              <span className="text-xs font-medium text-white">
-                {subtask.subTaskAssignee?.charAt(0).toUpperCase()}
-              </span>
-            </div>
-            <span className={`text-xs ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-900'}`}>
-              {subtask.subTaskAssignee}
-            </span>
-          </div>
+          <span className={`truncate ${isEdited ? 'text-blue-700 font-medium' : 'text-gray-500'}`}>
+            {subtask.subTaskAssignee}
+          </span>
         )}
       </td>
 
@@ -1550,7 +1523,7 @@ useEffect(() => {
 
         <div className="flex justify-center">
           <Button size="lg" onClick={handleShowConfirmation} disabled={!selectedProject} className="px-12">
-            Assign Task
+            Submit
           </Button>
         </div>
       </div>

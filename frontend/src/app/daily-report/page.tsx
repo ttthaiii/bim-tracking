@@ -437,10 +437,18 @@ export default function DailyReport() {
   }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
+    console.log('🔄 handleUpdateEntry called:', { entryId, updates });
+    
     setDailyReportEntries((currentEntries: DailyReportEntry[]) => {
       const newEntries = currentEntries.map((entry: DailyReportEntry) => {
         if (entry.id === entryId) {
           const newEntry = { ...entry, ...updates };
+          
+          console.log('📦 Updated entry:', {
+            old: entry,
+            new: newEntry
+          });
+          
           const progress = parseInt(newEntry.progress);
           if (progress === 100) newEntry.status = 'completed';
           else if (progress > 0) newEntry.status = 'in-progress';
@@ -449,10 +457,16 @@ export default function DailyReport() {
         }
         return entry;
       });
-      // อัพเดท cache ด้วย
-      setTempDataCache(prev => ({ ...prev, [workDate]: newEntries }));
-      return newEntries;
+      
+      // ✅ ลบบรรทัดที่เรียก setTempDataCache ออกจากตรงนี้
+      
+      console.log('✅ New entries state:', newEntries);
+      
+      // เราสามารถ return newEntries ตรงๆ ได้เลย เพราะ .map() จะคืนค่าเป็น array ใหม่อยู่แล้ว
+      return newEntries; 
     });
+    
+    setHasUnsavedChanges(true);
   };
 
   const handleRowFocus = (entryId: string, idx: number) => {
@@ -478,26 +492,39 @@ export default function DailyReport() {
 
   const handleTimeChange = (entryId: string, type: 'normalWorkingHours' | 'otWorkingHours', part: 'h' | 'm', value: string) => {
     const currentEntry = dailyReportEntries.find(e => e.id === entryId);
-    if (!currentEntry) return;
-
-    let [h, m] = (currentEntry[type] || '0:0').split(':').map(Number);
-    if (part === 'h') h = Number(value);
-    if (part === 'm') m = Number(value);
-
+    if (!currentEntry) {
+      console.log('❌ Entry not found:', entryId);
+      return;
+    }
+  
+    const currentValue = currentEntry[type] || '0:0';
+    let [h, m] = currentValue.split(':').map(Number);
+    
+    console.log('📝 Before change:', { entryId, type, part, currentValue, h, m, newValue: value });
+    
+    if (part === 'h') {
+      h = Number(value);
+    } else if (part === 'm') {
+      m = Number(value);
+    }
+  
     // For normal working hours, validate against 8-hour total limit
     if (type === 'normalWorkingHours') {
       const totalOtherHours = calculateTotalHoursExcluding(dailyReportEntries, entryId);
       const newTotalHours = totalOtherHours + h + m / 60;
       
       if (newTotalHours > 8) {
-        // If exceeds 8 hours, adjust to maximum available
         const maxAvailableHours = Math.floor(8 - totalOtherHours);
         h = maxAvailableHours;
         m = 0;
       }
     }
-
-    handleUpdateEntry(entryId, { [type]: `${h}:${m}` });
+  
+    const newValue = `${h}:${m}`;
+    console.log(`✅ Updating ${type} for ${entryId}:`, currentValue, '→', newValue);
+    
+    handleUpdateEntry(entryId, { [type]: newValue });
+    setHasUnsavedChanges(true);
   };
 
   const handleDeleteEntry = (entryId: string) => {
@@ -868,10 +895,13 @@ export default function DailyReport() {
                                 />
                               )}
                             </td>
+
+                            {/* เวลาทำงาน / Working Hours */}
                             <td className="p-2 border-r border-yellow-200">
                               <div className="flex items-center space-x-1 w-28">
                                 <Select 
-                                  value={String((entry.normalWorkingHours || '0:0').split(':')[0])} 
+                                  key={`hour-${entry.id}-${entry.normalWorkingHours}`}
+                                  value={(entry.normalWorkingHours || '0:0').split(':')[0]} 
                                   onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} 
                                   options={getHourOptions(dailyReportEntries, entry.id)} 
                                   disabled={isReadOnly || (entry.isExistingData && !editableRows.has(entry.id))}
@@ -879,7 +909,8 @@ export default function DailyReport() {
                                 />
                                 <span className="text-gray-400">:</span>
                                 <Select 
-                                  value={String((entry.normalWorkingHours || '0:0').split(':')[1])} 
+                                  key={`minute-${entry.id}-${entry.normalWorkingHours}`}
+                                  value={(entry.normalWorkingHours || '0:0').split(':')[1]} 
                                   onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'm', value)} 
                                   options={getMinuteOptions(
                                     dailyReportEntries,
@@ -891,25 +922,30 @@ export default function DailyReport() {
                                 />
                               </div>
                             </td>
+
+                            {/* เวลาโอที / Overtime */}
                             <td className="p-2 border-r border-yellow-200">
                               <div className="flex items-center space-x-1 w-28">
                                 <Select 
-                                  value={String((entry.otWorkingHours || '0:0').split(':')[0])} 
+                                  key={`ot-hour-${entry.id}-${entry.otWorkingHours}`}
+                                  value={(entry.otWorkingHours || '0:0').split(':')[0]} 
                                   onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} 
                                   options={Array.from({ length: 13 }, (_, i) => ({ value: i.toString(), label: `${i} hrs` }))} 
-                                  disabled={Boolean(isReadOnly || entry.isLeaveTask || (entry.isExistingData && !editableRows.has(entry.id)))}
+                                  disabled={isReadOnly || (entry.isExistingData && !editableRows.has(entry.id))}
                                   className="!w-12 !py-1 !px-1 text-center !text-xs"
                                 />
                                 <span className="text-gray-400">:</span>
                                 <Select 
-                                  value={String((entry.otWorkingHours || '0:0').split(':')[1])} 
+                                  key={`ot-minute-${entry.id}-${entry.otWorkingHours}`}
+                                  value={(entry.otWorkingHours || '0:0').split(':')[1]} 
                                   onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} 
-                                  options={[0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} m` }))} 
-                                  disabled={Boolean(isReadOnly || entry.isLeaveTask || (entry.isExistingData && !editableRows.has(entry.id)))}
+                                  options={[0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} mins` }))} 
+                                  disabled={Boolean(isReadOnly || (entry.isExistingData && !editableRows.has(entry.id)))}
                                   className="!w-12 !py-1 !px-1 text-center !text-xs"
                                 />
                               </div>
                             </td>
+
                             <td className="p-2 border-r border-yellow-200">
                               <div title={entry.progressError || `Progress ต้องไม่น้อยกว่า ${entry.initialProgress || 0}%`}>
                                 <div className="flex items-center gap-1">

@@ -3,6 +3,7 @@ import Select, { SelectOption } from '@/components/ui/Select';
 import { getUsers } from '@/lib/users';
 
 interface AssigneeSelectProps {
+  projectName?: string; // ✅ เพิ่ม prop นี้เพื่อรับชื่อโปรเจกต์
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
@@ -10,6 +11,7 @@ interface AssigneeSelectProps {
 }
 
 export default function AssigneeSelect({
+  projectName,
   value,
   onChange,
   disabled = false,
@@ -23,13 +25,21 @@ export default function AssigneeSelect({
       setLoading(true);
       try {
         const userList = await getUsers();
-        const options = userList
-          .filter(u => u.fullName && u.fullName.trim() !== '')  // เปลี่ยนจาก FullName
+        let options = userList
+          .filter(u => u.fullName && u.fullName.trim() !== '')
           .map((u, index) => ({
-            value: u.fullName,  // เปลี่ยนจาก FullName
-            label: u.fullName,  // เปลี่ยนจาก FullName
+            value: u.fullName,
+            label: u.fullName,
             key: u.id || `user-${index}`
           }));
+        
+        // ✅ ถ้าโปรเจกต์เป็น "Bim room" ให้เพิ่มตัวเลือก "all"
+        if (projectName === 'Bim room') {
+          options = [
+            { value: 'all', label: 'all', key: 'all' },
+            ...options
+          ];
+        }
         
         console.log('👥 Users loaded:', options);
         setUsers(options);
@@ -41,7 +51,7 @@ export default function AssigneeSelect({
     };
 
     fetchUsers();
-  }, []);
+  }, [projectName]); // ✅ เพิ่ม projectName ใน dependencies
 
   return (
     <Select
