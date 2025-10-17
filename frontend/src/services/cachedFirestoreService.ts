@@ -97,7 +97,16 @@ export async function getCachedSubtasks(
   setCache: <T>(key: string, data: T, ttl?: number) => void
 ) {
   const cacheKey = generateCacheKey('subtasks', { projectId });
-  
+
+  const buildCdnUrl = (storagePath: string): string => {
+    if (!storagePath) return '';
+    const encodedPath = storagePath
+      .split('/')
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    return `https://bim-tracking-cdn.ttthaiii30.workers.dev/${encodedPath}`;
+  };
+
   return cachedQuery(
     cacheKey,
     getCache,
@@ -110,14 +119,59 @@ export async function getCachedSubtasks(
         taskIds.map(async (taskId) => {
           const subtasksCol = collection(db, 'tasks', taskId, 'subtasks');
           const subtasksSnapshot = await getDocs(subtasksCol);
-          
-          subtasksSnapshot.docs.forEach(subtaskDoc => {
+
+          for (const subtaskDoc of subtasksSnapshot.docs) {
             const data = subtaskDoc.data();
-                        // ✅ กรอง Subtasks ที่ถูกลบออก
+            // ✅ กรอง Subtasks ที่ถูกลบออก
             if (data.subTaskStatus === 'DELETED') {
               console.log('🗑️ Filtered out DELETED subtask:', subtaskDoc.id);
-              return; // ข้ามไป
+              continue;
             }
+
+            let latestFileURL = '';
+            let latestFileName = '';
+            let latestFileTimestamp = 0;
+
+            const dailyReportCol = collection(db, 'tasks', taskId, 'subtasks', subtaskDoc.id, 'dailyReport');
+            const dailyReportSnapshot = await getDocs(dailyReportCol);
+
+            dailyReportSnapshot.forEach((reportDoc) => {
+              const reportData = reportDoc.data();
+              const workhours = Array.isArray(reportData.workhours) ? reportData.workhours : [];
+
+              workhours.forEach((log: any) => {
+                const rawTimestamp = log.timestamp;
+                let timestampValue = 0;
+
+                if (rawTimestamp?.toDate) {
+                  timestampValue = rawTimestamp.toDate().getTime();
+                } else if (rawTimestamp instanceof Date) {
+                  timestampValue = rawTimestamp.getTime();
+                } else if (typeof rawTimestamp === 'string') {
+                  const parsed = Date.parse(rawTimestamp);
+                  if (!Number.isNaN(parsed)) {
+                    timestampValue = parsed;
+                  }
+                }
+
+                if (!timestampValue) return;
+
+                let fileURL: string | null = log.fileURL || null;
+                if (!fileURL && typeof log.storagePath === 'string') {
+                  fileURL = buildCdnUrl(log.storagePath);
+                }
+
+                if (fileURL && timestampValue > latestFileTimestamp) {
+                  latestFileTimestamp = timestampValue;
+                  latestFileURL = fileURL;
+                  const fileName = typeof log.fileName === 'string' && log.fileName.length > 0
+                    ? log.fileName
+                    : (fileURL.split('/').pop() || '').split('?')[0];
+                  latestFileName = fileName || 'daily-report-file';
+                }
+              });
+            });
+
             allSubtasks.push({
               id: subtaskDoc.id,
               subTaskNumber: data.subTaskNumber || '',
@@ -130,12 +184,14 @@ export async function getCachedSubtasks(
               subTaskProgress: data.subTaskProgress || 0,
               startDate: data.startDate,
               endDate: data.endDate,
-              subTaskFiles: data.subTaskFiles || null
+              subTaskFiles: data.subTaskFiles || null,
+              latestDailyReportFileURL: latestFileURL,
+              latestDailyReportFileName: latestFileName,
             });
-          });
+          }
         })
       );
-      
+
       return allSubtasks;
     },
     5 * 60 * 1000 // ⬅️ TTL = 5 นาที (Subtasks เปลี่ยนบ่อย)

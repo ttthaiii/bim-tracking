@@ -1,14 +1,23 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { DailyReportEntry } from '@/types/database';
 import { uploadFileForDailyReport } from '@/services/uploadService';
 import { useAuth } from '@/context/AuthContext';
 
+export interface SelectedFileInfo {
+  fileName: string;
+  fileURL: string;
+  storagePath: string;
+  fileUploadedAt?: string;
+}
+
+export type SelectedFileMap = Record<string, SelectedFileInfo>;
+
 interface UploadPopupProps {
   isOpen: boolean;
   onClose: () => void;
-  onComplete: () => void;
+  onComplete: (files: SelectedFileMap) => void;
   completedTasks: DailyReportEntry[]; // Tasks ที่มี Progress 100%
 }
 
@@ -17,7 +26,12 @@ interface UploadStatus {
     file: File | null;
     uploading: boolean;
     uploaded: boolean;
+    skipped: boolean;
     error: string | null;
+    existingFileName: string | null;
+    existingFileURL: string | null;
+    existingStoragePath: string | null;
+    existingFileUploadedAt: string | null;
   };
 }
 
@@ -28,22 +42,78 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
   completedTasks
 }) => {
   const { appUser } = useAuth();
-  const [uploadStatus, setUploadStatus] = useState<UploadStatus>(() => {
+  const buildInitialStatus = useCallback((): UploadStatus => {
     const initialStatus: UploadStatus = {};
     completedTasks.forEach(task => {
+      const uploadedAtISO = task.fileUploadedAt
+        ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+            ? (task.fileUploadedAt as any).toDate().toISOString()
+            : (task.fileUploadedAt as Date).toISOString?.() || null)
+        : null;
       initialStatus[task.id] = {
         file: null,
         uploading: false,
-        uploaded: false,
-        error: null
+        uploaded: Boolean(task.fileURL),
+        skipped: Boolean(task.fileURL),
+        error: null,
+        existingFileName: task.fileName || null,
+        existingFileURL: task.fileURL || null,
+        existingStoragePath: task.storagePath || null,
+        existingFileUploadedAt: uploadedAtISO,
       };
     });
     return initialStatus;
-  });
+  }, [completedTasks]);
+
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>(() => buildInitialStatus());
+
+  useEffect(() => {
+    if (isOpen) {
+      setUploadStatus(buildInitialStatus());
+      setIsAllUploading(false);
+    }
+  }, [isOpen, buildInitialStatus]);
+
+  useEffect(() => {
+    setUploadStatus(prev => {
+      const merged: UploadStatus = {};
+      completedTasks.forEach(task => {
+        const existing = prev[task.id];
+        merged[task.id] = existing
+          ? {
+              ...existing,
+              existingFileName: existing.existingFileName || task.fileName || null,
+              existingFileURL: existing.existingFileURL || task.fileURL || null,
+              existingStoragePath: existing.existingStoragePath || task.storagePath || null,
+              existingFileUploadedAt: existing.existingFileUploadedAt || (task.fileUploadedAt
+                ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+                    ? (task.fileUploadedAt as any).toDate().toISOString()
+                    : (task.fileUploadedAt as Date).toISOString?.() || null)
+                : null),
+              uploaded: existing.uploaded || Boolean(task.fileURL),
+              skipped: existing.skipped || Boolean(task.fileURL && !existing.file),
+            }
+          : {
+              file: null,
+              uploading: false,
+              uploaded: Boolean(task.fileURL),
+              skipped: Boolean(task.fileURL),
+              error: null,
+              existingFileName: task.fileName || null,
+              existingFileURL: task.fileURL || null,
+              existingStoragePath: task.storagePath || null,
+              existingFileUploadedAt: task.fileUploadedAt
+                ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+                    ? (task.fileUploadedAt as any).toDate().toISOString()
+                    : (task.fileUploadedAt as Date).toISOString?.() || null)
+                : null,
+            };
+      });
+      return merged;
+    });
+  }, [completedTasks]);
 
   const [isAllUploading, setIsAllUploading] = useState(false);
-
-  if (!isOpen) return null;
 
   const handleFileSelect = (taskId: string, file: File | null) => {
     setUploadStatus(prev => ({
@@ -51,14 +121,53 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
       [taskId]: {
         ...prev[taskId],
         file,
+        skipped: false,
+        uploaded: false,
         error: null
+      }
+    }));
+  };
+
+  const handleSkipToExisting = (task: DailyReportEntry) => {
+    setUploadStatus(prev => ({
+      ...prev,
+      [task.id]: {
+        ...prev[task.id],
+        file: null,
+        uploading: false,
+        uploaded: true,
+        skipped: true,
+        error: null,
+        existingFileName: prev[task.id]?.existingFileName || task.fileName || null,
+        existingFileURL: prev[task.id]?.existingFileURL || task.fileURL || null,
+        existingStoragePath: prev[task.id]?.existingStoragePath || task.storagePath || null,
+        existingFileUploadedAt: prev[task.id]?.existingFileUploadedAt
+          || (task.fileUploadedAt
+                ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+                    ? (task.fileUploadedAt as any).toDate().toISOString()
+                    : (task.fileUploadedAt as Date).toISOString?.() || null)
+                : null),
       }
     }));
   };
 
   const handleSingleUpload = async (task: DailyReportEntry) => {
     const status = uploadStatus[task.id];
-    if (!status.file) return;
+    if (!status.file) {
+      // If no new file but task already has existing file, treat as skip
+      if (status.existingFileURL || task.fileURL) {
+        handleSkipToExisting(task);
+      } else {
+        setUploadStatus(prev => ({
+          ...prev,
+          [task.id]: {
+            ...prev[task.id],
+            error: 'กรุณาเลือกไฟล์ก่อนอัปโหลด',
+          }
+        }));
+      }
+      return;
+    }
 
     setUploadStatus(prev => ({
       ...prev,
@@ -74,7 +183,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
         throw new Error('ไม่พบข้อมูลผู้ใช้');
       }
 
-      await uploadFileForDailyReport(
+      const { cdnURL, storagePath, fileUploadedAt } = await uploadFileForDailyReport(
         status.file,
         appUser.employeeId,
         task.subtaskId,
@@ -85,9 +194,16 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
       setUploadStatus(prev => ({
         ...prev,
         [task.id]: {
-          ...prev[task.id],
-          uploading: false,
-          uploaded: true
+        ...prev[task.id],
+        uploading: false,
+        uploaded: true,
+        skipped: false,
+        error: null,
+        existingFileName: status.file?.name || prev[task.id]?.existingFileName || null,
+        existingFileURL: cdnURL,
+        existingStoragePath: storagePath,
+        existingFileUploadedAt: fileUploadedAt.toDate().toISOString(),
+        file: null,
         }
       }));
     } catch (error) {
@@ -107,7 +223,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
     setIsAllUploading(true);
     
     const tasksWithFiles = completedTasks.filter(task => 
-      uploadStatus[task.id]?.file
+      uploadStatus[task.id]?.file && !uploadStatus[task.id]?.skipped
     );
 
     for (const task of tasksWithFiles) {
@@ -119,13 +235,49 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
     setIsAllUploading(false);
   };
 
-  const allTasksUploaded = completedTasks.every(task => 
-    uploadStatus[task.id]?.uploaded || !uploadStatus[task.id]?.file
-  );
+  const hasFilesToUpload = useMemo(() => completedTasks.some(task => {
+    const status = uploadStatus[task.id];
+    if (!status) return true;
 
-  const hasFilesToUpload = completedTasks.some(task => 
-    uploadStatus[task.id]?.file && !uploadStatus[task.id]?.uploaded
-  );
+    const hasExistingFile = Boolean(status.existingFileURL || task.fileURL);
+
+    if (status.file) {
+      return !status.uploaded;
+    }
+
+    if (status.skipped || status.uploaded) {
+      return false;
+    }
+
+    return !hasExistingFile;
+  }), [completedTasks, uploadStatus]);
+
+  const buildSelectedFileMap = useCallback((): SelectedFileMap => {
+    const map: SelectedFileMap = {};
+    completedTasks.forEach(task => {
+      const status = uploadStatus[task.id];
+      if (!status) return;
+
+      const fileURL = status.existingFileURL || task.fileURL;
+      if (!fileURL) return;
+
+      map[task.id] = {
+        fileName: status.existingFileName || task.fileName || '',
+        fileURL,
+        storagePath: status.existingStoragePath || task.storagePath || '',
+        fileUploadedAt: status.existingFileUploadedAt || (task.fileUploadedAt
+          ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+              ? (task.fileUploadedAt as any).toDate().toISOString()
+              : (task.fileUploadedAt as Date).toISOString?.() || undefined)
+          : undefined),
+      };
+    });
+    return map;
+  }, [completedTasks, uploadStatus]);
+
+  if (!isOpen) {
+    return null;
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
@@ -175,11 +327,24 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
                         type="file"
                         onChange={(e) => handleFileSelect(task.id, e.target.files?.[0] || null)}
                         className="w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none focus:border-green-500"
-                        disabled={status?.uploading || status?.uploaded}
+                        disabled={status?.uploading}
                       />
                       {status?.file && (
                         <div className="mt-1 text-xs text-gray-600">
                           {status.file.name} ({(status.file.size / 1024 / 1024).toFixed(2)} MB)
+                        </div>
+                      )}
+                      {!status?.file && (status?.existingFileURL || task.fileURL) && (
+                        <div className="mt-1 text-xs text-green-700 flex items-center gap-2">
+                          <span>ไฟล์ปัจจุบัน:</span>
+                          <a
+                            href={status?.existingFileURL || task.fileURL || '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-green-600 hover:text-green-800 underline"
+                          >
+                            {status?.existingFileName || task.fileName || 'เปิดไฟล์'}
+                          </a>
                         </div>
                       )}
                     </td>
@@ -190,7 +355,12 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
                           <span className="ml-2 text-sm text-green-600">กำลังอัปโหลด...</span>
                         </div>
                       )}
-                      {status?.uploaded && (
+                      {status?.skipped && (status?.existingFileURL || task.fileURL) && !status?.uploading && (
+                        <div className="text-green-600 font-semibold text-sm">
+                          ✓ ใช้ไฟล์เดิม
+                        </div>
+                      )}
+                      {status?.uploaded && !status?.skipped && (
                         <div className="text-green-600 font-semibold text-sm">
                           ✓ อัปโหลดสำเร็จ
                         </div>
@@ -200,24 +370,39 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
                           ✗ {status.error}
                         </div>
                       )}
-                      {!status?.uploading && !status?.uploaded && !status?.error && (
+                      {!status?.uploading && !status?.uploaded && !status?.error && !status?.skipped && (
                         <div className="text-gray-500 text-sm">
                           รอการอัปโหลด
                         </div>
                       )}
                     </td>
                     <td className="border border-green-200 p-4 text-center">
-                      <button
-                        onClick={() => handleSingleUpload(task)}
-                        disabled={!status?.file || status?.uploading || status?.uploaded}
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                          !status?.file || status?.uploading || status?.uploaded
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white shadow-md hover:shadow-lg transform hover:scale-105'
-                        }`}
-                      >
-                        {status?.uploaded ? 'อัปโหลดแล้ว' : status?.uploading ? 'กำลังอัปโหลด...' : 'อัปโหลด'}
-                      </button>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => handleSingleUpload(task)}
+                          disabled={status?.uploading || (!status?.file && status?.uploaded)}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                            status?.uploading || (!status?.file && status?.uploaded)
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white shadow-md hover:shadow-lg transform hover:scale-105'
+                          }`}
+                        >
+                          {status?.uploading ? 'กำลังอัปโหลด...' : status?.uploaded && !status?.file ? 'อัปโหลดแล้ว' : 'อัปโหลด'}
+                        </button>
+                        {(status?.existingFileURL || task.fileURL) && (
+                          <button
+                            onClick={() => handleSkipToExisting(task)}
+                            disabled={status?.uploading}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                              status?.uploading
+                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                : 'bg-white border border-green-400 text-green-600 hover:bg-green-50 shadow-sm'
+                            }`}
+                          >
+                            ใช้ไฟล์เดิม
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -254,10 +439,10 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
             )}
             
             <button
-              onClick={onComplete}
-              disabled={!allTasksUploaded && hasFilesToUpload}
+              onClick={() => onComplete(buildSelectedFileMap())}
+              disabled={hasFilesToUpload}
               className={`px-8 py-3 rounded-xl text-lg font-medium shadow-lg transition-all duration-200 transform hover:scale-105 ${
-                !allTasksUploaded && hasFilesToUpload
+                hasFilesToUpload
                   ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                   : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white hover:shadow-xl'
               }`}

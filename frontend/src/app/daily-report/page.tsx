@@ -14,6 +14,7 @@ const Calendar = dynamic(
 import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
 import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee, UploadedFile } from '@/services/taskAssignService';
+import type { SelectedFileMap } from '@/components/UploadPopup';
 import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useDashboard } from '@/context/DashboardContext';
@@ -26,6 +27,7 @@ import { RecheckPopup } from '@/components/RecheckPopup';
 import { HistoryModal } from '@/components/HistoryModal'; // Import the new modal
 import { isEqual } from 'lodash';
 import { Timestamp } from 'firebase/firestore';
+import FilePreviewModal from '@/components/modals/FilePreviewModal';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
@@ -40,6 +42,120 @@ const formatDateToYYYYMMDD = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+const formatDateForDisplay = (dateString: string): string => {
+  if (!dateString) return '';
+  const date = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateString;
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date).replace(/ /g, '/');
+};
+
+const NON_WORK_KEYWORDS = ['ลา', 'ประชุม', 'meeting'];
+
+const includesNonWorkKeyword = (value?: string | null): boolean => {
+  if (!value) return false;
+  const lowerValue = value.toLowerCase();
+  return NON_WORK_KEYWORDS.some(keyword => lowerValue.includes(keyword.toLowerCase()));
+};
+
+const parseTimeString = (value?: string) => {
+  const [hoursRaw = '0', minutesRaw = '0'] = (value || '0:0').split(':');
+  const hours = Number.isFinite(Number(hoursRaw)) ? parseInt(hoursRaw, 10) || 0 : 0;
+  const minutes = Number.isFinite(Number(minutesRaw)) ? parseInt(minutesRaw, 10) || 0 : 0;
+  return { hours, minutes };
+};
+
+const normalizeTimeString = (value?: string) => {
+  const { hours, minutes } = parseTimeString(value);
+  return `${hours}:${minutes}`;
+};
+
+const normalizeProgressString = (value?: string | number) => {
+  const numeric = parseInt(String(value ?? '0').toString().replace('%', ''), 10);
+  return `${Number.isNaN(numeric) ? 0 : numeric}%`;
+};
+
+const isEntryBlank = (entry?: DailyReportEntry | null): boolean => {
+  if (!entry) return true;
+  const hasSubtask = Boolean(entry.subtaskId?.trim?.());
+  const hasNote = Boolean(entry.note?.trim?.());
+  const hasFile = Boolean(entry.fileURL || entry.fileName);
+  const hasItem = Boolean(entry.item?.trim?.());
+  const normal = parseTimeString(entry.normalWorkingHours);
+  const ot = parseTimeString(entry.otWorkingHours);
+  const progressValue = parseInt(String(entry.progress ?? '0').toString().replace('%', ''), 10) || 0;
+  return (
+    !hasSubtask &&
+    !hasNote &&
+    !hasFile &&
+    !hasItem &&
+    normal.hours === 0 &&
+    normal.minutes === 0 &&
+    ot.hours === 0 &&
+    ot.minutes === 0 &&
+    progressValue === 0
+  );
+};
+
+const sanitizeEntry = (entry: DailyReportEntry) => {
+  const {
+    id,
+    relateDrawing: _relateDrawing,
+    timestamp: _timestamp,
+    loggedAt: _loggedAt,
+    progressError: _progressError,
+    isExistingData: _isExistingData,
+    initialProgress: _initialProgress,
+    isLeaveTask: _isLeaveTask,
+    ...rest
+  } = entry;
+
+  const sanitizedId = id && (id.startsWith('temp-') || id.includes('-temp-')) ? '' : (id || '');
+
+  return {
+    id: sanitizedId,
+    employeeId: rest.employeeId,
+    assignDate: rest.assignDate,
+    subtaskId: rest.subtaskId || '',
+    subtaskPath: rest.subtaskPath || '',
+    taskName: rest.taskName || '',
+    subTaskName: rest.subTaskName || '',
+    subTaskCategory: rest.subTaskCategory || '',
+    internalRev: rest.internalRev || '',
+    subTaskScale: rest.subTaskScale || '',
+    project: rest.project || '',
+    item: rest.item || '',
+    note: rest.note?.trim?.() || '',
+    status: rest.status || 'pending',
+    normalWorkingHours: normalizeTimeString(rest.normalWorkingHours),
+    otWorkingHours: normalizeTimeString(rest.otWorkingHours),
+    progress: normalizeProgressString(rest.progress),
+    fileName: rest.fileName || '',
+    fileURL: rest.fileURL || '',
+    storagePath: rest.storagePath || '',
+    fileUploadedAt: rest.fileUploadedAt instanceof Timestamp
+      ? rest.fileUploadedAt.toMillis()
+      : rest.fileUploadedAt || null,
+    loggedAtMillis: (rest as any).loggedAt instanceof Timestamp ? (rest as any).loggedAt.toMillis() : null,
+    timestampMillis: entry.timestamp instanceof Timestamp ? entry.timestamp.toMillis() : null
+  };
+};
+
+const normalizeEntries = (entries?: DailyReportEntry[]): ReturnType<typeof sanitizeEntry>[] => {
+  if (!entries || entries.length === 0) return [];
+  return entries
+    .filter(entry => !isEntryBlank(entry))
+    .map(entry => sanitizeEntry(entry))
+    .sort((a, b) => {
+      const keyA = `${a.id}-${a.subtaskId}-${a.assignDate}`;
+      const keyB = `${b.id}-${b.subtaskId}-${b.assignDate}`;
+      return keyA.localeCompare(keyB);
+    });
+};
+
 const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: string, baseId: string, index: number): DailyReportEntry => ({
   id: `${baseId}-temp-${index}`,
   employeeId, assignDate, subtaskId: '', subtaskPath: '',
@@ -49,6 +165,9 @@ const createInitialEmptyDailyReportEntry = (employeeId: string, assignDate: stri
   isLeaveTask: false,
   initialProgress: 0,
   progressError: '',
+  fileName: '',
+  fileURL: '',
+  storagePath: '',
 });
 
 // Calculate total working hours excluding a specific entry
@@ -79,16 +198,16 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
   
   // ถ้าเหลือเวลาน้อยกว่า 1 ชั่วโมง ให้แสดงตัวเลือกนาทีตามที่เหลือ
   if (remainingHours < 0) {
-    return [{ value: '0', label: '0 น. (เกินเวลา)' }];
+    return [{ value: '0', label: '0 น.' }];
   } else if (remainingHours === 0) {
-    return [{ value: '0', label: '0 น. (ครบ 8 ชม.)' }];
+    return [{ value: '0', label: '0 น.' }];
   } else if (remainingHours < 1) {
     const maxMinutes = Math.floor(remainingHours * 60);
     return [0, 15, 30, 45]
       .filter(m => m <= maxMinutes)
       .map(m => ({ 
         value: m.toString(), 
-        label: `${m} น. (เหลือ ${maxMinutes} น.)`
+        label: `${m} น. `
       }));
   }
   
@@ -96,7 +215,7 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
   const remainingMinutes = Math.floor(remainingHours * 60);
   return [0, 15, 30, 45].map(m => ({ 
     value: m.toString(), 
-    label: `${m} น. (เหลือ ${remainingMinutes - m} น.)`
+    label: `${m} น.`
   }));
 };
 
@@ -146,10 +265,20 @@ export default function DailyReport() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   // historyLogs will now be grouped by timestamp
   const [historyLogsGrouped, setHistoryLogsGrouped] = useState<Record<string, DailyReportEntry[]>>({});
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [showErrorModal, setShowErrorModal] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
+const [showSuccessModal, setShowSuccessModal] = useState(false);
+const [successMessage, setSuccessMessage] = useState('');
+const [showErrorModal, setShowErrorModal] = useState(false);
+const [errorMessage, setErrorMessage] = useState('');
+const [previewFile, setPreviewFile] = useState<{ name: string; url: string } | null>(null);
+const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  const computeHasUnsavedChanges = useCallback(
+    (entries: DailyReportEntry[] = []) => {
+      const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
+      return !isEqual(normalizeEntries(originalData), normalizeEntries(entries));
+    },
+    [allDailyEntries, workDate]
+  );
 
   const handleShowHistory = () => {
     // กรองข้อมูลสำหรับประวัติ: ใช้ assignDate เป็นหลัก
@@ -193,23 +322,26 @@ export default function DailyReport() {
     setHistoryLogsGrouped(sortedGroupedLogs);
     setShowHistoryModal(true);
   };
+
+  const handlePreviewFile = (file: { fileName?: string; fileURL: string }) => {
+    if (!file?.fileURL) return;
+    setPreviewFile({
+      name: file.fileName || 'file',
+      url: file.fileURL,
+    });
+    setIsPreviewOpen(true);
+  };
   
   useEffect(() => {
-    const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
-    const currentData = tempDataCache[workDate];
-    
-    const normalize = (entries: DailyReportEntry[] = []) => 
-      entries.map(({ id, relateDrawing: _relateDrawing, ...rest }) => ({ 
-        ...rest, 
-        id: id.startsWith('temp-') ? '' : id 
-      }));
-
-    if (originalData.length === 0 && currentData && currentData.some((d: DailyReportEntry) => d.subtaskId)) {
-        setHasUnsavedChanges(true);
-    } else {
-        setHasUnsavedChanges(!isEqual(normalize(originalData), normalize(currentData)));
-    }
-  }, [workDate, allDailyEntries, setHasUnsavedChanges, tempDataCache]);
+    const currentEntries = tempDataCache[workDate] ?? dailyReportEntries;
+    setHasUnsavedChanges(computeHasUnsavedChanges(currentEntries));
+  }, [
+    workDate,
+    tempDataCache,
+    dailyReportEntries,
+    computeHasUnsavedChanges,
+    setHasUnsavedChanges
+  ]);
 
   const fetchAllData = useCallback(async (eid: string) => {
     setLoading(true);
@@ -322,7 +454,7 @@ export default function DailyReport() {
     if (isFutureDate) {
       // วันในอนาคต: แสดงเฉพาะงานลา
       const leaveTasks = availableSubtasks.filter(
-        subtask => (subtask.taskName || '').includes('ลา') || (subtask.subTaskName || '').includes('ลา')
+        subtask => includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
       );
       setFilteredSubtasks(leaveTasks);
     } else {
@@ -406,9 +538,9 @@ export default function DailyReport() {
   const entriesToShow = Object.values(latestEntriesMap).map((entry: DailyReportEntry) => {
       // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
       const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
-      const isLeaveTask = subtask ?
-        (subtask.taskName?.includes('ลา') || subtask.subTaskName?.includes('ลา')) :
-        (entry.taskName?.includes('ลา') || entry.subTaskName?.includes('ลา'));
+      const isLeaveTask = subtask
+        ? includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
+        : includesNonWorkKeyword(entry.taskName) || includesNonWorkKeyword(entry.subTaskName) || includesNonWorkKeyword(entry.item);
 
       // สร้าง relateDrawing สำหรับข้อมูลเก่า
       let relateDrawing = entry.relateDrawing;
@@ -426,13 +558,27 @@ export default function DailyReport() {
         relateDrawing = `${abbr}_${taskName}_${subTaskName}_${item}`;
       }
 
+      const matchingUploadedFile = uploadedFiles.find(file =>
+        file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate
+      );
+
+      const resolvedFileUploadedAt = entry.fileUploadedAt
+        || (matchingUploadedFile?.fileUploadedAt instanceof Timestamp
+              ? matchingUploadedFile.fileUploadedAt
+              : undefined);
+
       return {
         ...entry,
         isLeaveTask,
         initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
         progress: isLeaveTask ? '0%' : entry.progress,
+        otWorkingHours: isLeaveTask ? '0:0' : (entry.otWorkingHours || '0:0'),
         isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
         relateDrawing: relateDrawing || '', // เพิ่ม relateDrawing
+        fileName: entry.fileName || matchingUploadedFile?.fileName || '',
+        fileURL: entry.fileURL || matchingUploadedFile?.fileURL || '',
+        storagePath: entry.storagePath || matchingUploadedFile?.storagePath || '',
+        fileUploadedAt: resolvedFileUploadedAt,
       };
     });
 
@@ -448,12 +594,18 @@ export default function DailyReport() {
       const newEntries = currentEntries.map((entry: DailyReportEntry) => {
         if (entry.id === entryId) {
           const newEntry = { ...entry, ...updates };
-          
+
           console.log('📦 Updated entry:', {
             old: entry,
             new: newEntry
           });
-          
+
+          if (newEntry.isLeaveTask) {
+            newEntry.progress = '0%';
+            newEntry.progressError = '';
+            newEntry.otWorkingHours = '0:0';
+          }
+
           const progress = parseInt(newEntry.progress);
           if (progress === 100) newEntry.status = 'completed';
           else if (progress > 0) newEntry.status = 'in-progress';
@@ -466,12 +618,12 @@ export default function DailyReport() {
       // ✅ ลบบรรทัดที่เรียก setTempDataCache ออกจากตรงนี้
       
       console.log('✅ New entries state:', newEntries);
-      
+
+      setHasUnsavedChanges(computeHasUnsavedChanges(newEntries));
+
       // เราสามารถ return newEntries ตรงๆ ได้เลย เพราะ .map() จะคืนค่าเป็น array ใหม่อยู่แล้ว
       return newEntries; 
     });
-    
-    setHasUnsavedChanges(true);
   };
 
   const handleRowFocus = (entryId: string, idx: number) => {
@@ -501,7 +653,12 @@ export default function DailyReport() {
       console.log('❌ Entry not found:', entryId);
       return;
     }
-  
+
+    if (currentEntry.isLeaveTask && type === 'otWorkingHours') {
+      handleUpdateEntry(entryId, { otWorkingHours: '0:0' });
+      return;
+    }
+
     const currentValue = currentEntry[type] || '0:0';
     let [h, m] = currentValue.split(':').map(Number);
     
@@ -529,7 +686,6 @@ export default function DailyReport() {
     console.log(`✅ Updating ${type} for ${entryId}:`, currentValue, '→', newValue);
     
     handleUpdateEntry(entryId, { [type]: newValue });
-    setHasUnsavedChanges(true);
   };
 
   const handleDeleteEntry = (entryId: string) => {
@@ -540,15 +696,14 @@ export default function DailyReport() {
 
     setDailyReportEntries(currentEntries => {
       const newEntries = currentEntries.filter(entry => entry.id !== entryId);
-      // If all entries are deleted, add one empty row
       if (newEntries.length === 0) {
-        return [createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0)];
+        const resetEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
+        setHasUnsavedChanges(computeHasUnsavedChanges([resetEntry]));
+        return [resetEntry];
       }
+      setHasUnsavedChanges(computeHasUnsavedChanges(newEntries));
       return newEntries;
     });
-
-    // Update unsaved changes state
-    setHasUnsavedChanges(true);
   };
   
   const handleAddRow = () => {
@@ -613,7 +768,9 @@ export default function DailyReport() {
                   null;
     }
 
-    const isLeave = selectedSubtask?.taskName?.includes('ลา') || selectedSubtask?.subTaskName?.includes('ลา') || false;
+    const isLeave = selectedSubtask
+      ? includesNonWorkKeyword(selectedSubtask.taskName) || includesNonWorkKeyword(selectedSubtask.subTaskName) || includesNonWorkKeyword(selectedSubtask.item)
+      : false;
     // Note: initialProgress here is for newly selected subtask, not for existing entry validation.
     const newSubtaskInitialProgress = selectedSubtask?.subTaskProgress || 0;
 
@@ -714,7 +871,7 @@ export default function DailyReport() {
     setIsRecheckOpen(true);
   };
 
-  const handleConfirmSubmit = async () => {
+  const handleConfirmSubmit = async (selectedFiles: SelectedFileMap = {}) => {
     setIsRecheckOpen(false);
     setLoading(true);
     setError('');
@@ -725,11 +882,26 @@ export default function DailyReport() {
       if (!dateRegex.test(selectedDate)) {
         throw new Error(`Invalid date format: ${selectedDate}`);
       }
+      const entriesToSave = entriesToSubmit.map(entry => {
+        const selectedFile = selectedFiles?.[entry.id];
+        let fileUploadedAt = entry.fileUploadedAt;
 
-      const entriesToSave = entriesToSubmit.map(entry => ({
-        ...entry,
-        assignDate: selectedDate,
-      }));
+        if (selectedFile?.fileUploadedAt) {
+          const parsedDate = new Date(selectedFile.fileUploadedAt);
+          if (!Number.isNaN(parsedDate.getTime())) {
+            fileUploadedAt = Timestamp.fromDate(parsedDate);
+          }
+        }
+
+        return {
+          ...entry,
+          assignDate: selectedDate,
+          fileName: selectedFile?.fileName || entry.fileName || '',
+          fileURL: selectedFile?.fileURL || entry.fileURL || '',
+          storagePath: selectedFile?.storagePath || entry.storagePath || '',
+          fileUploadedAt,
+        };
+      });
 
       await saveDailyReportEntries(employeeId, entriesToSave);
       
@@ -790,12 +962,12 @@ export default function DailyReport() {
         <div className="flex flex-col md:flex-row gap-6">
           {/* Calendar and Legend Section */}
           <div className="w-full md:w-[384px] md:flex-shrink-0">
-          <div className="bg-white rounded-lg shadow-md border border-gray-200">
+          <div className="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
             <Calendar 
               onChange={setDate} 
               value={date || new Date()} 
               className="custom-calendar" 
-              locale="th-TH"
+              locale="en-GB"
               tileClassName={tileClassName}
               key={`calendar-${employeeId}`} 
             />
@@ -839,7 +1011,12 @@ export default function DailyReport() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">วันที่ทำงาน</label>
-                  <input type="date" value={workDate} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed"/>
+                  <input
+                    type="text"
+                    value={formatDateForDisplay(workDate)}
+                    readOnly
+                    className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed"
+                  />
                 </div>
               </div>
 
@@ -866,7 +1043,16 @@ export default function DailyReport() {
                     </thead>
                     <tbody>
                       {dailyReportEntries.map((entry, index) => {
-                        const relevantFile = uploadedFiles.find(file => 
+                        const inlineFile = entry.fileURL
+                          ? {
+                              fileURL: entry.fileURL,
+                              fileName: entry.fileName || '',
+                              subtaskId: entry.subtaskId,
+                              workDate: entry.assignDate,
+                            }
+                          : null;
+
+                        const relevantFile = inlineFile || uploadedFiles.find(file => 
                           file.subtaskId === entry.subtaskId && 
                           file.workDate === entry.assignDate
                         );
@@ -903,14 +1089,15 @@ export default function DailyReport() {
 
                             {/* เวลาทำงาน / Working Hours */}
                             <td className="p-2 border-r border-yellow-200">
-                              <div className="flex items-center space-x-1 w-28">
+                              <div className="flex items-center gap-1 w-full max-w-[220px]">
                                 <Select 
                                   key={`hour-${entry.id}-${entry.normalWorkingHours}`}
                                   value={(entry.normalWorkingHours || '0:0').split(':')[0]} 
                                   onChange={value => handleTimeChange(entry.id, 'normalWorkingHours', 'h', value)} 
                                   options={getHourOptions(dailyReportEntries, entry.id)} 
                                   disabled={isReadOnly || (entry.isExistingData && !editableRows.has(entry.id))}
-                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
+                                  className="flex-1 !min-w-[68px] !py-1 !px-1 text-center"
+                                  selectClassName="!text-[11px]"
                                 />
                                 <span className="text-gray-400">:</span>
                                 <Select 
@@ -923,21 +1110,23 @@ export default function DailyReport() {
                                     Number((entry.normalWorkingHours || '0:0').split(':')[0])
                                   )} 
                                   disabled={Boolean(isReadOnly || (entry.isExistingData && !editableRows.has(entry.id)))}
-                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
+                                  className="flex-1 !min-w-[68px] !py-1 !px-1 text-center"
+                                  selectClassName="!text-[11px]"
                                 />
                               </div>
                             </td>
 
                             {/* เวลาโอที / Overtime */}
                             <td className="p-2 border-r border-yellow-200">
-                              <div className="flex items-center space-x-1 w-28">
+                              <div className="flex items-center gap-1 w-full max-w-[220px]">
                                 <Select 
                                   key={`ot-hour-${entry.id}-${entry.otWorkingHours}`}
                                   value={(entry.otWorkingHours || '0:0').split(':')[0]} 
                                   onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'h', value)} 
                                   options={Array.from({ length: 13 }, (_, i) => ({ value: i.toString(), label: `${i} hrs` }))} 
-                                  disabled={isReadOnly || (entry.isExistingData && !editableRows.has(entry.id))}
-                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
+                                  disabled={isReadOnly || entry.isLeaveTask || (entry.isExistingData && !editableRows.has(entry.id))}
+                                  className="flex-1 !min-w-[68px] !py-1 !px-1 text-center"
+                                  selectClassName="!text-[11px]"
                                 />
                                 <span className="text-gray-400">:</span>
                                 <Select 
@@ -945,8 +1134,9 @@ export default function DailyReport() {
                                   value={(entry.otWorkingHours || '0:0').split(':')[1]} 
                                   onChange={value => handleTimeChange(entry.id, 'otWorkingHours', 'm', value)} 
                                   options={[0, 15, 30, 45].map(m => ({ value: m.toString(), label: `${m} mins` }))} 
-                                  disabled={Boolean(isReadOnly || (entry.isExistingData && !editableRows.has(entry.id)))}
-                                  className="!w-12 !py-1 !px-1 text-center !text-xs"
+                                  disabled={Boolean(isReadOnly || entry.isLeaveTask || (entry.isExistingData && !editableRows.has(entry.id)))}
+                                  className="flex-1 !min-w-[68px] !py-1 !px-1 text-center"
+                                  selectClassName="!text-[11px]"
                                 />
                               </div>
                             </td>
@@ -993,9 +1183,16 @@ export default function DailyReport() {
                             </td>
                             <td className="p-2 border-r border-yellow-200 text-center">
                               {relevantFile ? (
-                                <a href={relevantFile.fileURL} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700 font-semibold">
-                                  Download
-                                </a>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePreviewFile({
+                                    fileName: relevantFile.fileName,
+                                    fileURL: relevantFile.fileURL,
+                                  })}
+                                  className="text-blue-500 hover:text-blue-700 font-semibold underline"
+                                >
+                                  Preview
+                                </button>
                               ) : (
                                 <span className="text-gray-500">ยังไม่มีไฟล์</span>
                               )}
@@ -1093,6 +1290,14 @@ export default function DailyReport() {
         onConfirm={handleConfirmSubmit}
         dailyReportEntries={entriesToSubmit}
         workDate={workDate}
+      />
+      <FilePreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => {
+          setIsPreviewOpen(false);
+          setPreviewFile(null);
+        }}
+        file={previewFile}
       />
       
     </PageLayout>

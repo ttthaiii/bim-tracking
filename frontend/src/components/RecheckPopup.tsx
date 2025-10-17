@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { DailyReportEntry } from '@/types/database';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
-import { UploadPopup } from './UploadPopup';
+import { UploadPopup, SelectedFileMap } from './UploadPopup';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
@@ -12,7 +12,7 @@ type Value = ValuePiece | [ValuePiece, ValuePiece];
 interface RecheckPopupProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (files: SelectedFileMap) => void;
   dailyReportEntries: DailyReportEntry[];
   workDate: string;
   onEdit?: () => void;
@@ -79,14 +79,14 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
       setShowUploadPopup(true);
     } else {
       // ถ้าไม่มี task ที่เสร็จ 100% ให้ confirm ตรงไป
-      onConfirm();
+      onConfirm({});
     }
   };
 
   // จัดการเมื่อ Upload เสร็จ
-  const handleUploadComplete = () => {
+  const handleUploadComplete = (files: SelectedFileMap) => {
     setShowUploadPopup(false);
-    onConfirm(); // เรียก onConfirm หลังจาก upload เสร็จ
+    onConfirm(files); // เรียก onConfirm หลังจาก upload เสร็จ พร้อมไฟล์ที่เลือก
   };
 
   return (
@@ -205,21 +205,22 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
       <div className="bg-white rounded-2xl p-8 flex gap-8 shadow-2xl border border-orange-100" style={{ minWidth: '80vw', maxHeight: '90vh' }}>
         {/* Left side - Calendar */}
-        <div className="w-96">
-          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl p-6 shadow-lg">
+        <div className="w-full max-w-md">
+          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl p-4 shadow-lg">
                     <Calendar
             onChange={(value: Value) => setSelectedDate(value)}
             value={selectedDate}
             className="w-full border-0 rounded-xl shadow-md bg-white text-lg custom-calendar"
-            locale="th-TH"
-            formatShortWeekday={(locale, date) => ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'][date.getDay()]}
+            locale="en-GB"
+            formatShortWeekday={(locale, date) =>
+              date.toLocaleDateString('en-GB', { weekday: 'short' }).replace('.', '')
+            }
             navigationLabel={({ date, view }) => {
               if (view === 'month') {
-                const thaiMonths = [
-                  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-                  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-                ];
-                return `${thaiMonths[date.getMonth()]} ${date.getFullYear()}`;
+                return new Intl.DateTimeFormat('en-GB', {
+                  month: 'long',
+                  year: 'numeric',
+                }).format(date);
               }
               return '';
             }}
@@ -227,13 +228,17 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           </div>
           <div className="mt-6 text-center bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-200">
             <p className="font-semibold text-lg mb-2 text-orange-800">วันที่เลือก:</p>
-            <p className="text-lg text-orange-700">{selectedDate instanceof Date ? (() => {
-              const thaiMonths = [
-                'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-              ];
-              return `${selectedDate.getDate()} ${thaiMonths[selectedDate.getMonth()]} ${selectedDate.getFullYear()}`;
-            })() : ''}</p>
+            <p className="text-lg text-orange-700">
+              {selectedDate instanceof Date
+                ? new Intl.DateTimeFormat('en-GB', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })
+                    .format(selectedDate)
+                    .replace(/ /g, '/')
+                : ''}
+            </p>
           </div>
           
           {/* กำกับสีในปฏิทิน */}

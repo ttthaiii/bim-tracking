@@ -2,10 +2,11 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Timestamp } from "firebase/firestore";
 import CreateProjectModal from "@/components/modals/CreateProjectModal";
 import ProjectListModal from "@/components/modals/ProjectListModal";
+import ManageUsersModal from "@/components/modals/ManageUsersModal";
 import {
   createProject,
   updateProjectLeader,
@@ -15,6 +16,7 @@ import {
   updateTask,
   createTask,
   deleteTask,
+  getTaskEditHistory,
 } from "@/services/firebase";
 import { Project, Task } from "@/types/database";
 import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
@@ -26,6 +28,9 @@ import ExportModal from "@/components/modals/ExportModal";
 import { exportGanttChart } from "@/utils/exportGanttChart";
 import ImportExcelModal from '@/components/modals/ImportExcelModal';
 import ViewDeletedModal from '@/components/modals/ViewDeletedModal';
+import { uploadTaskEditAttachment } from "@/services/uploadService";
+import FilePreviewModal from "@/components/modals/FilePreviewModal";
+import { useAuth } from "@/context/AuthContext";
 
 interface TaskRow {
   firestoreId?: string;
@@ -40,6 +45,23 @@ interface TaskRow {
   link?: string;
   progress?: number;
   correct: boolean;
+}
+
+type EditChange = {
+  field: string;
+  label: string;
+  before: string;
+  after: string;
+};
+
+interface TaskEditHistoryEntry {
+  timestamp?: Timestamp | Date | { seconds: number; nanoseconds?: number };
+  fields?: EditChange[] | Array<{ field?: string; label?: string; before?: string; after?: string }>;
+  note?: string;
+  fileURL?: string;
+  fileName?: string;
+  storagePath?: string;
+  fileUploadedAt?: Timestamp | Date | { seconds: number; nanoseconds?: number };
 }
 
 const initialRows: TaskRow[] = [
@@ -157,6 +179,7 @@ const translateStatus = (status: string, isWorkRequest: boolean = false): string
 };
 
 const ProjectsPage = () => {
+  const { appUser } = useAuth();
   const [selectedProject, setSelectedProject] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("");
   const [rows, setRows] = useState<TaskRow[]>(initialRows);
@@ -172,11 +195,21 @@ const ProjectsPage = () => {
   const [editedRows, setEditedRows] = useState<Set<number>>(new Set());
   const [originalRows, setOriginalRows] = useState<Map<number, TaskRow>>(new Map());
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [saveModalData, setSaveModalData] = useState<{ updated: Array<{ id: string; name: string; changes: string[] }>; created: Array<{ id: string; name: string; changes: string[] }>; }>({ updated: [], created: [] });
+  const [saveModalData, setSaveModalData] = useState<{ updated: Array<{ id: string; name: string; changes: string[]; rowIdx: number }>; created: Array<{ id: string; name: string; changes: string[] }>; }>({ updated: [], created: [] });
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [showAddRevModal, setShowAddRevModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  const isProjectLocked = !selectedProject || selectedProject === "all";
+  const requireProjectSelection = () => {
+    if (isProjectLocked) {
+      setErrorMessage('กรุณาเลือกโครงการก่อนจัดการข้อมูล');
+      setShowErrorModal(true);
+      return false;
+    }
+    return true;
+  };
   const [showExportModal, setShowExportModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ idx: number; row: TaskRow } | null>(null);
   const [allTasksCache, setAllTasksCache] = useState<(Task & { id: string })[]>([]);
@@ -189,6 +222,152 @@ const ProjectsPage = () => {
   const [pendingRevCount, setPendingRevCount] = useState(0);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [editNotes, setEditNotes] = useState<Record<number, string>>({});
+  const [editAttachments, setEditAttachments] = useState<Record<number, File | null>>({});
+  const [editAttachmentErrors, setEditAttachmentErrors] = useState<Record<number, string | null>>({});
+  const [editChangesMap, setEditChangesMap] = useState<Record<number, EditChange[]>>({});
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<TaskEditHistoryEntry[]>([]);
+  const [historyTaskName, setHistoryTaskName] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyPreviewFile, setHistoryPreviewFile] = useState<{ name: string; url: string } | null>(null);
+  const [isHistoryPreviewOpen, setIsHistoryPreviewOpen] = useState(false);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+
+  const formatDisplayValue = (value: any): string => {
+    if (value === undefined || value === null) return '-';
+    if (value instanceof Timestamp) {
+      return formatDate(value);
+    }
+    if (value instanceof Date) {
+      return formatDate(value);
+    }
+    if (typeof value === 'string') {
+      return value.trim() || '-';
+    }
+    if (typeof value === 'boolean') {
+      return value ? 'Yes' : 'No';
+    }
+    return String(value);
+  };
+
+  const normalizeTimestamp = (value: any): Date | null => {
+    if (!value) return null;
+    if (value instanceof Timestamp) return value.toDate();
+    if (value instanceof Date) return value;
+    if (typeof value === 'string') {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value === 'object' && typeof value.seconds === 'number') {
+      return new Date(value.seconds * 1000);
+    }
+    return null;
+  };
+
+  const computeRowChangesBetween = (original: TaskRow | undefined, updated: TaskRow): EditChange[] => {
+    if (!original) return [];
+    const fields: Array<{ field: keyof TaskRow; label: string }> = [
+      { field: 'relateDrawing', label: 'Relate Drawing' },
+      { field: 'activity', label: 'Activity' },
+      { field: 'startDate', label: 'Plan Start Date' },
+      { field: 'dueDate', label: 'Due Date' },
+      { field: 'statusDwg', label: 'Status DWG.' },
+      { field: 'docNo', label: 'Doc. No.' },
+      { field: 'link', label: 'Link File' },
+    ];
+
+    const changes: EditChange[] = [];
+    fields.forEach(({ field, label }) => {
+      const before = formatDisplayValue(original[field]);
+      const after = formatDisplayValue(updated[field]);
+      if (before !== after) {
+        changes.push({ field: String(field), label, before, after });
+      }
+    });
+    return changes;
+  };
+
+  const getRowChanges = (idx: number, rowOverride?: TaskRow): EditChange[] => {
+    const original = originalRows.get(idx);
+    if (!original) return [];
+    const currentRow = rowOverride ?? rows[idx];
+    const cached = editChangesMap[idx];
+    return cached ?? computeRowChangesBetween(original, currentRow);
+  };
+
+  const handleEditNoteChange = (idx: number, note: string) => {
+    if (isProjectLocked) {
+      return;
+    }
+    setEditNotes(prev => ({ ...prev, [idx]: note }));
+    if (note.trim()) {
+      markRowEdited(idx);
+    }
+  };
+
+  const handleEditAttachmentChange = (idx: number, file: File | null) => {
+    if (isProjectLocked) {
+      return;
+    }
+    const MAX_MB = 25;
+    if (!file) {
+      setEditAttachments(prev => {
+        const newMap = { ...prev };
+        delete newMap[idx];
+        return newMap;
+      });
+      setEditAttachmentErrors(prev => {
+        const newMap = { ...prev };
+        delete newMap[idx];
+        return newMap;
+      });
+      markRowEdited(idx);
+      return;
+    }
+
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setEditAttachmentErrors(prev => ({ ...prev, [idx]: `ขนาดไฟล์ต้องไม่เกิน ${MAX_MB}MB` }));
+      setEditAttachments(prev => ({ ...prev, [idx]: null }));
+      return;
+    }
+
+    setEditAttachments(prev => ({ ...prev, [idx]: file }));
+    markRowEdited(idx);
+    setEditAttachmentErrors(prev => {
+      const newMap = { ...prev };
+      delete newMap[idx];
+      return newMap;
+    });
+  };
+
+  const formatDateTime = (date: Date | null): string => {
+    if (!date) return '-';
+    return `${date.toLocaleDateString('th-TH')} ${date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
+  const normalizeHistoryFields = (fields: any): EditChange[] => {
+    if (!Array.isArray(fields)) return [];
+    return fields.map((field: any) => {
+      if (typeof field === 'string') {
+        const [labelPart, rest] = field.split(':');
+        const [beforePart, afterPart] = rest ? rest.split('→') : ['', ''];
+        const label = labelPart?.trim() || 'Field';
+        const before = beforePart?.replace(/"/g, '').trim() || '-';
+        const after = afterPart?.replace(/"/g, '').trim() || '-';
+        return { field: label, label, before, after };
+      }
+      const label = field?.label || field?.field || 'Field';
+      const before = formatDisplayValue(field?.before ?? field?.oldValue ?? '-');
+      const after = formatDisplayValue(field?.after ?? field?.newValue ?? '-');
+      return {
+        field: field?.field || label,
+        label,
+        before,
+        after,
+      };
+    });
+  };
 
   useEffect(() => {
     const loadActivities = async () => {
@@ -238,6 +417,13 @@ const ProjectsPage = () => {
     
     const taskRows = filteredTasks.map(task => convertTaskToRow(task));
     setRows([...taskRows, ...initialRows]);
+    setEditingRows(new Set());
+    setEditedRows(new Set());
+    setOriginalRows(new Map());
+    setEditNotes({});
+    setEditAttachments({});
+    setEditAttachmentErrors({});
+    setEditChangesMap({});
   }, [cacheLoaded, allTasksCache, selectedProject, filterActivity, filterStatus]);
   
   useEffect(() => {
@@ -340,14 +526,135 @@ const ProjectsPage = () => {
       }
     };
 
+  const markRowEdited = (idx: number) => {
+    const row = rows[idx];
+    if (!row?.firestoreId) return;
+    setEditedRows(prev => {
+      const next = new Set(prev);
+      next.add(idx);
+      return next;
+    });
+  };
+
   const handleRowChange = (idx: number, field: keyof TaskRow, value: string | boolean) => {
-    setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
-    if (rows[idx]?.firestoreId) {
-      setEditedRows(prev => new Set(prev).add(idx));
+    if (isProjectLocked) {
+      return;
+    }
+    setRows(prevRows => {
+      const updatedRows = prevRows.map((row, i) => i === idx ? { ...row, [field]: value } : row);
+      if (originalRows.has(idx)) {
+        const changes = computeRowChangesBetween(originalRows.get(idx), updatedRows[idx]);
+        setEditChangesMap(prev => ({ ...prev, [idx]: changes }));
+      }
+      return updatedRows;
+    });
+    markRowEdited(idx);
+  };
+
+  const handleViewHistory = async (idx: number) => {
+    const row = rows[idx];
+    if (!row) return;
+    setHistoryTaskName(row.relateDrawing || row.id || 'ไม่พบชื่อเอกสาร');
+    if (!row.firestoreId) {
+      setHistoryEntries([]);
+      setHistoryModalOpen(true);
+      return;
+    }
+
+    try {
+      setHistoryLoading(true);
+      const history = await getTaskEditHistory(row.firestoreId);
+      const normalized = (history || [])
+        .map((entry: TaskEditHistoryEntry) => {
+          const timestamp = normalizeTimestamp(entry.timestamp) || undefined;
+          const fileUploadedAt = normalizeTimestamp(entry.fileUploadedAt) || undefined;
+          const fields = normalizeHistoryFields(entry.fields);
+          return {
+            ...entry,
+            timestamp,
+            fileUploadedAt,
+            fields,
+          } as TaskEditHistoryEntry;
+        })
+        .sort((a, b) => {
+          const timeA = normalizeTimestamp(a.timestamp)?.getTime() || 0;
+          const timeB = normalizeTimestamp(b.timestamp)?.getTime() || 0;
+          return timeB - timeA;
+        });
+
+      setHistoryEntries(normalized);
+      setHistoryModalOpen(true);
+    } catch (error) {
+      console.error('Error loading history:', error);
+      setErrorMessage('ไม่สามารถโหลดประวัติการแก้ไขได้');
+      setShowErrorModal(true);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
+  const closeHistoryModal = () => {
+    setHistoryModalOpen(false);
+    setHistoryEntries([]);
+    setHistoryTaskName('');
+    setHistoryLoading(false);
+    setHistoryPreviewFile(null);
+    setIsHistoryPreviewOpen(false);
+  };
+
+  const attachmentErrorsPresent = useMemo(() => Object.values(editAttachmentErrors).some(Boolean), [editAttachmentErrors]);
+  const saveDisabled = attachmentErrorsPresent || isProjectLocked;
+
+  const handleSaveEditRow = (idx: number) => {
+    if (isProjectLocked) {
+      return;
+    }
+    const original = originalRows.get(idx);
+    const currentRow = rows[idx];
+    const computedChanges = computeRowChangesBetween(original, currentRow);
+    setEditChangesMap(prev => ({ ...prev, [idx]: computedChanges }));
+    const note = (editNotes[idx] || '').trim();
+    const attachment = editAttachments[idx] || null;
+    if (computedChanges.length > 0 || note || attachment) {
+      markRowEdited(idx);
+    } else {
+      setEditedRows(prev => {
+        const next = new Set(prev);
+        next.delete(idx);
+        return next;
+      });
+      setEditChangesMap(prev => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+      setEditNotes(prev => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+      setEditAttachments(prev => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+      setEditAttachmentErrors(prev => {
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+    }
+    setEditingRows(prev => {
+      const next = new Set(prev);
+      next.delete(idx);
+      return next;
+    });
+  };
+
   const handleRowFocus = (idx: number) => {
+    if (isProjectLocked) {
+      return;
+    }
     if (!touchedRows.has(idx)) {
       setTouchedRows(prev => new Set(prev).add(idx));
       setRows(rows => {
@@ -361,6 +668,9 @@ const ProjectsPage = () => {
 
   // ========== ✅ MERGED: เพิ่มการป้องกันลบ Work Request ==========
   const handleDelete = (idx: number) => {
+    if (!requireProjectSelection()) {
+      return;
+    }
     const rowToDelete = rows[idx];
     
     const showError = (message: string) => {
@@ -438,12 +748,19 @@ const ProjectsPage = () => {
       showError('ไม่พบข้อมูลโครงการที่เลือก');
       return;
     }
-    const rowsToUpdate: TaskRow[] = [];
+    const rowsToUpdate: Array<{ row: TaskRow; idx: number; changeDetails: EditChange[] }> = [];
     const rowsToCreate: TaskRow[] = [];
     rows.forEach((row, idx) => {
       if (!row.relateDrawing || !row.activity || !row.startDate || !row.dueDate) return;
       if (row.firestoreId && editedRows.has(idx)) {
-        rowsToUpdate.push(row);
+        const original = originalRows.get(idx);
+        const changeDetails = computeRowChangesBetween(original, row);
+        const note = (editNotes[idx] || '').trim();
+        const attachment = editAttachments[idx] || null;
+        if (changeDetails.length > 0 || note || attachment) {
+          rowsToUpdate.push({ row, idx, changeDetails });
+          setEditChangesMap(prev => ({ ...prev, [idx]: changeDetails }));
+        }
       } else if (!row.firestoreId) {
         rowsToCreate.push(row);
       }
@@ -453,22 +770,54 @@ const ProjectsPage = () => {
       return;
     }
     const modalData = {
-      updated: rowsToUpdate.map((r, index) => {
-        const rowIdx = rows.findIndex(row => row.firestoreId === r.firestoreId);
-        const original = originalRows.get(rowIdx);
-        const changes: string[] = [];
-        if (original) {
-          if (original.relateDrawing !== r.relateDrawing) changes.push(`ชื่อเอกสาร: "${original.relateDrawing}" → "${r.relateDrawing}"`);
-          if (original.activity !== r.activity) changes.push(`Activity: "${original.activity}" → "${r.activity}"`);
-          if (original.startDate !== r.startDate) changes.push(`วันเริ่มตามแผน: ${original.startDate || '-'} → ${r.startDate}`);
-          if (original.dueDate !== r.dueDate) changes.push(`วันครบกำหนด: ${original.dueDate || '-'} → ${r.dueDate}`);
+      updated: rowsToUpdate.map(({ row, idx, changeDetails }) => {
+        const changeStrings = changeDetails.length
+          ? changeDetails.map(change => `${change.label}: ${change.before} → ${change.after}`)
+          : ['ไม่มีการเปลี่ยนแปลง'];
+        const note = (editNotes[idx] || '').trim();
+        if (note) {
+          changeStrings.push(`หมายเหตุ: ${note}`);
         }
-        return { id: r.id, name: r.relateDrawing, changes: changes.length > 0 ? changes : ['ไม่มีการเปลี่ยนแปลง'] };
+        return { id: row.id, name: row.relateDrawing, changes: changeStrings, rowIdx: idx };
       }),
       created: rowsToCreate.map(r => ({ id: '(จะสร้างใหม่)', name: r.relateDrawing, changes: [`Activity: ${r.activity}`, `วันเริ่มตามแผน: ${r.startDate}`, `วันครบกำหนด: ${r.dueDate}`] }))
     };
+    const hasAttachmentErrors = Object.values(editAttachmentErrors).some(Boolean);
+    if (hasAttachmentErrors) {
+      showError('กรุณาแก้ไขไฟล์แนบที่ไม่ถูกต้องก่อนบันทึก');
+      return;
+    }
+
     setSaveModalData(modalData);
     setShowSaveModal(true);
+  };
+
+  const handleOpenAddRevModal = () => {
+    if (!requireProjectSelection()) {
+      return;
+    }
+    setShowAddRevModal(true);
+  };
+
+  const handleOpenImportModal = () => {
+    if (!requireProjectSelection()) {
+      return;
+    }
+    setShowImportModal(true);
+  };
+
+  const handleOpenExportModal = () => {
+    if (!requireProjectSelection()) {
+      return;
+    }
+    setShowExportModal(true);
+  };
+
+  const handleOpenDeletedModal = () => {
+    if (!requireProjectSelection()) {
+      return;
+    }
+    setShowDeletedModal(true);
   };
 
   const confirmSave = async () => {
@@ -477,9 +826,71 @@ const ProjectsPage = () => {
       const currentProject = projects.find(p => p.id === selectedProject);
       if (!currentProject) return;
       const updatePromises = saveModalData.updated.map(async (updatedItem) => {
-        const row = rows.find(r => r.id === updatedItem.id);
+        const rowIdx = updatedItem.rowIdx !== undefined ? updatedItem.rowIdx : rows.findIndex(r => r.id === updatedItem.id);
+        if (rowIdx === -1) return;
+        const row = rows[rowIdx];
         if (!row || !row.firestoreId) return;
-        await updateTask(row.firestoreId, { taskName: row.relateDrawing, taskCategory: row.activity, planStartDate: row.startDate ? Timestamp.fromDate(new Date(row.startDate)) : null, dueDate: row.dueDate ? Timestamp.fromDate(new Date(row.dueDate)) : null } as any);
+
+        const changeDetails = getRowChanges(rowIdx, row);
+        const note = (editNotes[rowIdx] || '').trim();
+        let attachmentInfo: { cdnURL: string; storagePath: string; fileUploadedAt: Timestamp; fileName: string } | null = null;
+        const attachmentFile = editAttachments[rowIdx] || null;
+        if (attachmentFile) {
+          attachmentInfo = await uploadTaskEditAttachment(attachmentFile, row.firestoreId);
+        }
+
+        const editorName = appUser?.fullName || appUser?.username || appUser?.employeeId || 'unknown';
+        const historyEntry: any = {
+          timestamp: Timestamp.now(),
+          fields: changeDetails,
+          taskId: row.firestoreId,
+          taskNumber: row.id,
+          user: editorName,
+        };
+        if (note) {
+          historyEntry.note = note;
+        }
+
+        if (attachmentInfo) {
+          historyEntry.fileURL = attachmentInfo.cdnURL;
+          historyEntry.storagePath = attachmentInfo.storagePath;
+          historyEntry.fileName = attachmentInfo.fileName;
+          historyEntry.fileUploadedAt = attachmentInfo.fileUploadedAt;
+        }
+
+        const shouldRecordHistory = changeDetails.length > 0 || note || attachmentInfo;
+
+        await updateTask(
+          row.firestoreId,
+          {
+            taskName: row.relateDrawing,
+            taskCategory: row.activity,
+            planStartDate: row.startDate ? Timestamp.fromDate(new Date(row.startDate)) : null,
+            dueDate: row.dueDate ? Timestamp.fromDate(new Date(row.dueDate)) : null,
+          } as any,
+          shouldRecordHistory ? historyEntry : undefined
+        );
+
+        setEditNotes(prev => {
+          const newMap = { ...prev };
+          delete newMap[rowIdx];
+          return newMap;
+        });
+        setEditAttachments(prev => {
+          const newMap = { ...prev };
+          delete newMap[rowIdx];
+          return newMap;
+        });
+        setEditAttachmentErrors(prev => {
+          const newMap = { ...prev };
+          delete newMap[rowIdx];
+          return newMap;
+        });
+        setEditChangesMap(prev => {
+          const newMap = { ...prev };
+          delete newMap[rowIdx];
+          return newMap;
+        });
       });
       await Promise.all(updatePromises);
       let finalRows = [...rows];
@@ -511,6 +922,10 @@ const ProjectsPage = () => {
       setEditingRows(new Set());
       setEditedRows(new Set());
       setOriginalRows(new Map());
+      setEditNotes({});
+      setEditAttachments({});
+      setEditAttachmentErrors({});
+      setEditChangesMap({});
     } catch (error) {
       console.error('❌ Error saving:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -521,6 +936,9 @@ const ProjectsPage = () => {
 
   // ========== ✅ MERGED: เพิ่มการป้องกันแก้ไข Work Request ==========
   const handleEdit = (idx: number) => {
+    if (!requireProjectSelection()) {
+      return;
+    }
     const row = rows[idx];
     const isWorkRequest = row.activity === 'Work Request';
     
@@ -538,6 +956,18 @@ const ProjectsPage = () => {
       return newMap;
     });
     setEditingRows(prev => new Set(prev).add(idx));
+    setEditNotes(prev => ({ ...prev, [idx]: prev[idx] ?? '' }));
+    setEditAttachments(prev => {
+      const newMap = { ...prev };
+      delete newMap[idx];
+      return newMap;
+    });
+    setEditAttachmentErrors(prev => {
+      const newMap = { ...prev };
+      delete newMap[idx];
+      return newMap;
+    });
+    setEditChangesMap(prev => ({ ...prev, [idx]: [] }));
   };
 
   const handleCancelEdit = (idx: number) => {
@@ -547,6 +977,26 @@ const ProjectsPage = () => {
     }
     setEditingRows(prev => { const newSet = new Set(prev); newSet.delete(idx); return newSet; });
     setEditedRows(prev => { const newSet = new Set(prev); newSet.delete(idx); return newSet; });
+    setEditNotes(prev => {
+      const newMap = { ...prev };
+      delete newMap[idx];
+      return newMap;
+    });
+    setEditAttachments(prev => {
+      const newMap = { ...prev };
+      delete newMap[idx];
+      return newMap;
+    });
+    setEditAttachmentErrors(prev => {
+      const newMap = { ...prev };
+      delete newMap[idx];
+      return newMap;
+    });
+    setEditChangesMap(prev => {
+      const newMap = { ...prev };
+      delete newMap[idx];
+      return newMap;
+    });
   };
 
   const handleExport = async (options: any) => {
@@ -632,11 +1082,14 @@ const ProjectsPage = () => {
     <div style={{ minHeight: "100vh", background: "#f0f2f5" }}>
       <div style={{ maxWidth: "100%", margin: "35px auto 0 auto" }}>
         <div style={{ marginBottom: "24px", display: "flex", gap: "16px", alignItems: "center" }}>
-          <button onClick={() => setIsCreateModalOpen(true)} style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
-            <span style={{ color: "#6366f1", fontWeight: "bold" }}>+</span> สร้างโครงการใหม่
-          </button>
-          <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onSubmit={handleCreateProject} onViewProjects={() => { setIsCreateModalOpen(false); setIsProjectListOpen(true); }} />
-          <ProjectListModal isOpen={isProjectListOpen} onClose={() => setIsProjectListOpen(false)} projects={projects} onUpdateLeader={handleUpdateLeader} />
+        <button onClick={() => setIsCreateModalOpen(true)} style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
+          <span style={{ color: "#6366f1", fontWeight: "bold" }}>+</span> สร้างโครงการใหม่
+        </button>
+        <button onClick={() => setIsUserModalOpen(true)} style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
+          <span style={{ color: "#6366f1", fontWeight: "bold" }}>👥</span> จัดการสมาชิก
+        </button>
+        <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onSubmit={handleCreateProject} onViewProjects={() => { setIsCreateModalOpen(false); setIsProjectListOpen(true); }} />
+        <ProjectListModal isOpen={isProjectListOpen} onClose={() => setIsProjectListOpen(false)} projects={projects} onUpdateLeader={handleUpdateLeader} />
           <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} disabled={loading} style={{ padding: "8px 12px", width: "200px", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", backgroundColor: loading ? "#f3f4f6" : "#fff", color: "#374151", cursor: loading ? "not-allowed" : "pointer" }}>
             <option value="all">ทุกโครงการ</option>
             {projects.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
@@ -715,14 +1168,21 @@ const ProjectsPage = () => {
                 </thead>
                 <tbody>
                   {rows.map((row, idx) => {
-                    const isNewRow = !row.id;
-                    const isEditing = editingRows.has(idx);
-                    const isWorkRequest = row.activity === 'Work Request';
-                    const isWorkRequestEditable = isWorkRequest && row.statusDwg === 'PENDING_BIM';
-                    const isEditable = isNewRow || (isEditing && (!isWorkRequest || isWorkRequestEditable));
-                    
-                    return (
-                      <tr key={row.firestoreId || `row-${idx}`} style={{ 
+                  const isNewRow = !row.id;
+                  const isEditing = editingRows.has(idx);
+                  const isWorkRequest = row.activity === 'Work Request';
+                  const isWorkRequestEditable = isWorkRequest && row.statusDwg === 'PENDING_BIM';
+                  const isLockRow = isWorkRequest && row.statusDwg !== 'PENDING_BIM';
+                  const isEditable = !isProjectLocked && (isNewRow || (isEditing && (!isWorkRequest || isWorkRequestEditable)));
+                  const actionsDisabled = isProjectLocked || isLockRow;
+                  const changes = getRowChanges(idx, row);
+                  const noteValue = editNotes[idx] ?? '';
+                  const attachmentFile = editAttachments[idx] || null;
+                  const attachmentError = editAttachmentErrors[idx] || null;
+
+                  return (
+                    <React.Fragment key={row.firestoreId || `row-${idx}`}>
+                    <tr style={{ 
                         borderBottom: "1px solid #e5e7eb", 
                         background: highlightedRow === idx 
                           ? "#fef08a" 
@@ -734,8 +1194,8 @@ const ProjectsPage = () => {
                           ? "#f9fafb" 
                           : "#fff",
                         transition: "background-color 0.15s ease-out",
-                        cursor: "pointer"
-                      }} onMouseEnter={(e) => { if (highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = "#e0f2fe"; } }} onMouseLeave={(e) => { if (highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff"; } }}>
+                        cursor: isProjectLocked ? "default" : "pointer"
+                      }} onMouseEnter={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = "#e0f2fe"; } }} onMouseLeave={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff"; } }}>
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
                         <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
                           <input type="text" value={row.relateDrawing} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
@@ -762,51 +1222,77 @@ const ProjectsPage = () => {
                           {row.statusDwg ? translateStatus(row.statusDwg, isWorkRequest) : ""}
                         </td>
                         <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-                          {row.link ? (<a href={row.link} target="_blank" rel="noopener noreferrer" style={{ color: "#3b82f6", textDecoration: "none", fontSize: "16px" }} title="คลิกเพื่อดูไฟล์">📎</a>) : (<span style={{ color: "#9ca3af" }}>-</span>)}
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            {row.link ? (
+                              <a
+                                href={row.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: "#3b82f6", textDecoration: "none", fontSize: "16px" }}
+                                title="คลิกเพื่อดูไฟล์"
+                              >
+                                📎
+                              </a>
+                            ) : (
+                              <span style={{ color: "#9ca3af" }}>-</span>
+                            )}
+                          </div>
                         </td>
                         <td style={{ padding: "4px 6px", fontSize: 10 }}>{row.docNo}</td>
                         <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
                           {row.lastRev || "00"}
                         </td>
                         <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-                          {isWorkRequest && row.statusDwg !== 'PENDING_BIM' ? (
-                            // Work Request ที่ไม่ใช่ PENDING_BIM → แสดง "🔒 ล็อค"
-                            <span style={{ 
-                              fontSize: 10, 
-                              color: "#dc2626",
-                              fontWeight: 600,
-                              padding: "3px 8px",
-                              background: "#fee2e2",
-                              borderRadius: "3px"
-                            }}>
-                              🔒 ล็อค
-                            </span>
-                          ) : row.statusDwg && !isWorkRequest ? (
-                            // เอกสาร RFA ที่มีสถานะแล้ว → แสดง "-"
-                            <span style={{ fontSize: 10, color: "#9ca3af" }}>-</span>
-                          ) : isNewRow ? (
-                            // แถวใหม่ → แสดง "ใหม่"
-                            <span style={{ fontSize: 10, color: "#9ca3af" }}>ใหม่</span>
-                          ) : isEditing ? (
-                            // กำลังแก้ไข → ปุ่มบันทึก
-                            <button 
-                              onClick={() => handleCancelEdit(idx)}
-                              style={{ padding: "3px 10px", background: "#10b981", border: "none", borderRadius: "3px", fontSize: 10, cursor: "pointer", color: "white", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)", margin: "0 auto", display: "block" }}
-                            >
-                              บันทึก
-                            </button>
-                          ) : (
-                            // ปกติ → ปุ่ม Edit
-                            <button 
-                              onClick={() => handleEdit(idx)}
-                              style={{ padding: "4px", background: "none", border: "none", borderRadius: "3px", cursor: "pointer", color: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}
-                              title="แก้ไข"
-                            >
-                              <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                              </svg>
-                            </button>
-                          )}
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                            {actionsDisabled ? (
+                              <div
+                                style={{
+                                  width: "28px",
+                                  height: "28px",
+                                  borderRadius: "6px",
+                                  background: isProjectLocked ? "#e5e7eb" : "#fee2e2",
+                                  border: `1px solid ${isProjectLocked ? "#d1d5db" : "#fecaca"}`,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: isProjectLocked ? "#6b7280" : "#dc2626",
+                                  fontSize: "16px",
+                                  cursor: "not-allowed"
+                                }}
+                                title={isProjectLocked ? "เลือกรายการโครงการก่อน" : "แถวนี้ไม่อนุญาตให้แก้ไข"}
+                              >
+                                🔒
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleEdit(idx)}
+                                  style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#e0f2fe", border: "1px solid #bfdbfe", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "14px" }}
+                                  title="แก้ไข"
+                                >
+                                  ✎
+                                </button>
+                                {isEditing && (
+                                  <button
+                                    onClick={() => handleSaveEditRow(idx)}
+                                    style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#10b981", border: "none", color: "white", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "14px", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)" }}
+                                    title="บันทึก"
+                                  >
+                                    ✔
+                                  </button>
+                                )}
+                              </>
+                            )}
+                            {row.firestoreId && (
+                              <button
+                                onClick={() => handleViewHistory(idx)}
+                                style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#f3f4f6", border: "1px solid #e5e7eb", cursor: "pointer", color: "#111827", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                                title="ประวัติการแก้ไข"
+                              >
+                                🕘
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td style={{ padding: "2px 4px", fontSize: 10, textAlign: "center" }}>
                           {(() => {
@@ -814,6 +1300,9 @@ const ProjectsPage = () => {
                             const isLastEmptyRow = isEmptyRow && idx === rows.length - 1;
                             const hasStatus = !!row.statusDwg;
                             const hasProgress = row.progress && row.progress > 0;
+                            if (isProjectLocked) {
+                              return <span style={{ color: "#9ca3af" }} title="เลือกรายการโครงการก่อน">🔒</span>;
+                            }
                             if (isLastEmptyRow || hasStatus || hasProgress) {
                               return <span style={{ color: "#9ca3af" }}>-</span>;
                             }
@@ -822,21 +1311,103 @@ const ProjectsPage = () => {
                         </td>
 
                       </tr>
-                    );
-                  })}
+                      {isEditing && (
+                        <tr>
+                          <td colSpan={11} style={{ background: "#f9fafb", padding: "12px" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+                              <div style={{ flex: "1 1 280px" }}>
+                                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#1f2937", marginBottom: "4px" }}>
+                                  หมายเหตุการแก้ไข
+                                </label>
+                                <textarea
+                                  value={noteValue}
+                                  onChange={(e) => handleEditNoteChange(idx, e.target.value)}
+                                  rows={3}
+                                  style={{ width: "100%", padding: "6px", border: "1px solid #d1d5db", borderRadius: "4px", fontSize: "12px", color: "#111827", background: "#fff" }}
+                                  placeholder="อธิบายเหตุผลหรือรายละเอียดการแก้ไข"
+                                />
+                              </div>
+                              <div style={{ flex: "1 1 240px" }}>
+                                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#1f2937", marginBottom: "4px" }}>
+                                  แนบไฟล์อ้างอิง (สูงสุด 25MB)
+                                </label>
+                                <input
+                                  type="file"
+                                  onChange={(e) => handleEditAttachmentChange(idx, e.target.files?.[0] || null)}
+                                  style={{ fontSize: "12px" }}
+                                />
+                                {attachmentFile && (
+                                  <p style={{ fontSize: "11px", color: "#4b5563", marginTop: "4px" }}>
+                                    {attachmentFile.name} ({(attachmentFile.size / (1024 * 1024)).toFixed(2)} MB)
+                                  </p>
+                                )}
+                                {attachmentError && (
+                                  <p style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px" }}>{attachmentError}</p>
+                                )}
+                              </div>
+                            </div>
+                            <div style={{ marginTop: "12px" }}>
+                              <div style={{ fontSize: "12px", fontWeight: 600, color: "#111827", marginBottom: "6px" }}>ฟิลด์ที่แก้ไข</div>
+                              {changes.length > 0 ? (
+                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+                                  <thead>
+                                    <tr>
+                                      <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>ฟิลด์</th>
+                                      <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>ก่อนแก้ไข</th>
+                                      <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>หลังแก้ไข</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {changes.map((change, changeIdx) => (
+                                      <tr key={`change-${idx}-${changeIdx}`}>
+                                        <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", fontWeight: 500 }}>{change.label}</td>
+                                        <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280" }}>{change.before}</td>
+                                        <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#2563eb", fontWeight: 500 }}>{change.after}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <p style={{ fontSize: "11px", color: "#6b7280" }}>ยังไม่มีการเปลี่ยนแปลงข้อมูล</p>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
                 </tbody>
               </table>
             </div>
           )}
           <div style={{ marginTop: 24, textAlign: "right", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
-            <button onClick={handleSave} style={{ padding: "8px 24px", background: "#f97316", border: "none", borderRadius: "6px", fontSize: "14px", cursor: "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(249, 115, 22, 0.1)" }}>SAVE</button>
-            <button onClick={() => setShowAddRevModal(true)} style={{ padding: "8px 16px", background: "#4f46e5", border: "none", borderRadius: "6px", fontSize: "14px", cursor: "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(79, 70, 229, 0.1)", position: "relative", display: "flex", alignItems: "center", gap: "8px" }}>
+            <button
+              onClick={handleSave}
+              disabled={saveDisabled}
+              style={{
+                padding: "8px 24px",
+                background: saveDisabled ? "#9ca3af" : "#f97316",
+                border: "none",
+                borderRadius: "6px",
+                fontSize: "14px",
+                cursor: saveDisabled ? "not-allowed" : "pointer",
+                color: "white",
+                fontWeight: 500,
+                boxShadow: "0 1px 2px rgba(249, 115, 22, 0.1)",
+                opacity: saveDisabled ? 0.6 : 1
+              }}
+              title={saveDisabled ? (isProjectLocked ? "กรุณาเลือกโครงการก่อนบันทึก" : "กรุณาแก้ไขไฟล์แนบที่ไม่ถูกต้องก่อนบันทึก") : undefined}
+            >
+              SAVE
+            </button>
+            <button onClick={handleOpenAddRevModal} disabled={isProjectLocked} style={{ padding: "8px 16px", background: isProjectLocked ? "#9ca3af" : "#4f46e5", border: "none", borderRadius: "6px", fontSize: "14px", cursor: isProjectLocked ? "not-allowed" : "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(79, 70, 229, 0.1)", position: "relative", display: "flex", alignItems: "center", gap: "8px", opacity: isProjectLocked ? 0.7 : 1 }} title={isProjectLocked ? "กรุณาเลือกโครงการก่อนเพิ่ม Rev." : undefined}>
               Add new Rev.
               {pendingRevCount > 0 && (<span style={{ position: "absolute", top: "-8px", right: "-8px", background: "#ef4444", color: "white", borderRadius: "50%", width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "bold", boxShadow: "0 2px 4px rgba(0, 0, 0, 0.2)", animation: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite" }}>{pendingRevCount}</span>)}
             </button>
-            <button onClick={() => setShowImportModal(true)} style={{ padding: "8px 16px", background: "#059669", border: "none", borderRadius: "6px", fontSize: "14px", cursor: "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(5, 150, 105, 0.1)" }}>📥 Import Excel</button>
-            <button onClick={() => setShowExportModal(true)} style={{ padding: "8px 16px", background: "#10b981", border: "none", borderRadius: "6px", fontSize: "14px", cursor: "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(16, 185, 129, 0.1)" }}>📊 Export</button>
-            <button onClick={() => setShowDeletedModal(true)} style={{ padding: "8px 16px", background: "#6b7280", border: "none", borderRadius: "6px", fontSize: "14px", cursor: "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(0, 0, 0, 0.1)" }}>🗑️ View Deleted</button>
+            <button onClick={handleOpenImportModal} disabled={isProjectLocked} style={{ padding: "8px 16px", background: isProjectLocked ? "#9ca3af" : "#059669", border: "none", borderRadius: "6px", fontSize: "14px", cursor: isProjectLocked ? "not-allowed" : "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(5, 150, 105, 0.1)", opacity: isProjectLocked ? 0.7 : 1 }} title={isProjectLocked ? "กรุณาเลือกโครงการก่อนนำเข้า" : undefined}>📥 Import Excel</button>
+            <button onClick={handleOpenExportModal} disabled={isProjectLocked} style={{ padding: "8px 16px", background: isProjectLocked ? "#9ca3af" : "#10b981", border: "none", borderRadius: "6px", fontSize: "14px", cursor: isProjectLocked ? "not-allowed" : "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(16, 185, 129, 0.1)", opacity: isProjectLocked ? 0.7 : 1 }} title={isProjectLocked ? "กรุณาเลือกโครงการก่อนส่งออก" : undefined}>📊 Export</button>
+            <button onClick={handleOpenDeletedModal} disabled={isProjectLocked} style={{ padding: "8px 16px", background: isProjectLocked ? "#9ca3af" : "#6b7280", border: "none", borderRadius: "6px", fontSize: "14px", cursor: isProjectLocked ? "not-allowed" : "pointer", color: "white", fontWeight: 500, boxShadow: "0 1px 2px rgba(0, 0, 0, 0.1)", opacity: isProjectLocked ? 0.7 : 1 }} title={isProjectLocked ? "กรุณาเลือกโครงการก่อนดูรายการที่ลบ" : undefined}>🗑️ View Deleted</button>
           </div>
         </div>
       </div>
@@ -848,6 +1419,106 @@ const ProjectsPage = () => {
       <ExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} onExport={handleExport} projects={projects} currentProjectId={selectedProject} />
       <ImportExcelModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} projectName={projects.find(p => p.id === selectedProject)?.name || 'Project'} activities={activities.map(a => a.activityName)} onImport={(tasks) => { console.log('Imported tasks:', tasks); setShowImportModal(false); }} />
       <ViewDeletedModal isOpen={showDeletedModal} onClose={() => setShowDeletedModal(false)} onRestore={handleRestoreComplete} currentProjectId={selectedProject} />
+      <ManageUsersModal isOpen={isUserModalOpen} onClose={() => setIsUserModalOpen(false)} />
+      {historyModalOpen && (
+        <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 40 }}>
+          <div style={{ background: "#fff", width: "90%", maxWidth: "760px", maxHeight: "80vh", borderRadius: "12px", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e5e7eb", background: "#f9fafb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 600, color: "#111827" }}>ประวัติการแก้ไข</h3>
+                <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#6b7280" }}>{historyTaskName}</p>
+              </div>
+              <button onClick={closeHistoryModal} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#6b7280" }} title="ปิด">
+                ✕
+              </button>
+            </div>
+            <div style={{ padding: "20px", overflowY: "auto", flex: 1 }}>
+              {historyLoading ? (
+                <p style={{ fontSize: "13px", color: "#4b5563" }}>กำลังโหลดข้อมูล...</p>
+              ) : historyEntries.length === 0 ? (
+                <p style={{ fontSize: "13px", color: "#4b5563" }}>ยังไม่มีประวัติการแก้ไขสำหรับงานนี้</p>
+              ) : (
+                historyEntries.map((entry, idx) => {
+                  const timestamp = normalizeTimestamp(entry.timestamp);
+                  const fileUploadedAt = normalizeTimestamp(entry.fileUploadedAt);
+                  const fields = Array.isArray(entry.fields) ? (entry.fields as EditChange[]) : [];
+                  return (
+                    <div key={`history-entry-${idx}`} style={{ border: "1px solid #e5e7eb", borderRadius: "10px", padding: "14px", marginBottom: "12px", background: "#f9fafb" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "#1f2937" }}>{formatDateTime(timestamp)}</div>
+                        {entry.fileURL && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                            <button
+                              onClick={() => {
+                                setHistoryPreviewFile({
+                                  name: entry.fileName || historyTaskName || 'ไฟล์แนบ',
+                                  url: entry.fileURL as string,
+                                });
+                                setIsHistoryPreviewOpen(true);
+                              }}
+                              style={{ fontSize: "12px", color: "#2563eb", background: "none", border: "none", textDecoration: "underline", cursor: "pointer" }}
+                            >
+                              ดูไฟล์
+                            </button>
+                            <a
+                              href={entry.fileURL as string}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ fontSize: "12px", color: "#2563eb", textDecoration: "none", fontWeight: 500 }}
+                            >
+                              ดาวน์โหลดไฟล์
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                      {entry.note && (
+                        <div style={{ marginBottom: "10px", fontSize: "12px", color: "#374151", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", padding: "10px" }}>
+                          {entry.note}
+                        </div>
+                      )}
+                      {fields.length > 0 ? (
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+                          <thead>
+                            <tr>
+                              <th style={{ padding: "6px", textAlign: "left", background: "#eff6ff", border: "1px solid #dbeafe" }}>ฟิลด์</th>
+                              <th style={{ padding: "6px", textAlign: "left", background: "#eff6ff", border: "1px solid #dbeafe" }}>ก่อนแก้ไข</th>
+                              <th style={{ padding: "6px", textAlign: "left", background: "#eff6ff", border: "1px solid #dbeafe" }}>หลังแก้ไข</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {fields.map((change, changeIdx) => (
+                              <tr key={`history-change-${idx}-${changeIdx}`}>
+                                <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", fontWeight: 500 }}>{change.label}</td>
+                                <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280" }}>{change.before}</td>
+                                <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#2563eb", fontWeight: 500 }}>{change.after}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <p style={{ fontSize: "11px", color: "#6b7280" }}>ไม่มีรายละเอียดการแก้ไขฟิลด์</p>
+                      )}
+                      {fileUploadedAt && (
+                        <p style={{ marginTop: "8px", fontSize: "11px", color: "#9ca3af" }}>
+                          แนบไฟล์เมื่อ: {formatDateTime(fileUploadedAt)}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <FilePreviewModal
+        isOpen={isHistoryPreviewOpen && Boolean(historyPreviewFile)}
+        onClose={() => {
+          setIsHistoryPreviewOpen(false);
+          setHistoryPreviewFile(null);
+        }}
+        file={historyPreviewFile}
+      />
       <ErrorModal
         isOpen={showErrorModal}
         message={errorMessage}

@@ -110,6 +110,10 @@ export interface DailyReportEntry {
   taskName?: string;
   remark?: string;
   item?: string;
+  fileName?: string;
+  fileURL?: string;
+  storagePath?: string;
+  fileUploadedAt?: Timestamp;
 }
 
 export interface User {
@@ -129,4 +133,16 @@ export interface Employee {
 export interface RelateWork {
   activityName: string;
   relatedWorks?: any[];
+}
+
+export interface UploadedFile {
+  id: string;
+  employeeId: string;
+  subtaskId: string;
+  subtaskPath?: string;
+  workDate: string;
+  fileName: string;
+  fileURL: string;
+  storagePath?: string;
+  fileUploadedAt?: Timestamp;
 }

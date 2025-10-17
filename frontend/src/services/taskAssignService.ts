@@ -1,6 +1,5 @@
 
 import {
-  collection,
   collectionGroup,
   doc,
   getDocs,
@@ -11,7 +10,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { DailyReportEntry, Subtask } from '../types/database';
+import { DailyReportEntry, Subtask, UploadedFile } from '../types/database';
 import { getEmployeeByID } from './employeeService';
 
 // Fetches all daily report entries for a given employee from the correct sub-collection location.
@@ -27,33 +26,91 @@ export const getEmployeeDailyReportEntries = async (
     console.log('Query snapshot size:', querySnapshot.size);
     const allEntries: DailyReportEntry[] = [];
 
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
       if (data.workhours && Array.isArray(data.workhours)) {
+        const subtaskPath = docSnap.ref.path.split('/dailyReport')[0];
+
+        const toMillis = (value: any): number => {
+          if (!value) return 0;
+          if (typeof value === 'number') return value;
+          if (value instanceof Date) return value.getTime();
+          if (typeof value.toMillis === 'function') return value.toMillis();
+          if (typeof value.toDate === 'function') return value.toDate().getTime();
+          return 0;
+        };
+
         // เรียงลำดับข้อมูลตาม timestamp (เวลาที่บันทึก) ล่าสุด
         const sortedLogs = [...data.workhours].sort((a, b) => {
-          const timeA = a.timestamp?.toDate().getTime() || 0;
-          const timeB = b.timestamp?.toDate().getTime() || 0;
+          const timeA = toMillis(a.timestamp || a.loggedAt);
+          const timeB = toMillis(b.timestamp || b.loggedAt);
           return timeB - timeA; // เรียงจากใหม่ไปเก่า
         });
+
+        
 
         sortedLogs.forEach((log: any, index: number) => {
           // ใช้ assignDate ถ้ามี, ไม่งั้นใช้ timestamp
           let assignDate: string;
           if (log.assignDate) {
             assignDate = log.assignDate;
-          } else {
+          } else if (log.timestamp?.toDate) {
             assignDate = log.timestamp.toDate().toISOString().split('T')[0];
+          } else if (log.loggedAt?.toDate) {
+            assignDate = log.loggedAt.toDate().toISOString().split('T')[0];
+          } else {
+            assignDate = new Date().toISOString().split('T')[0];
+          }
+
+          let fileName = log.fileName || '';
+          let fileURL = log.fileURL || '';
+          let storagePath = log.storagePath;
+          let fileUploadedAt: Timestamp | undefined = log.fileUploadedAt instanceof Timestamp
+            ? log.fileUploadedAt
+            : log.uploadedAt instanceof Timestamp
+              ? log.uploadedAt
+              : log.uploadDate instanceof Timestamp
+                ? log.uploadDate
+                : undefined;
+
+          if (!fileUploadedAt && typeof log.fileUploadedAt === 'string') {
+            const parsed = new Date(log.fileUploadedAt);
+            if (!Number.isNaN(parsed.getTime())) {
+              fileUploadedAt = Timestamp.fromDate(parsed);
+            }
+          }
+
+          if ((!fileName || !fileURL) && Array.isArray(log.uploadedFiles) && log.uploadedFiles.length > 0) {
+            const legacy = log.uploadedFiles[log.uploadedFiles.length - 1];
+            fileName = fileName || legacy.fileName || '';
+            fileURL = fileURL || legacy.fileURL || '';
+            storagePath = storagePath || legacy.storagePath;
+            fileUploadedAt = fileUploadedAt
+              || (legacy.uploadedAt instanceof Timestamp ? legacy.uploadedAt : undefined)
+              || (legacy.uploadDate instanceof Timestamp ? legacy.uploadDate : undefined);
+
+            if (!fileUploadedAt && typeof legacy.uploadedAt === 'string') {
+              const legacyDate = new Date(legacy.uploadedAt);
+              if (!Number.isNaN(legacyDate.getTime())) {
+                fileUploadedAt = Timestamp.fromDate(legacyDate);
+              }
+            }
+            if (!fileUploadedAt && typeof legacy.uploadDate === 'string') {
+              const legacyUploadDate = new Date(legacy.uploadDate);
+              if (!Number.isNaN(legacyUploadDate.getTime())) {
+                fileUploadedAt = Timestamp.fromDate(legacyUploadDate);
+              }
+            }
           }
           
           // Generate a truly unique ID for each individual log entry
-          const uniqueEntryId = `${doc.id}-${data.subtaskId}-${assignDate}-${log.timestamp?.toMillis() || 0}-${index}`;
+          const uniqueEntryId = `${docSnap.id}-${data.subtaskId}-${assignDate}-${log.timestamp?.toMillis?.() || 0}-${index}`;
 
           allEntries.push({
             id: uniqueEntryId,
             employeeId: data.employeeId,
             subtaskId: data.subtaskId,
-            subtaskPath: doc.ref.path.split('/dailyReport')[0],
+            subtaskPath,
             assignDate: assignDate,
             normalWorkingHours: `${Math.floor(log.day)}:${Math.round((log.day % 1) * 60)}`,
             otWorkingHours: `${Math.floor(log.ot)}:${Math.round((log.ot % 1) * 60)}`,
@@ -70,6 +127,10 @@ export const getEmployeeDailyReportEntries = async (
             loggedAt: log.loggedAt, // เพิ่ม loggedAt
             status: 'pending',
             relateDrawing: '',
+            fileName,
+            fileURL,
+            storagePath,
+            fileUploadedAt,
           } as DailyReportEntry);
         });
       }
@@ -189,7 +250,7 @@ export const saveDailyReportEntries = async (
         currentTime: now.toISOString()
       });
 
-      const workLogData = {
+      const workLogData: any = {
         day: parseHours(entry.normalWorkingHours),
         ot: parseHours(entry.otWorkingHours),
         progress: newProgressNumber,
@@ -198,6 +259,25 @@ export const saveDailyReportEntries = async (
         loggedAt: selectedDate,      // วันที่ที่เลือกจากปฏิทิน (Date + เวลา 12:00)
         assignDate: entry.assignDate  // วันที่ที่เลือกจากปฏิทิน (YYYY-MM-DD)
       };
+
+      if (entry.fileName) {
+        workLogData.fileName = entry.fileName;
+      }
+      if (entry.fileURL) {
+        workLogData.fileURL = entry.fileURL;
+      }
+      if (entry.storagePath) {
+        workLogData.storagePath = entry.storagePath;
+      }
+      if (entry.subtaskId) {
+        workLogData.subtaskId = entry.subtaskId;
+      }
+      if (entry.subtaskPath) {
+        workLogData.subtaskPath = entry.subtaskPath;
+      }
+      if (entry.fileUploadedAt) {
+        workLogData.fileUploadedAt = entry.fileUploadedAt;
+      }
 
       // Atomically add the new work log to the 'workhours' array.
       batch.update(dailyReportRef, {
@@ -223,29 +303,84 @@ export const saveDailyReportEntries = async (
 };
 
 export interface UploadedFile {
-    id: string;
-    fileName: string;
-    fileURL: string;
-    subtaskId: string;
-    subtaskName: string;
-    uploadedAt: Timestamp;
-    workDate: string;
-  }
-  
-  export const getUploadedFilesForEmployee = async (employeeId: string): Promise<UploadedFile[]> => {
-    try {
-      const filesRef = collection(db, 'dailyReportFiles');
-      const q = query(filesRef, where('employeeId', '==', employeeId));
-      const querySnapshot = await getDocs(q);
-      
-      const files: UploadedFile[] = [];
-      querySnapshot.forEach((doc) => {
-        files.push({ id: doc.id, ...doc.data() } as UploadedFile);
+  id: string;
+  employeeId: string;
+  subtaskId: string;
+  subtaskPath?: string;
+  workDate: string;
+  fileName: string;
+  fileURL: string;
+  storagePath?: string;
+  fileUploadedAt?: Timestamp;
+  subtaskName: string;
+}
+
+export const getUploadedFilesForEmployee = async (employeeId: string): Promise<UploadedFile[]> => {
+  try {
+    const reportGroupRef = collectionGroup(db, 'dailyReport');
+    const q = query(reportGroupRef, where('employeeId', '==', employeeId));
+    const querySnapshot = await getDocs(q);
+
+    const files: UploadedFile[] = [];
+
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      const subtaskPath = docSnap.ref.path.split('/dailyReport')[0];
+      const parentSubtask = docSnap.ref.parent?.parent;
+      const workhours = Array.isArray(data.workhours) ? data.workhours : [];
+
+      workhours.forEach((log: any, logIndex: number) => {
+        const assignDate = log.assignDate
+          ? log.assignDate
+          : log.loggedAt?.toDate?.().toISOString().split('T')[0]
+            || log.timestamp?.toDate?.().toISOString().split('T')[0]
+            || '';
+
+        const addFile = (fileData: any, suffix: string) => {
+          if (!fileData?.fileName || !fileData?.fileURL) return;
+
+          const uploadedAtValue = fileData.fileUploadedAt || fileData.uploadedAt || fileData.uploadDate;
+          const uploadedAt = uploadedAtValue instanceof Timestamp
+            ? uploadedAtValue
+            : uploadedAtValue
+              ? Timestamp.fromDate(new Date(uploadedAtValue))
+              : undefined;
+
+          files.push({
+            id: `${docSnap.id}-${logIndex}-${suffix}`,
+            employeeId: fileData.employeeId || data.employeeId || employeeId,
+            subtaskId: fileData.subtaskId || data.subtaskId || parentSubtask?.id || '',
+            subtaskPath: fileData.subtaskPath || subtaskPath,
+            workDate: fileData.workDate || assignDate,
+            fileName: fileData.fileName,
+            fileURL: fileData.fileURL,
+            storagePath: fileData.storagePath,
+            fileUploadedAt: uploadedAt,
+            subtaskName: data.subTaskName || data.subtaskName || '',
+          });
+        };
+
+        addFile(log, 'inline');
+
+        if (Array.isArray(log.uploadedFiles)) {
+          log.uploadedFiles.forEach((legacy: any, legacyIndex: number) => {
+            addFile(
+              {
+                ...legacy,
+                subtaskId: legacy?.subtaskId || log.subtaskId,
+                subtaskPath: legacy?.subtaskPath || subtaskPath,
+                workDate: legacy?.workDate || assignDate,
+              },
+              `legacy-${legacyIndex}`
+            );
+          });
+        }
       });
-      
-      return files;
-    } catch (error) {
-      console.error('Error fetching uploaded files:', error);
-      return [];
-    }
-  };
+    });
+
+    return files;
+  } catch (error) {
+    console.error('Error fetching uploaded files:', error);
+    return [];
+  }
+};

@@ -1,27 +1,37 @@
 /* General Calendar Styling */
+
 .custom-calendar {
-  border: 1px solid #f97316 !important; /* Orange border */
-  border-radius: 0.5rem !important;
+  border: none !important;
+  border-radius: 0 !important;
   background-color: white !important;
   font-family: inherit;
   width: 100%;
+  box-sizing: border-box;
+}
+
+.custom-calendar.react-calendar {
+  width: 100% !important;
+  max-width: 100% !important;
+  border: none;
 }
 
 /* Navigation Bar */
+
 .custom-calendar .react-calendar__navigation {
   background-color: #f97316 !important; /* Orange background */
   color: white;
-  height: 44px;
+  height: 48px;
   margin-bottom: 0;
   border-bottom: 1px solid #fb923c;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
+  padding: 0 16px;
 }
 
 .custom-calendar .react-calendar__navigation button {
   color: white !important;
-  min-width: 44px;
+  padding: 0 12px;
   font-weight: 600;
   font-size: 1rem;
   background: none;
@@ -41,10 +51,10 @@
 .custom-calendar .react-calendar__month-view__weekdays {
   text-align: center;
   font-weight: 600;
-  font-size: 0.75rem; /* text-xs */
+  font-size: 0.8rem;
   color: #111827; /* gray-900 - Darker text */
   border-bottom: 1px solid #e5e7eb; /* gray-200 */
-  padding: 0.5rem 0;
+  padding: 0.75rem 0 0.5rem 0;
 }
 
 .custom-calendar .react-calendar__month-view__weekdays__weekday abbr {
@@ -53,7 +63,10 @@
 
 /* Day Tiles Grid Container */
 .custom-calendar .react-calendar__month-view__days {
-  padding: 4px;
+  padding: 0.75rem;
+  display: grid !important;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
 }
 
 /* ALL Day Tiles */
@@ -62,19 +75,24 @@
   align-items: center;
   justify-content: center;
   position: relative; /* Added for marker positioning */
-  height: 32px !important; /* Override default height */
-  width: 32px !important;   /* Override default width */
-  margin: auto !important; /* Center the circle in its container */
-  padding: 0;
+  height: 54px !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
   background: none;
   border: none;
-  border-radius: 50% !important; /* Ensure it's always a circle */
+  border-radius: 0.75rem !important;
   color: #374151; /* gray-700 */
   transition: background-color 0.2s;
 }
 
 .custom-calendar .react-calendar__tile:hover {
   background-color: #f3f4f6; /* gray-100 */
+}
+
+.custom-calendar .react-calendar__viewContainer,
+.custom-calendar .react-calendar__month-view {
+  width: 100%;
 }
 
 /* Day from neighboring month */

@@ -14,6 +14,10 @@ const nextConfig = {
       NEXT_PUBLIC_FIREBASE_APP_ID: firebaseConfig.appId || '',
     };
   })(),
+  turbopack: {
+    // Scope Turbopack to the frontend workspace so it stops auto-picking the repo root.
+    root: __dirname,
+  },
 };
 
 export default nextConfig;

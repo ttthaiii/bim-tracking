@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface SaveData {
-  updated: Array<{ id: string; name: string; changes: string[] }>;
+  updated: Array<{ id: string; name: string; changes: string[]; rowIdx?: number }>;
   created: Array<{ id: string; name: string; changes: string[] }>;
 }
 

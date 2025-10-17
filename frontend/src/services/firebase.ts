@@ -1,6 +1,18 @@
 import { db } from '../lib/firebase';
-import { collection, getDocs, doc, updateDoc, serverTimestamp, setDoc, Timestamp, query, where, addDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, serverTimestamp, setDoc, Timestamp, query, where, addDoc, getDoc, arrayUnion } from 'firebase/firestore';
 import { Project, Task, RelateWork, Subtask } from '../types/database';
+
+export interface UserRecord {
+    id: string;
+    employeeId: string;
+    fullName: string;
+    username: string;
+    role: string;
+    fullNameEn?: string;
+    email?: string;
+    password?: string;
+    deletedAt?: Timestamp | null;
+}
 import { getTaskStatusCategory } from './taskStatus'; // ✅ ให้ import เข้ามาแบบนี้
 
 // =================================================================
@@ -168,9 +180,13 @@ export const fetchRelateWorksByProject = async (activityName: string) => {
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter((item: any) => item.activityName === activityName) as (RelateWork & { id: string })[];
 };
 
-export const updateTask = async (taskId: string, data: Partial<Task>) => {
+export const updateTask = async (taskId: string, data: Partial<Task>, historyEntry?: any) => {
     const taskRef = doc(db, 'tasks', taskId);
-    await updateDoc(taskRef, { ...data, lastUpdate: serverTimestamp() });
+    const payload: any = { ...data, lastUpdate: serverTimestamp() };
+    if (historyEntry) {
+        payload.editHistory = arrayUnion(historyEntry);
+    }
+    await updateDoc(taskRef, payload);
 };
 
 export const createTask = async (projectId: string, taskData: any) => {
@@ -223,6 +239,75 @@ export const deleteTask = async (taskId: string) => {
         console.error('❌ Error soft deleting task:', error);
         throw error;
     }
+};
+
+export const getTaskEditHistory = async (taskId: string): Promise<any[]> => {
+    const taskRef = doc(db, 'tasks', taskId);
+    const snapshot = await getDoc(taskRef);
+    const data = snapshot.data();
+    return (data?.editHistory || []) as any[];
+};
+
+export const getUsers = async (): Promise<UserRecord[]> => {
+    const usersRef = collection(db, 'users');
+    const snapshot = await getDocs(usersRef);
+    return snapshot.docs
+      .map(docSnap => ({
+        id: docSnap.id,
+        employeeId: docSnap.data()?.employeeId || docSnap.id,
+        fullName: docSnap.data()?.fullName || docSnap.data()?.Name || '',
+        username: docSnap.data()?.username || docSnap.data()?.Email || '',
+        role: docSnap.data()?.role || docSnap.data()?.ตำแหน่ง || '',
+        fullNameEn: docSnap.data()?.fullNameEn,
+        email: docSnap.data()?.Email,
+        password: docSnap.data()?.password,
+        deletedAt: docSnap.data()?.deletedAt,
+      }))
+      .filter(user => !user.deletedAt) as UserRecord[];
+};
+
+const generateId = () => Math.random().toString(36).slice(2, 10);
+
+export const createUserRecord = async (user: Omit<UserRecord, 'id'> & { id?: string }) => {
+    const docId = user.id || user.employeeId || generateId();
+    const userRef = doc(db, 'users', docId);
+    await setDoc(userRef, {
+        employeeId: user.employeeId,
+        fullName: user.fullName,
+        username: user.username,
+        role: user.role,
+        fullNameEn: user.fullNameEn || null,
+        email: user.email || null,
+        password: user.password || null,
+    });
+    return docId;
+};
+
+export const updateUserRecord = async (id: string, data: Partial<UserRecord>) => {
+    const userRef = doc(db, 'users', id);
+    const optionalKeys = new Set<keyof UserRecord>(['fullNameEn', 'email', 'password']);
+    const sanitizedPayload = Object.entries(data).reduce((acc, [key, value]) => {
+        if (value === undefined) {
+            return acc;
+        }
+        if (optionalKeys.has(key as keyof UserRecord) && value === '') {
+            acc[key as keyof UserRecord] = null as any;
+            return acc;
+        }
+        acc[key as keyof UserRecord] = value as any;
+        return acc;
+    }, {} as Partial<UserRecord>);
+
+    if (Object.keys(sanitizedPayload).length === 0) {
+        return;
+    }
+
+    await updateDoc(userRef, sanitizedPayload);
+};
+
+export const deleteUserRecord = async (id: string) => {
+    const userRef = doc(db, 'users', id);
+    await updateDoc(userRef, { deletedAt: serverTimestamp() });
 };
 
 export const createProject = async (projectData: { name: string; code: string; leader: string }) => {

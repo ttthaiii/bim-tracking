@@ -3,8 +3,9 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, useMemo } from 'react';
-import { collection, query, where, getDocs, setDoc, doc, Timestamp, getDoc } from 'firebase/firestore'; // ✅ เพิ่ม getDoc
+import { collection, query, where, getDocs, setDoc, doc, Timestamp, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
 import Navbar from '@/components/shared/Navbar';
 import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
@@ -17,7 +18,8 @@ import RelateWorkSelect from './components/RelateWorkSelect';
 import AssigneeSelect from './components/AssigneeSelect';
 import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
 import { getCachedProjects, getCachedTasks, getCachedSubtasks } from '@/services/cachedFirestoreService';
-import { calculateDeadlineStatus } from '@/utils/deadlineCalculator'; // ⬅️ เพิ่มบรรทัดนี้
+import { calculateDeadlineStatus } from '@/utils/deadlineCalculator';
+import { uploadTaskEditAttachment } from '@/services/uploadService';
 
 interface TaskItem {
   id: string;
@@ -42,6 +44,13 @@ interface SubtaskRow {
   progress: number;
 }
 
+type EditChange = {
+  field: string;
+  label: string;
+  before: string;
+  after: string;
+};
+
 // ✅ โค้ดใหม่
 interface ExistingSubtask {
   id: string;
@@ -64,6 +73,8 @@ interface ExistingSubtask {
     fileName: string;
     fileUrl: string;
   }> | null;
+  latestDailyReportFileURL?: string;
+  latestDailyReportFileName?: string;
   // 🔧 เพิ่มข้อมูลเหล่านี้
   activity?: string;
   relateDrawing?: string;
@@ -71,6 +82,7 @@ interface ExistingSubtask {
 }
 
 export default function TaskAssignment() {
+  const { appUser } = useAuth();
   const { getCache, setCache, invalidateCache } = useFirestoreCache();
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState('');
@@ -133,17 +145,21 @@ export default function TaskAssignment() {
   } | null>(null);
 
   // ✅ เพิ่ม State สำหรับ Edit Mode
-  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
+const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
   const [editingData, setEditingData] = useState<{
     activity: string;
     relateDrawing: string;
     relateDrawingName: string;
     relateWork: string;
-    item: string;
+    item: string | null;
     internalRev: number | null;
     workScale: string;
     assignee: string;
   } | null>(null);
+  const [editChangedFields, setEditChangedFields] = useState<EditChange[]>([]);
+  const [editNote, setEditNote] = useState('');
+  const [editAttachment, setEditAttachment] = useState<File | null>(null);
+  const [editAttachmentError, setEditAttachmentError] = useState<string | null>(null);
 
   // ✅ เพิ่ม State สำหรับเก็บข้อมูลที่แก้ไขแล้ว (ยังไม่บันทึกลงฐานข้อมูล)
   const [editedSubtasks, setEditedSubtasks] = useState<{[key: string]: any}>({});
@@ -842,12 +858,20 @@ useEffect(() => {
       workScale: subtask.subTaskScale,
       assignee: subtask.subTaskAssignee
     });
+    setEditChangedFields([]);
+    setEditNote('');
+    setEditAttachment(null);
+    setEditAttachmentError(null);
   };
 
   // ✅ Function ยกเลิก Edit
   const handleCancelEdit = () => {
     setEditingSubtaskId(null);
     setEditingData(null);
+    setEditChangedFields([]);
+    setEditNote('');
+    setEditAttachment(null);
+    setEditAttachmentError(null);
   };
 
   // ✅ Function อัพเดทข้อมูลใน Edit Mode
@@ -871,12 +895,67 @@ useEffect(() => {
     });
   };
 
+  const handleEditAttachmentChange = (file: File | null) => {
+    if (!file) {
+      setEditAttachment(null);
+      setEditAttachmentError(null);
+      return;
+    }
+
+    const maxSizeMb = 25;
+    if (file.size > maxSizeMb * 1024 * 1024) {
+      setEditAttachmentError(`ขนาดไฟล์ต้องไม่เกิน ${maxSizeMb}MB`);
+      setEditAttachment(null);
+      return;
+    }
+
+    setEditAttachment(file);
+    setEditAttachmentError(null);
+  };
+
+  const computeEditChanges = (subtask: ExistingSubtask, editData: {
+    relateWork: string;
+    item: string | null;
+    internalRev: number | null;
+    workScale: string;
+    assignee: string;
+  }): EditChange[] => {
+    const changes: EditChange[] = [];
+
+    const addChange = (field: string, label: string, beforeValue: string | number | null | undefined, afterValue: string | number | null | undefined) => {
+      const before = (beforeValue ?? '').toString().trim();
+      const after = (afterValue ?? '').toString().trim();
+      if (before !== after) {
+        changes.push({ field, label, before: before || '-', after: after || '-' });
+      }
+    };
+
+    addChange('relateWork', 'Relate Work', subtask.subTaskCategory, editData.relateWork);
+    addChange('item', 'Item', subtask.item, editData.item);
+    const subtaskInternalRev = subtask.internalRev ? parseInt(subtask.internalRev) : null;
+    addChange('internalRev', 'Internal Rev.', subtaskInternalRev, editData.internalRev);
+    addChange('workScale', 'Work Scale', subtask.subTaskScale, editData.workScale);
+    addChange('assignee', 'Assignee', subtask.subTaskAssignee, editData.assignee);
+
+    return changes;
+  };
+
   // ✅ Function เตรียมข้อมูลสำหรับ Confirmation
   const handlePrepareEditConfirm = () => {
     if (!editingSubtaskId || !editingData) return;
 
     const subtask = existingSubtasks.find(s => s.id === editingSubtaskId);
     if (!subtask) return;
+
+    setEditChangedFields(
+      computeEditChanges(subtask, {
+        relateWork: editingData.relateWork,
+        item: editingData.item,
+        internalRev: editingData.internalRev,
+        workScale: editingData.workScale,
+        assignee: editingData.assignee,
+      })
+    );
 
     setEditConfirmData({
       subtaskNumber: subtask.subTaskNumber,
@@ -902,7 +981,16 @@ useEffect(() => {
       if (!subtask) return;
 
       const taskId = editingData.relateDrawing;
-      
+      const changes: EditChange[] = editChangedFields.length
+        ? editChangedFields
+        : computeEditChanges(subtask, {
+            relateWork: editingData.relateWork,
+            item: editingData.item,
+            internalRev: editingData.internalRev,
+            workScale: editingData.workScale,
+            assignee: editingData.assignee,
+          });
+
       // บันทึกลง Firestore
       await setDoc(
         doc(db, 'tasks', taskId, 'subtasks', subtask.subTaskNumber),
@@ -918,6 +1006,41 @@ useEffect(() => {
         },
         { merge: true }
       );
+
+      let attachmentInfo: { cdnURL: string; storagePath: string; fileUploadedAt: Timestamp; fileName: string } | null = null;
+      if (editAttachment) {
+        attachmentInfo = await uploadTaskEditAttachment(editAttachment, taskId);
+      }
+
+      const editorName = appUser?.fullName || appUser?.username || appUser?.employeeId || 'unknown';
+      const historyEntry: any = {
+        timestamp: Timestamp.now(),
+        fields: changes,
+        note: editNote.trim(),
+        subtaskNumber: subtask.subTaskNumber,
+        subtaskPath: `tasks/${taskId}/subtasks/${subtask.subTaskNumber}`,
+        user: editorName,
+      };
+
+      if (attachmentInfo) {
+        historyEntry.fileURL = attachmentInfo.cdnURL;
+        historyEntry.storagePath = attachmentInfo.storagePath;
+        historyEntry.fileName = attachmentInfo.fileName;
+        historyEntry.fileUploadedAt = attachmentInfo.fileUploadedAt;
+      }
+
+      try {
+        await updateDoc(doc(db, 'tasks', taskId), {
+          editHistory: arrayUnion(historyEntry),
+        });
+      } catch (historyError) {
+        console.warn('Failed to append edit history via updateDoc, retrying with setDoc merge', historyError);
+        await setDoc(
+          doc(db, 'tasks', taskId),
+          { editHistory: [historyEntry] },
+          { merge: true }
+        );
+      }
 
       // Invalidate Cache
       invalidateCache(`subtasks_projectId:${selectedProject}`);
@@ -936,6 +1059,10 @@ useEffect(() => {
       handleCancelEdit();
       setShowEditConfirmModal(false);
       setEditConfirmData(null);
+      setEditNote('');
+      setEditAttachment(null);
+      setEditAttachmentError(null);
+      setEditChangedFields([]);
 
       // แสดง Success Modal
       setSuccessNewCount(0);
@@ -1434,21 +1561,29 @@ useEffect(() => {
 
       {/* LINK FILE - ไม่แก้ไข */}
       <td className="px-2 py-2 text-center">
-        {subtask.subTaskFiles && 
-         subtask.subTaskFiles.length > 0 && 
-         subtask.subTaskFiles[0] && 
-         typeof subtask.subTaskFiles[0] === 'object' &&
-         subtask.subTaskFiles[0].fileName &&
-         subtask.subTaskFiles[0].fileUrl ? (
-          <button
-            onClick={() => handleOpenFile(subtask.subTaskFiles![0])}
-            className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200 flex items-center gap-1 mx-auto"
-          >
-            📎 
-          </button>
-        ) : (
-          <span className="text-gray-400 text-xs">-</span>
-        )}
+        {(() => {
+          const latestFile = subtask.latestDailyReportFileURL
+            ? {
+                fileName: subtask.latestDailyReportFileName || 'Daily Report',
+                fileUrl: subtask.latestDailyReportFileURL,
+              }
+            : (subtask.subTaskFiles && subtask.subTaskFiles.length > 0
+                ? subtask.subTaskFiles[0]
+                : null);
+
+          if (latestFile && latestFile.fileUrl) {
+            return (
+              <button
+                onClick={() => handleOpenFile(latestFile)}
+                className="px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors border border-blue-200 flex items-center gap-1 mx-auto"
+              >
+                📎
+              </button>
+            );
+          }
+
+          return <span className="text-gray-400 text-xs">-</span>;
+        })()}
       </td>
 
       {/* CORRECT - ปุ่ม Edit/Save/Cancel/Delete */}
@@ -1614,6 +1749,64 @@ useEffect(() => {
               </tbody>
             </table>
           </div>
+
+          {editingSubtaskId && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">ฟิลด์ที่แก้ไข</h3>
+                {editChangedFields.length > 0 ? (
+                  <ul className="space-y-1 text-sm text-gray-600">
+                    {editChangedFields.map((change, idx) => (
+                      <li key={idx}>
+                        <span className="font-medium text-gray-700">{change.label}:</span>{' '}
+                        <span className="text-gray-500 line-through mr-1">{change.before}</span>
+                        <span className="text-blue-700">{change.after}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-gray-400">ไม่มีการเปลี่ยนแปลงข้อมูล</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุการแก้ไข</label>
+                <textarea
+                  value={editNote}
+                  onChange={(e) => setEditNote(e.target.value)}
+                  rows={3}
+                  className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="อธิบายเหตุผลหรือรายละเอียดการแก้ไข"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">แนบไฟล์อ้างอิง (ถ้ามี)</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="file"
+                    onChange={(e) => handleEditAttachmentChange(e.target.files?.[0] || null)}
+                    className="text-sm"
+                  />
+                  {editAttachment && (
+                    <button
+                      type="button"
+                      className="text-xs text-red-600 hover:text-red-800"
+                      onClick={() => handleEditAttachmentChange(null)}
+                    >
+                      ลบไฟล์
+                    </button>
+                  )}
+                </div>
+                {editAttachment && (
+                  <p className="text-xs text-gray-500 mt-1">{editAttachment.name}</p>
+                )}
+                {editAttachmentError && (
+                  <p className="text-xs text-red-500 mt-1">{editAttachmentError}</p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
  <SuccessModal
@@ -1640,7 +1833,7 @@ useEffect(() => {
             </Button>
             <Button 
               onClick={handleConfirmEditSave}
-              disabled={isSaving}
+              disabled={isSaving || Boolean(editAttachmentError)}
             >
               {isSaving ? 'กำลังบันทึก...' : 'ยืนยันการแก้ไข'}
             </Button>

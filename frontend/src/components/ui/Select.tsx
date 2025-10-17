@@ -13,6 +13,7 @@ interface SelectProps {
   disabled?: boolean | 0 | 1 | "" | null | undefined;
   loading?: boolean;
   className?: string;
+  selectClassName?: string;
 }
 
 function Select({
@@ -22,7 +23,8 @@ function Select({
   placeholder = 'Select...',
   disabled = false,
   loading = false,
-  className = ''
+  className = '',
+  selectClassName = ''
 }: SelectProps) {
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newValue = e.target.value;
@@ -39,13 +41,14 @@ function Select({
         // --- แก้ไข: แปลงค่าให้เป็น boolean เสมอ ---
         disabled={Boolean(disabled || loading)}
         className={`
-          px-3 py-2 
+          pl-2 pr-5 py-2 
           bg-white border border-gray-300 rounded-md 
           text-sm ${value ? 'text-gray-900' : 'text-gray-500'}
           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
           disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed
           appearance-none
           w-full
+        ${selectClassName}
         `}
       >
         <option value="">{loading ? 'Loading...' : placeholder}</option>
@@ -56,9 +59,9 @@ function Select({
         ))}
       </select>
       
-      <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+      <div className="absolute inset-y-0 right-1 flex items-center px-1 pointer-events-none">
         <svg
-          className="w-5 h-5 text-gray-400"
+          className="w-3.5 h-3.5 text-gray-300 opacity-60"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -80,6 +83,7 @@ export default React.memo(Select, (prevProps, nextProps) => {
     prevProps.value === nextProps.value &&
     prevProps.disabled === nextProps.disabled &&
     prevProps.loading === nextProps.loading &&
-    prevProps.options.length === nextProps.options.length
+    prevProps.options.length === nextProps.options.length &&
+    prevProps.selectClassName === nextProps.selectClassName
   );
 });
