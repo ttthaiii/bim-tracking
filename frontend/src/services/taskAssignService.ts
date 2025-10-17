@@ -302,19 +302,6 @@ export const saveDailyReportEntries = async (
   }
 };
 
-export interface UploadedFile {
-  id: string;
-  employeeId: string;
-  subtaskId: string;
-  subtaskPath?: string;
-  workDate: string;
-  fileName: string;
-  fileURL: string;
-  storagePath?: string;
-  fileUploadedAt?: Timestamp;
-  subtaskName: string;
-}
-
 export const getUploadedFilesForEmployee = async (employeeId: string): Promise<UploadedFile[]> => {
   try {
     const reportGroupRef = collectionGroup(db, 'dailyReport');
