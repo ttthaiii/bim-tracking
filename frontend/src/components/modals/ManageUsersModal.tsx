@@ -28,6 +28,16 @@ const createEmptyForm = (): Partial<UserRecord> => ({
   password: "",
 });
 
+const emptyForm = {
+  employeeId: '',
+  fullName: '',
+  fullNameEn: '',
+  email: '',
+  password: '',
+  role: '',
+  username: '',
+};
+
 const ManageUsersModal: React.FC<ManageUsersModalProps> = ({ isOpen, onClose }) => {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -145,9 +155,9 @@ const ManageUsersModal: React.FC<ManageUsersModalProps> = ({ isOpen, onClose }) 
         fullName: editForm.fullName!.trim(),
         username: editForm.username!.trim(),
         role: editForm.role!.trim(),
-        fullNameEn: normalizedFullNameEn,
-        email: normalizedEmail,
-        password: normalizedPassword,
+        fullNameEn: normalizedFullNameEn || undefined,
+        email: normalizedEmail || undefined,
+        password: normalizedPassword || undefined,
       });
       setUsers(prev => prev.map(user => user.id === editingId ? {
         id: editingId,

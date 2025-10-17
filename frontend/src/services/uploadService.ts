@@ -4,11 +4,12 @@ import { storage, db, ensureAuthenticated } from '../lib/firebase';
 
 export const uploadFileToSubtask = async (
   file: File,
-  subtaskPath: string // เช่น "/tasks/TTS-BIM-BIM-021-005/subtasks/subtaskId"
+  subtaskPath: string
 ): Promise<string> => {
   try {
     // 1. Upload file to Firebase Storage
-    const storageRef = ref(storage, `${subtaskPath}/${file.name}`);
+    const storagePath = `${subtaskPath}/${file.name}`;
+    const storageRef = ref(storage, storagePath);
     await uploadBytes(storageRef, file);
     
     // 2. Get download URL
@@ -20,6 +21,13 @@ export const uploadFileToSubtask = async (
       link: downloadURL,
       lastUpdate: new Date()
     });
+    
+    // 4. Return CDN URL
+    const fileCDNPath = storagePath
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/');
+    const cdnURL = `https://bim-tracking-cdn.ttthaiii30.workers.dev/${fileCDNPath}`;
     
     return cdnURL;
   } catch (error) {
