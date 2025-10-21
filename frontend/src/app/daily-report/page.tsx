@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useId, useRef } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, useMemo, KeyboardEvent } from 'react';
 import dynamic from 'next/dynamic';
 
 import SuccessModal from '@/components/modals/SuccessModal';
@@ -28,6 +28,8 @@ import { HistoryModal } from '@/components/HistoryModal'; // Import the new moda
 import { isEqual } from 'lodash';
 import { Timestamp } from 'firebase/firestore';
 import FilePreviewModal from '@/components/modals/FilePreviewModal';
+import { EmployeeAutocomplete } from '@/components/EmployeeAutocomplete';
+import { useEmployeeOptions } from '@/hooks/useEmployeeOptions';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
@@ -219,6 +221,8 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
   }));
 };
 
+const SUPERVISOR_ROLES = ['BimManager', 'BimLeader'];
+
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
   if (!entry.subtaskId) return '';
   const project = projects.find(p => p.id === entry.project);
@@ -241,6 +245,7 @@ export default function DailyReport() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   });
   const [employeeId, setEmployeeId] = useState('');
+  const [pendingEmployeeId, setPendingEmployeeId] = useState('');
   const [employeeData, setEmployeeData] = useState<{ employeeId: string; fullName: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -279,6 +284,51 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     },
     [allDailyEntries, workDate]
   );
+  const isSupervisor = useMemo(() => SUPERVISOR_ROLES.includes((appUser?.role || '').trim()), [appUser?.role]);
+  const { options: employeeOptions, loading: employeesLoading } = useEmployeeOptions(isSupervisor);
+  const lastFetchedEmployeeIdRef = useRef<string>('');
+
+  const applyEmployeeIdChange = useCallback(
+    (fetchData: (id: string) => Promise<void>) => {
+      if (!isSupervisor) return;
+      const trimmed = pendingEmployeeId.trim();
+      if (!trimmed) {
+        setPendingEmployeeId(employeeId);
+        return;
+      }
+
+      if (trimmed === employeeId) {
+        setPendingEmployeeId(trimmed);
+        lastFetchedEmployeeIdRef.current = '';
+        setTempDataCache({});
+        setHasUnsavedChanges(false);
+        setDailyReportEntries([createInitialEmptyDailyReportEntry(trimmed, workDate, baseId, 0)]);
+        fetchData(trimmed);
+        return;
+      }
+      lastFetchedEmployeeIdRef.current = '';
+      setEmployeeId(trimmed);
+    },
+    [employeeId, pendingEmployeeId, isSupervisor, setTempDataCache, setHasUnsavedChanges, workDate, baseId, setDailyReportEntries]
+  );
+
+  const handleEmployeeIdInputChange = (value: string) => {
+    if (!isSupervisor) return;
+    setPendingEmployeeId(value);
+  };
+
+  const handleEmployeeIdKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!isSupervisor) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyEmployeeIdChange(fetchAllData);
+    }
+  };
+
+  const handleEmployeeIdBlur = () => {
+    if (!isSupervisor) return;
+    applyEmployeeIdChange(fetchAllData);
+  };
 
   const handleShowHistory = () => {
     // กรองข้อมูลสำหรับประวัติ: ใช้ assignDate เป็นหลัก
@@ -377,18 +427,38 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   }, []);
 
   useEffect(() => {
-    if (appUser?.employeeId && !employeeId) {
-      setEmployeeId(appUser.employeeId);
-      fetchAllData(appUser.employeeId);
+    if (appUser?.employeeId) {
+      setEmployeeId(prev => prev || appUser.employeeId);
+      setPendingEmployeeId(prev => prev || appUser.employeeId);
     }
-  }, [appUser, employeeId, fetchAllData]);
+  }, [appUser?.employeeId]);
+
+  useEffect(() => {
+    const trimmedId = employeeId.trim();
+    if (!trimmedId) {
+      setDailyReportEntries([createInitialEmptyDailyReportEntry('', workDate, baseId, 0)]);
+      setEmployeeData(null);
+      return;
+    }
+
+    if (trimmedId === lastFetchedEmployeeIdRef.current) {
+      return;
+    }
+
+    lastFetchedEmployeeIdRef.current = trimmedId;
+    setPendingEmployeeId(prev => (prev === trimmedId ? prev : trimmedId));
+    setTempDataCache({});
+    setDailyReportEntries([createInitialEmptyDailyReportEntry(trimmedId, workDate, baseId, 0)]);
+    setHasUnsavedChanges(false);
+    fetchAllData(trimmedId);
+  }, [employeeId, workDate, baseId, fetchAllData, setHasUnsavedChanges, setTempDataCache, setDailyReportEntries, setEmployeeData]);
 
   // Set initial date after component mounts
   useEffect(() => {
     if (typeof window !== 'undefined' && !date) {
       setDate(new Date());
     }
-  }, [date]);
+  }, [date, isSupervisor]);
 
   useEffect(() => {
     if (date instanceof Date) {
@@ -413,7 +483,7 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
       });
 
       setIsFutureDate(selectedDate > today);
-      setIsReadOnly(selectedDate < twoDaysAgoStr);
+      setIsReadOnly(!isSupervisor && selectedDate < twoDaysAgoStr);
     }
   }, [date]);
 
@@ -590,6 +660,7 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
     console.log('🔄 handleUpdateEntry called:', { entryId, updates });
     
+    let updatedEntriesSnapshot: DailyReportEntry[] = [];
     setDailyReportEntries((currentEntries: DailyReportEntry[]) => {
       const newEntries = currentEntries.map((entry: DailyReportEntry) => {
         if (entry.id === entryId) {
@@ -615,15 +686,12 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
         return entry;
       });
       
-      // ✅ ลบบรรทัดที่เรียก setTempDataCache ออกจากตรงนี้
-      
       console.log('✅ New entries state:', newEntries);
 
-      setHasUnsavedChanges(computeHasUnsavedChanges(newEntries));
-
-      // เราสามารถ return newEntries ตรงๆ ได้เลย เพราะ .map() จะคืนค่าเป็น array ใหม่อยู่แล้ว
+      updatedEntriesSnapshot = newEntries;
       return newEntries; 
     });
+    setHasUnsavedChanges(computeHasUnsavedChanges(updatedEntriesSnapshot));
   };
 
   const handleRowFocus = (entryId: string, idx: number) => {
@@ -707,6 +775,9 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   };
   
   const handleAddRow = () => {
+    if (!employeeId.trim()) {
+      return;
+    }
     setDailyReportEntries(currentEntries => {
       // Prevent adding a new row if the last one is empty
       if (currentEntries.length > 0 && !currentEntries[currentEntries.length - 1].subtaskId) {
@@ -1006,8 +1077,32 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
               {/* Header Info */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">รหัสพนักงาน</label>
-                  <input type="text" value={employeeId} readOnly className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed" placeholder="กำลังโหลด..."/>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    รหัสพนักงาน
+                    {isSupervisor && (
+                      <span className="ml-1 text-[11px] text-red-500 font-semibold">( * หัวหน้าสามารถกรอกรหัสพนักงานคนอื่นเพื่อบันทึกให้ได้ )</span>
+                    )}
+                  </label>
+                  {isSupervisor ? (
+                    <EmployeeAutocomplete
+                      value={pendingEmployeeId}
+                      options={employeeOptions}
+                      onChange={(id) => {
+                        setPendingEmployeeId(id);
+                        setEmployeeId(id);
+                      }}
+                      placeholder={employeesLoading ? 'กำลังโหลดรายชื่อ...' : 'ค้นหาพนักงาน...'}
+                      isDisabled={employeesLoading}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={employeeId}
+                      readOnly
+                      className="w-full p-2 border border-gray-300 rounded-md text-sm bg-gray-100 text-gray-900 cursor-not-allowed"
+                      placeholder="กำลังโหลด..."
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">วันที่ทำงาน</label>
