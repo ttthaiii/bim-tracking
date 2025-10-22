@@ -145,4 +145,5 @@ export interface UploadedFile {
   fileURL: string;
   storagePath?: string;
   fileUploadedAt?: Timestamp;
+  subtaskName: string;
 }
