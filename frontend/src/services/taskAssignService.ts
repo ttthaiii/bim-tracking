@@ -2,13 +2,15 @@
 import {
   collectionGroup,
   doc,
+  getDoc,
   getDocs,
   query,
   where,
   writeBatch,
   arrayUnion,
-  Timestamp
+  Timestamp,
 } from 'firebase/firestore';
+import type { DocumentData, QueryDocumentSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { DailyReportEntry, Subtask, UploadedFile } from '../types/database';
 import { getEmployeeByID } from './employeeService';
@@ -153,29 +155,43 @@ export const fetchAvailableSubtasksForEmployee = async (
     
     const allSubtasks: Subtask[] = [];
     const subtaskIds = new Set<string>();
+    const taskStatusCache = new Map<string, string | null>();
+
+    const shouldIncludeSubtask = async (subtaskDoc: QueryDocumentSnapshot<DocumentData>) => {
+      const data = subtaskDoc.data() as Subtask;
+      if ((data.subtaskStatus ?? data.subTaskStatus ?? '').toUpperCase() === 'DELETED') {
+        return false;
+      }
+      const taskRef = subtaskDoc.ref.parent?.parent;
+      if (!taskRef) return true;
+      const cacheKey = taskRef.path;
+      if (!taskStatusCache.has(cacheKey)) {
+        const parentSnap = await getDoc(taskRef);
+        const status = parentSnap.exists() ? (parentSnap.data()?.taskStatus ?? null) : null;
+        taskStatusCache.set(cacheKey, status);
+      }
+      const status = taskStatusCache.get(cacheKey);
+      return (status ?? '').toUpperCase() !== 'DELETED';
+    };
+
+    const appendSubtasks = async (docs: QueryDocumentSnapshot<DocumentData>[]) => {
+      for (const subtaskDoc of docs) {
+        if (subtaskIds.has(subtaskDoc.id)) continue;
+        if (!(await shouldIncludeSubtask(subtaskDoc))) continue;
+        const data = subtaskDoc.data() as Subtask;
+        allSubtasks.push({ ...data, id: subtaskDoc.id, path: subtaskDoc.ref.path });
+        subtaskIds.add(subtaskDoc.id);
+      }
+    };
     
     const subtasksGroupRef = collectionGroup(db, 'subtasks');
     const qPersonal = query(subtasksGroupRef, where('subTaskAssignee', '==', employee.fullName));
     const personalSnapshot = await getDocs(qPersonal);
-    
-    personalSnapshot.forEach((subtaskDoc) => {
-      if (!subtaskIds.has(subtaskDoc.id)) {
-        const data = subtaskDoc.data() as Subtask;
-        allSubtasks.push({ ...data, id: subtaskDoc.id, path: subtaskDoc.ref.path });
-        subtaskIds.add(subtaskDoc.id);
-      }
-    });
+    await appendSubtasks(personalSnapshot.docs);
 
     const qAll = query(subtasksGroupRef, where('subTaskAssignee', '==', 'all'));
     const allSnapshot = await getDocs(qAll);
-
-    allSnapshot.forEach((subtaskDoc) => {
-      if (!subtaskIds.has(subtaskDoc.id)) {
-        const data = subtaskDoc.data() as Subtask;
-        allSubtasks.push({ ...data, id: subtaskDoc.id, path: subtaskDoc.ref.path });
-        subtaskIds.add(subtaskDoc.id);
-      }
-    });
+    await appendSubtasks(allSnapshot.docs);
 
     return allSubtasks;
   } catch (error) {

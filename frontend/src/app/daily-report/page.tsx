@@ -797,15 +797,19 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
       return;
     }
 
-    const newProgress = parseInt(newProgressValue, 10);
+    const parsedProgress = parseInt(newProgressValue, 10);
+    const clampedProgress = Number.isNaN(parsedProgress)
+      ? null
+      : Math.min(Math.max(parsedProgress, 0), 100);
+    const sanitizedValue = clampedProgress !== null ? String(clampedProgress) : newProgressValue;
     const initialProgress = entry.initialProgress || 0;
   
     let progressError = '';
-    if (!isNaN(newProgress) && newProgress < initialProgress) {
+    if (clampedProgress !== null && clampedProgress < initialProgress) {
       progressError = `ค่าต้องไม่น้อยกว่าค่าเริ่มต้น (${initialProgress}%)`;
     }
   
-    handleUpdateEntry(entryId, { progress: newProgressValue, progressError });
+    handleUpdateEntry(entryId, { progress: sanitizedValue, progressError });
   };
   
   const handleProgressValidation = (entryId: string) => {
@@ -823,6 +827,8 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
     if (isNaN(currentProgress) || currentProgress < initialProgress) {
       handleUpdateEntry(entryId, { progress: `${initialProgress}%`, progressError: '' });
+    } else if (currentProgress > 100) {
+      handleUpdateEntry(entryId, { progress: '100%', progressError: '' });
     } else {
       handleUpdateEntry(entryId, { progressError: '' });
     }
