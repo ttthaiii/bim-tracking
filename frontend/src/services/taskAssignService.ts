@@ -49,8 +49,6 @@ export const getEmployeeDailyReportEntries = async (
           return timeB - timeA; // เรียงจากใหม่ไปเก่า
         });
 
-        
-
         sortedLogs.forEach((log: any, index: number) => {
           // ใช้ assignDate ถ้ามี, ไม่งั้นใช้ timestamp
           let assignDate: string;
@@ -159,7 +157,7 @@ export const fetchAvailableSubtasksForEmployee = async (
 
     const shouldIncludeSubtask = async (subtaskDoc: QueryDocumentSnapshot<DocumentData>) => {
       const data = subtaskDoc.data() as Subtask;
-      if ((data.subtaskStatus ?? data.subTaskStatus ?? '').toUpperCase() === 'DELETED') {
+      if ((data.subtaskStatus ?? '').toUpperCase() === 'DELETED') {
         return false;
       }
       const taskRef = subtaskDoc.ref.parent?.parent;
@@ -317,19 +315,6 @@ export const saveDailyReportEntries = async (
     throw error;
   }
 };
-
-export interface UploadedFile {
-  id: string;
-  employeeId: string;
-  subtaskId: string;
-  subtaskPath?: string;
-  workDate: string;
-  fileName: string;
-  fileURL: string;
-  storagePath?: string;
-  fileUploadedAt?: Timestamp;
-  subtaskName: string;
-}
 
 export const getUploadedFilesForEmployee = async (employeeId: string): Promise<UploadedFile[]> => {
   try {

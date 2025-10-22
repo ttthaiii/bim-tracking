@@ -48,7 +48,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
       const uploadedAtISO = task.fileUploadedAt
         ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
             ? (task.fileUploadedAt as any).toDate().toISOString()
-            : (task.fileUploadedAt as Date).toISOString?.() || null)
+            : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
         : null;
       initialStatus[task.id] = {
         file: null,
@@ -88,7 +88,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
               existingFileUploadedAt: existing.existingFileUploadedAt || (task.fileUploadedAt
                 ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
                     ? (task.fileUploadedAt as any).toDate().toISOString()
-                    : (task.fileUploadedAt as Date).toISOString?.() || null)
+                    : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
                 : null),
               uploaded: existing.uploaded || Boolean(task.fileURL),
               skipped: existing.skipped || Boolean(task.fileURL && !existing.file),
@@ -105,7 +105,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
               existingFileUploadedAt: task.fileUploadedAt
                 ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
                     ? (task.fileUploadedAt as any).toDate().toISOString()
-                    : (task.fileUploadedAt as Date).toISOString?.() || null)
+                    : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
                 : null,
             };
       });
@@ -145,7 +145,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
           || (task.fileUploadedAt
                 ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
                     ? (task.fileUploadedAt as any).toDate().toISOString()
-                    : (task.fileUploadedAt as Date).toISOString?.() || null)
+                    : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
                 : null),
       }
     }));
@@ -268,7 +268,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
         fileUploadedAt: status.existingFileUploadedAt || (task.fileUploadedAt
           ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
               ? (task.fileUploadedAt as any).toDate().toISOString()
-              : (task.fileUploadedAt as Date).toISOString?.() || undefined)
+              : (task.fileUploadedAt as unknown as Date).toISOString?.() || undefined)
           : undefined),
       };
     });

@@ -145,9 +145,9 @@ const ManageUsersModal: React.FC<ManageUsersModalProps> = ({ isOpen, onClose }) 
         fullName: editForm.fullName!.trim(),
         username: editForm.username!.trim(),
         role: editForm.role!.trim(),
-        fullNameEn: normalizedFullNameEn,
-        email: normalizedEmail,
-        password: normalizedPassword,
+        fullNameEn: normalizedFullNameEn ?? undefined,
+        email: normalizedEmail ?? undefined,
+        password: normalizedPassword ?? undefined,
       });
       setUsers(prev => prev.map(user => user.id === editingId ? {
         id: editingId,
@@ -377,7 +377,7 @@ const ManageUsersModal: React.FC<ManageUsersModalProps> = ({ isOpen, onClose }) 
             {isEditingRow ? (
               <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
                 <Button onClick={handleSaveEdit} disabled={!isEditValid || loading}>บันทึก</Button>
-                <Button variant="outline" onClick={() => { setEditingId(null); setEditForm(emptyForm); }}>ยกเลิก</Button>
+                <Button variant="outline" onClick={() => { setEditingId(null); setEditForm(createEmptyForm()); }}>ยกเลิก</Button>
                           </div>
                         ) : (
                           <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>

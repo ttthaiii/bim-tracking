@@ -21,7 +21,7 @@ export const uploadFileToSubtask = async (
       lastUpdate: new Date()
     });
     
-    return cdnURL;
+    return downloadURL;
   } catch (error) {
     console.error('Error uploading file:', error);
     throw new Error('Failed to upload file');

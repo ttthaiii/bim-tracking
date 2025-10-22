@@ -13,7 +13,7 @@ const Calendar = dynamic(
 );
 import '../custom-calendar.css';
 import { getEmployeeByID } from '@/services/employeeService';
-import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee, UploadedFile } from '@/services/taskAssignService';
+import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveDailyReportEntries, getUploadedFilesForEmployee } from '@/services/taskAssignService';
 import type { SelectedFileMap } from '@/components/UploadPopup';
 import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
@@ -30,6 +30,7 @@ import { Timestamp } from 'firebase/firestore';
 import FilePreviewModal from '@/components/modals/FilePreviewModal';
 import { EmployeeAutocomplete } from '@/components/EmployeeAutocomplete';
 import { useEmployeeOptions } from '@/hooks/useEmployeeOptions';
+import type { UploadedFile } from '@/types/database';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
