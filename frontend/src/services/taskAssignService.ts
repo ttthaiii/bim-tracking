@@ -104,27 +104,30 @@ export const getEmployeeDailyReportEntries = async (
           }
           
           // Generate a truly unique ID for each individual log entry
-          const uniqueEntryId = `${docSnap.id}-${data.subtaskId}-${assignDate}-${log.timestamp?.toMillis?.() || 0}-${index}`;
+          const uniqueEntryId = `${docSnap.id}-${log.subtaskId || data.subtaskId}-${assignDate}-${log.timestamp?.toMillis?.() || 0}-${index}`;
 
           allEntries.push({
             id: uniqueEntryId,
-            employeeId: data.employeeId,
-            subtaskId: data.subtaskId,
+            employeeId: log.employeeId || data.employeeId, // <-- 💥 แก้ไข: อ่านจาก log ก่อน
+            subtaskId: log.subtaskId || data.subtaskId,   // (อันนี้คุณแก้แล้ว)
             subtaskPath,
             assignDate: assignDate,
             normalWorkingHours: `${Math.floor(log.day)}:${Math.round((log.day % 1) * 60)}`,
             otWorkingHours: `${Math.floor(log.ot)}:${Math.round((log.ot % 1) * 60)}`,
             progress: `${log.progress}%`,
             note: log.note,
-            taskName: data.taskName || '',
-            subTaskName: data.subTaskName || '',
-            item: data.item || '',
-            subTaskCategory: data.subTaskCategory || '',
-            internalRev: data.internalRev || '',
-            subTaskScale: data.subTaskScale || '',
-            project: data.project || '',
+            
+            // --- 💥 แก้ไขทั้งหมด ให้อ่านจาก 'log' ก่อน 💥 ---
+            taskName: log.taskName || data.taskName || '',
+            subTaskName: log.subTaskName || data.subTaskName || '',
+            item: log.item || data.item || '',
+            subTaskCategory: log.subTaskCategory || data.subTaskCategory || '',
+            internalRev: log.internalRev || data.internalRev || '',
+            subTaskScale: log.subTaskScale || data.subTaskScale || '',
+            project: log.project || data.project || '',
+            
             timestamp: log.timestamp,
-            loggedAt: log.loggedAt, // เพิ่ม loggedAt
+            loggedAt: log.loggedAt, 
             status: 'pending',
             relateDrawing: '',
             fileName,
@@ -135,7 +138,7 @@ export const getEmployeeDailyReportEntries = async (
         });
       }
     });
-    
+      
     return allEntries;
   } catch (error) {
     console.error('Error fetching daily report entries from collection group:', error);
@@ -265,13 +268,25 @@ export const saveDailyReportEntries = async (
       });
 
       const workLogData: any = {
+        // --- ข้อมูลเดิม ---
         day: parseHours(entry.normalWorkingHours),
         ot: parseHours(entry.otWorkingHours),
         progress: newProgressNumber,
         note: entry.note || '',
-        timestamp: now,              // เวลาที่กดบันทึก (เวลาปัจจุบัน) - ใช้จัดเรียงข้อมูลล่าสุด
-        loggedAt: selectedDate,      // วันที่ที่เลือกจากปฏิทิน (Date + เวลา 12:00)
-        assignDate: entry.assignDate  // วันที่ที่เลือกจากปฏิทิน (YYYY-MM-DD)
+        timestamp: now,
+        loggedAt: selectedDate,
+        assignDate: entry.assignDate,
+
+        // --- 💥 คัดลอกข้อมูลจาก dailyReportMainData มาใส่ที่นี่ 💥 ---
+        employeeId: entry.employeeId, // <-- เพิ่ม
+        subtaskId: entry.subtaskId,   // <-- ย้าย if(entry.subtaskId) มาไว้ตรงนี้เลย
+        taskName: entry.taskName || '',
+        subTaskName: entry.subTaskName || '',
+        item: entry.item || '',
+        subTaskCategory: entry.subTaskCategory || '',
+        internalRev: entry.internalRev || '',
+        subTaskScale: entry.subTaskScale || '',
+        project: entry.project || '',
       };
 
       if (entry.fileName) {

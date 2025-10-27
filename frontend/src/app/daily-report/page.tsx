@@ -386,14 +386,18 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   };
   
   useEffect(() => {
-    const currentEntries = tempDataCache[workDate] ?? dailyReportEntries;
+    // --- 💥 แก้ไข 2 บรรทัดนี้ 💥 ---
+    const cacheKey = getCacheKey(employeeId, workDate);
+    const currentEntries = tempDataCache[cacheKey] ?? dailyReportEntries;
     setHasUnsavedChanges(computeHasUnsavedChanges(currentEntries));
   }, [
     workDate,
     tempDataCache,
     dailyReportEntries,
     computeHasUnsavedChanges,
-    setHasUnsavedChanges
+    setHasUnsavedChanges,
+    employeeId,     // <-- 💥 เพิ่ม
+    getCacheKey     // <-- 💥 เพิ่ม
   ]);
 
   const fetchAllData = useCallback(async (eid: string) => {
@@ -611,6 +615,11 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
     const latestEntriesMap: Record<string, DailyReportEntry> = {};
     latestEntries.forEach((entry: DailyReportEntry) => {
+
+      // --- 💥 เพิ่ม LOG ตรงนี้ 💥 ---
+      console.log('DEBUG: Inspecting entry:', JSON.stringify(entry));
+      // --- -------------------- ---
+
       if (!entry.subtaskId) return;
       latestEntriesMap[entry.subtaskId] = entry;
     });
@@ -916,7 +925,9 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
       return;
     }
 
-    const validEntries = dailyReportEntries.filter(entry => entry.subtaskId);
+    const validEntries = dailyReportEntries.filter(entry => 
+      entry.subtaskId && entry.employeeId === employeeId
+    );
 
     if (validEntries.length === 0) {
       setErrorMessage('กรุณาเลือก Task อย่างน้อย 1 รายการก่อนบันทึก');
@@ -989,7 +1000,8 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
           fileUploadedAt,
         };
       });
-
+      console.log('DEBUG: Submitting entries for employeeId:', employeeId);
+      console.log('DEBUG: Data to save:', JSON.stringify(entriesToSave, null, 2));
       await saveDailyReportEntries(employeeId, entriesToSave);
       
       setSuccessMessage('บันทึกข้อมูล Daily Report สำเร็จ!');
@@ -1000,7 +1012,7 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
       setTempDataCache({});
       prevWorkDateRef.current = workDate;
       await fetchAllData(employeeId);
-      
+
     } catch (err) {
       console.error('Error submitting daily report:', err);
       // --- 3. เพิ่ม ErrorModal สำหรับ catch block ---
@@ -1415,7 +1427,10 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     <SuccessModal
         isOpen={showSuccessModal}
         message={successMessage}
-        onClose={() => setShowSuccessModal(false)}
+        onClose={() => {
+          setShowSuccessModal(false); // <-- สั่งปิด Modal ก่อน
+          window.location.reload();
+        }}
       />
       <ErrorModal
         isOpen={showErrorModal}
