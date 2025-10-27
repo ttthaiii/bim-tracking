@@ -665,7 +665,7 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   console.log('entriesToShow', entriesToShow);
   setDailyReportEntries(entriesToShow);
     setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
-  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects, getCacheKey, tempDataCache, uploadedFiles]);
+  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects, getCacheKey, uploadedFiles]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
     console.log('🔄 handleUpdateEntry called:', { entryId, updates });
