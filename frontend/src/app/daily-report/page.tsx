@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useId, useRef, useMemo, KeyboardEvent } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 
 import SuccessModal from '@/components/modals/SuccessModal';
@@ -215,7 +215,7 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
   }
   
   // ถ้าเหลือเวลามากกว่า 1 ชั่วโมง แสดงตัวเลือกนาทีทั้งหมด
-  const remainingMinutes = Math.floor(remainingHours * 60);
+  //const remainingMinutes = Math.floor(remainingHours * 60);
   return [0, 15, 30, 45].map(m => ({ 
     value: m.toString(), 
     label: `${m} น.`
@@ -289,7 +289,9 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const { options: employeeOptions, loading: employeesLoading } = useEmployeeOptions(isSupervisor);
   const lastFetchedEmployeeIdRef = useRef<string>('');
 
-  const applyEmployeeIdChange = useCallback(
+  const getCacheKey = useCallback((eid: string, date: string) => `${eid}-${date}`, []);
+
+  {/* const applyEmployeeIdChange = useCallback(
     (fetchData: (id: string) => Promise<void>) => {
       if (!isSupervisor) return;
       const trimmed = pendingEmployeeId.trim();
@@ -311,25 +313,25 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
       setEmployeeId(trimmed);
     },
     [employeeId, pendingEmployeeId, isSupervisor, setTempDataCache, setHasUnsavedChanges, workDate, baseId, setDailyReportEntries]
-  );
+  ); */}
 
-  const handleEmployeeIdInputChange = (value: string) => {
+  {/* const handleEmployeeIdInputChange = (value: string) => {
     if (!isSupervisor) return;
     setPendingEmployeeId(value);
-  };
+  };*/}
 
-  const handleEmployeeIdKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  {/* const handleEmployeeIdKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!isSupervisor) return;
     if (event.key === 'Enter') {
       event.preventDefault();
       applyEmployeeIdChange(fetchAllData);
     }
-  };
+  }; */}
 
-  const handleEmployeeIdBlur = () => {
+  {/* const handleEmployeeIdBlur = () => {
     if (!isSupervisor) return;
     applyEmployeeIdChange(fetchAllData);
-  };
+  }; */}
 
   const handleShowHistory = () => {
     // กรองข้อมูลสำหรับประวัติ: ใช้ assignDate เป็นหลัก
@@ -486,7 +488,7 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
       setIsFutureDate(selectedDate > today);
       setIsReadOnly(!isSupervisor && selectedDate < twoDaysAgoStr);
     }
-  }, [date]);
+  }, [date, isSupervisor]);
 
   // Effect สำหรับจัดการ cache และ validate workDate เมื่อมีการเปลี่ยนวันที่
   useEffect(() => {
@@ -506,19 +508,22 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     
     // ✅ เพิ่มเงื่อนไข: update cache เฉพาะเมื่อข้อมูลเปลี่ยนจริงๆ
     setTempDataCache(prev => {
-      const currentCache = prev[workDate];
+      // --- 2. แก้ไข 2 บรรทัดนี้ ---
+      const cacheKey = getCacheKey(employeeId, workDate);
+      const currentCache = prev[cacheKey];
       // ถ้า cache เหมือนเดิม ไม่ต้อง update
       if (currentCache && isEqual(currentCache, dailyReportEntries)) {
         return prev;
       }
       return {
         ...prev,
-        [workDate]: dailyReportEntries
+        // --- และบรรทัดนี้ ---
+        [cacheKey]: dailyReportEntries
       };
     });
     
     prevWorkDateRef.current = workDate;
-  }, [workDate, dailyReportEntries]);
+  }, [workDate, dailyReportEntries, employeeId, getCacheKey]);
 
   // Filter subtasks based on whether the date is in the future
   useEffect(() => {
@@ -544,16 +549,19 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     if (!employeeId || !workDate) {
       console.log('Missing required data, skipping');
       return;
-    }
+    }    
+    const cacheKey = getCacheKey(employeeId, workDate);
 
     // ถ้ามีข้อมูลใน cache ใช้ข้อมูลจาก cache
-    if (tempDataCache[workDate]) {
+    if (tempDataCache[cacheKey]) {
       console.log('🔍 Using cached data:', {
         workDate,
-        cachedEntries: tempDataCache[workDate],
+        // --- 5. แก้ไขบรรทัดนี้ ---
+        cachedEntries: tempDataCache[cacheKey],
         cacheKeys: Object.keys(tempDataCache)
       });
-      setDailyReportEntries(tempDataCache[workDate]);
+      // --- 6. แก้ไขบรรทัดนี้ ---
+      setDailyReportEntries(tempDataCache[cacheKey]);
       return;
     }
 
@@ -578,17 +586,18 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     });
 
     if (entriesForDate.length === 0) {
-        const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
-        const newEntry = {
-            ...initialEntry,
-            isExistingData: false,
-            timestamp: Timestamp.now()
-        };
-        setDailyReportEntries([newEntry]);
-        setTempDataCache(prev => ({ ...prev, [workDate]: [newEntry] }));
-        setEditableRows(new Set()); // เคลียร์ editableRows เพราะเป็นข้อมูลใหม่ แก้ไขได้เลย
-        return;
-    }
+      const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
+      const newEntry = {
+          ...initialEntry,
+          isExistingData: false,
+          timestamp: Timestamp.now()
+      };
+      setDailyReportEntries([newEntry]);
+      // --- 7. แก้ไขบรรทัดนี้ ---
+      setTempDataCache(prev => ({ ...prev, [cacheKey]: [newEntry] }));
+      setEditableRows(new Set()); // เคลียร์ editableRows เพราะเป็นข้อมูลใหม่ แก้ไขได้เลย
+      return;
+  }
 
     // หา timestamp ล่าสุดของวันนั้น (ข้อมูลที่บันทึกล่าสุดตาม timestamp)
     const latestTimestamp = Math.max(...entriesForDate.map(entry => entry.timestamp?.toMillis() || 0));
@@ -656,7 +665,7 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   console.log('entriesToShow', entriesToShow);
   setDailyReportEntries(entriesToShow);
     setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
-  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects]);
+  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects, getCacheKey, tempDataCache, uploadedFiles]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
     console.log('🔄 handleUpdateEntry called:', { entryId, updates });
