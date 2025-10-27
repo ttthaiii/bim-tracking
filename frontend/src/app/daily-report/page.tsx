@@ -547,134 +547,168 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   }, [isFutureDate, availableSubtasks]);
 
     // Effect สำหรับโหลดข้อมูลจาก allDailyEntries หรือ cache เมื่อเปลี่ยนวันที่
-  useEffect(() => {
-    console.log('Loading data for date:', workDate);
-
-    if (!employeeId || !workDate) {
-      console.log('Missing required data, skipping');
-      return;
-    }    
-    const cacheKey = getCacheKey(employeeId, workDate);
-
-    // ถ้ามีข้อมูลใน cache ใช้ข้อมูลจาก cache
-    if (tempDataCache[cacheKey]) {
-      console.log('🔍 Using cached data:', {
-        workDate,
-        // --- 5. แก้ไขบรรทัดนี้ ---
-        cachedEntries: tempDataCache[cacheKey],
-        cacheKeys: Object.keys(tempDataCache)
-      });
-      // --- 6. แก้ไขบรรทัดนี้ ---
-      setDailyReportEntries(tempDataCache[cacheKey]);
-      return;
-    }
-
-    // ถ้าไม่มีข้อมูลใน cache และไม่มีข้อมูลใน allDailyEntries
-    if (!allDailyEntries.length) {
-      console.log('🔍 No entries state:', {
-        workDate,
-        allEntriesLength: allDailyEntries.length,
-        cache: tempDataCache
-      });
-      return;
-    }
-
-    console.log('Filtering entries for table display:', workDate);
-    // กรองข้อมูลโดยใช้ assignDate เป็นหลัก
-    const entriesForDate = allDailyEntries.filter(entry => {
-      const matches = entry.assignDate === workDate;
-      if (matches) {
-        console.log('Found matching entry for table:', entry);
+    useEffect(() => {
+      console.log('Loading data for date:', workDate); // Line 545
+  
+      if (!employeeId || !workDate) {
+        console.log('Missing required data, skipping');
+        return;
       }
-      return matches;
-    });
-
-    if (entriesForDate.length === 0) {
-      const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
-      const newEntry = {
-          ...initialEntry,
-          isExistingData: false,
-          timestamp: Timestamp.now()
-      };
-      setDailyReportEntries([newEntry]);
-      // --- 7. แก้ไขบรรทัดนี้ ---
-      setTempDataCache(prev => ({ ...prev, [cacheKey]: [newEntry] }));
-      setEditableRows(new Set()); // เคลียร์ editableRows เพราะเป็นข้อมูลใหม่ แก้ไขได้เลย
-      return;
-  }
-
-    // หา timestamp ล่าสุดของวันนั้น (ข้อมูลที่บันทึกล่าสุดตาม timestamp)
-    const latestTimestamp = Math.max(...entriesForDate.map(entry => entry.timestamp?.toMillis() || 0));
-    console.log('Latest timestamp for date:', new Date(latestTimestamp));
-
-    // กรองเฉพาะ entries ที่มี timestamp ตรงกับ timestamp ล่าสุด
-    const latestEntries = entriesForDate.filter(entry => 
-      Math.floor((entry.timestamp?.toMillis() || 0) / 1000) === Math.floor(latestTimestamp / 1000)
-    );
-    console.log('Latest entries:', latestEntries);
-
-    const latestEntriesMap: Record<string, DailyReportEntry> = {};
-    latestEntries.forEach((entry: DailyReportEntry) => {
-
-      // --- 💥 เพิ่ม LOG ตรงนี้ 💥 ---
-      console.log('DEBUG: Inspecting entry:', JSON.stringify(entry));
-      // --- -------------------- ---
-
-      if (!entry.subtaskId) return;
-      latestEntriesMap[entry.subtaskId] = entry;
-    });
-
-  const entriesToShow = Object.values(latestEntriesMap).map((entry: DailyReportEntry) => {
-      // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
-      const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
-      const isLeaveTask = subtask
-        ? includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
-        : includesNonWorkKeyword(entry.taskName) || includesNonWorkKeyword(entry.subTaskName) || includesNonWorkKeyword(entry.item);
-
-      // สร้าง relateDrawing สำหรับข้อมูลเก่า
-      let relateDrawing = entry.relateDrawing;
-      if (!relateDrawing && subtask) {
-        // ค้นหา project
-        const project = allProjects.find(p => p.id === subtask.projectId) ||
-                       allProjects.find(p => p.id === subtask.project) ||
-                       allProjects.find(p => p.name === subtask.project);
-
-        // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
-        const abbr = project?.abbr || subtask.project || 'N/A';
-        const taskName = subtask.taskName || 'N/A';
-        const subTaskName = subtask.subTaskName || 'N/A';
-        const item = subtask.item || 'N/A';
-        relateDrawing = `${abbr}_${taskName}_${subTaskName}_${item}`;
-      }
-
-      const matchingUploadedFile = uploadedFiles.find(file =>
-        file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate
+      const cacheKey = getCacheKey(employeeId, workDate);
+  
+      // 1. ดึงข้อมูล "ร่าง" (Drafts) จาก Cache
+      //    เราจะดึง "ร่าง" ออกมาโดยกรองเฉพาะอันที่ "ไม่ใช่ข้อมูลที่มีอยู่จริง"
+      const cachedEntries = tempDataCache[cacheKey] || [];
+      const draftEntries = cachedEntries.filter(
+        entry => !entry.isExistingData 
       );
-
-      const resolvedFileUploadedAt = entry.fileUploadedAt
-        || (matchingUploadedFile?.fileUploadedAt instanceof Timestamp
-              ? matchingUploadedFile.fileUploadedAt
-              : undefined);
-
-      return {
-        ...entry,
-        isLeaveTask,
-        initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
-        progress: isLeaveTask ? '0%' : entry.progress,
-        otWorkingHours: isLeaveTask ? '0:0' : (entry.otWorkingHours || '0:0'),
-        isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
-        relateDrawing: relateDrawing || '', // เพิ่ม relateDrawing
-        fileName: entry.fileName || matchingUploadedFile?.fileName || '',
-        fileURL: entry.fileURL || matchingUploadedFile?.fileURL || '',
-        storagePath: entry.storagePath || matchingUploadedFile?.storagePath || '',
-        fileUploadedAt: resolvedFileUploadedAt,
-      };
-    });
-
-  console.log('entriesToShow', entriesToShow);
-  setDailyReportEntries(entriesToShow);
-    setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
-  }, [workDate, allDailyEntries, employeeId, baseId, availableSubtasks, allProjects, getCacheKey, uploadedFiles]);
+  
+      // 2. กรองข้อมูล "จริง" (DB) จาก allDailyEntries
+      //    (ตรวจสอบว่ามีข้อมูลที่ดึงมาจาก DB หรือไม่)
+      if (!allDailyEntries.length) {
+        console.log('🔍 No DB entries found (allDailyEntries is empty):', {
+          workDate,
+          allEntriesLength: allDailyEntries.length,
+          draftsCount: draftEntries.length
+        });
+        
+        // ถ้าไม่มีข้อมูลจริง (DB) -> ให้แสดงข้อมูลร่าง (Drafts) ที่มี
+        if (draftEntries.length > 0) {
+          setDailyReportEntries(draftEntries);
+        } else {
+          // ถ้าไม่มีทั้งข้อมูลจริง (DB) และข้อมูลร่าง (Drafts) -> สร้างแถวว่าง 1 แถว
+          const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
+          const newEntry = {
+              ...initialEntry,
+              isExistingData: false, // 👈 ระบุว่าเป็น "ร่าง"
+          };
+          setDailyReportEntries([newEntry]);
+        }
+        setEditableRows(new Set());
+        return; // สิ้นสุดการทำงาน
+      }
+  
+      console.log('Filtering DB entries for table display:', workDate); // Line 581 (เดิม)
+      // กรองข้อมูล (DB) เฉพาะที่ตรงกับวันที่เลือก
+      const entriesForDate = allDailyEntries.filter(entry => {
+        return entry.assignDate === workDate;
+      });
+  
+      // 3. จัดการกรณีที่ DB มีข้อมูล แต่ "ไม่มีข้อมูลของวันนี้"
+      if (entriesForDate.length === 0) {
+        console.log('🔍 No DB entries for *this specific date*.', {
+          workDate,
+          draftsCount: draftEntries.length
+        });
+        
+        // (เหมือน logic ข้อ 2)
+        // ถ้าไม่มีข้อมูลจริง (DB) ของวันนี้ -> ให้แสดงข้อมูลร่าง (Drafts) ที่มี
+        if (draftEntries.length > 0) {
+          setDailyReportEntries(draftEntries);
+        } else {
+          // ถ้าไม่มีทั้งข้อมูลจริง (DB) และข้อมูลร่าง (Drafts) -> สร้างแถวว่าง 1 แถว
+          const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
+          const newEntry = {
+              ...initialEntry,
+              isExistingData: false, // 👈 ระบุว่าเป็น "ร่าง"
+          };
+          setDailyReportEntries([newEntry]);
+        }
+        setEditableRows(new Set());
+        return; // สิ้นสุดการทำงาน
+      }
+  
+      // 4. (Logic เดิม) ประมวลผลข้อมูล "จริง" (DB) ที่ล่าสุดของวันนั้น
+      //    (บรรทัด 605 - 630 เดิม)
+      const latestTimestamp = Math.max(...entriesForDate.map(entry => entry.timestamp?.toMillis() || 0));
+      console.log('Latest timestamp for date:', new Date(latestTimestamp));
+  
+      const latestEntries = entriesForDate.filter(entry => 
+        Math.floor((entry.timestamp?.toMillis() || 0) / 1000) === Math.floor(latestTimestamp / 1000)
+      );
+      console.log('Latest entries:', latestEntries);
+  
+      const latestEntriesMap: Record<string, DailyReportEntry> = {};
+      latestEntries.forEach((entry: DailyReportEntry) => {
+        console.log('DEBUG: Inspecting entry:', JSON.stringify(entry));
+        if (!entry.subtaskId) return;
+        latestEntriesMap[entry.subtaskId] = entry;
+      });
+  
+      // entriesToShow คือข้อมูล "จริง" (DB) ที่ประมวลผลแล้ว
+      // (บรรทัด 632 - 665 เดิม)
+      const entriesToShow = Object.values(latestEntriesMap).map((entry: DailyReportEntry) => {
+        const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
+        const isLeaveTask = subtask
+          ? includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
+          : includesNonWorkKeyword(entry.taskName) || includesNonWorkKeyword(entry.subTaskName) || includesNonWorkKeyword(entry.item);
+  
+        let relateDrawing = entry.relateDrawing;
+        if (!relateDrawing && subtask) {
+          const project = allProjects.find(p => p.id === subtask.projectId) ||
+                         allProjects.find(p => p.id === subtask.project) ||
+                         allProjects.find(p => p.name === subtask.project);
+  
+          const abbr = project?.abbr || subtask.project || 'N/A';
+          const taskName = subtask.taskName || 'N/A';
+          const subTaskName = subtask.subTaskName || 'N/A';
+          const item = subtask.item || 'N/A';
+          relateDrawing = `${abbr}_${taskName}_${subTaskName}_${item}`;
+        }
+  
+        const matchingUploadedFile = uploadedFiles.find(file =>
+          file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate
+        );
+  
+        const resolvedFileUploadedAt = entry.fileUploadedAt
+          || (matchingUploadedFile?.fileUploadedAt instanceof Timestamp
+                ? matchingUploadedFile.fileUploadedAt
+                : undefined);
+  
+        return {
+          ...entry,
+          isLeaveTask,
+          initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
+          progress: isLeaveTask ? '0%' : entry.progress,
+          otWorkingHours: isLeaveTask ? '0:0' : (entry.otWorkingHours || '0:0'),
+          isExistingData: true, // 👈 [สำคัญมาก] ระบุว่านี่คือข้อมูลจาก DB
+          relateDrawing: relateDrawing || '',
+          fileName: entry.fileName || matchingUploadedFile?.fileName || '',
+          fileURL: entry.fileURL || matchingUploadedFile?.fileURL || '',
+          storagePath: entry.storagePath || matchingUploadedFile?.storagePath || '',
+          fileUploadedAt: resolvedFileUploadedAt,
+        };
+      }); // (สิ้นสุด Logic เดิม Line 665)
+  
+      // 5. [ ✅ จุดแก้ไขที่สำคัญ ✅ ]
+      //    รวมข้อมูล "จริง" (DB) + ข้อมูล "ร่าง" (Cache)
+      //    (เราดึง draftEntries มาตั้งแต่ข้อ 1 แล้ว)
+      const combinedEntries = [
+        ...entriesToShow, // ข้อมูลจริง (DB)
+        ...draftEntries   // ข้อมูลร่าง (Cache)
+      ];
+  
+      console.log('Final Combined Data:', { 
+        db: entriesToShow.length, 
+        drafts: draftEntries.length, 
+        total: combinedEntries.length 
+      });
+  
+      // (Logic เดิม)
+      setDailyReportEntries(combinedEntries);
+      setEditableRows(new Set()); // เริ่มต้นล็อคทุกแถวที่เป็นข้อมูลเก่า
+  
+    }, [
+        workDate, 
+        allDailyEntries, 
+        employeeId, 
+        baseId, 
+        availableSubtasks, 
+        allProjects, 
+        getCacheKey, 
+        uploadedFiles,
+        //tempDataCache // 👈 [ ✅ เพิ่ม Dependency นี้ด้วยครับ ]
+    ]);
 
   const handleUpdateEntry = (entryId: string, updates: Partial<DailyReportEntry>) => {
     console.log('🔄 handleUpdateEntry called:', { entryId, updates });
@@ -1008,14 +1042,19 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
       setShowSuccessModal(true);
       
       setHasUnsavedChanges(false);
-      
-      setTempDataCache({});
+
+      const cacheKey = getCacheKey(employeeId, workDate);
+      setTempDataCache(prev => {
+        const newCache = { ...prev };
+        delete newCache[cacheKey]; // ลบ Cache ร่าง "เฉพาะของวันนี้"
+        return newCache;
+      });  
+
       prevWorkDateRef.current = workDate;
       await fetchAllData(employeeId);
 
     } catch (err) {
       console.error('Error submitting daily report:', err);
-      // --- 3. เพิ่ม ErrorModal สำหรับ catch block ---
       const message = err instanceof Error ? err.message : 'Unknown error';
       setErrorMessage('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + message);
       setShowErrorModal(true);
@@ -1429,7 +1468,6 @@ const [isPreviewOpen, setIsPreviewOpen] = useState(false);
         message={successMessage}
         onClose={() => {
           setShowSuccessModal(false); // <-- สั่งปิด Modal ก่อน
-          window.location.reload();
         }}
       />
       <ErrorModal
