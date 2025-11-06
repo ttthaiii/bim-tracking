@@ -17,6 +17,7 @@ import {
   createTask,
   deleteTask,
   getTaskEditHistory,
+  getNextTaskCounter,
 } from "@/services/firebase";
 import { Project, Task } from "@/types/database";
 import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
@@ -895,22 +896,35 @@ const ProjectsPage = () => {
       await Promise.all(updatePromises);
       let finalRows = [...rows];
       const rowsToCreate = rows.filter(r => !r.firestoreId && !r.id && r.relateDrawing && r.activity);
+      
+      // ✅ ========== โค้ดส่วนที่แก้ไขแล้ว ========== ✅
       if (rowsToCreate.length > 0) {
-        const maxRunning = rows.reduce((max, row) => {
-          if (!row.id || !row.id.startsWith('TTS-BIM-')) return max;
-          const parts = row.id.split('-');
-          if (parts.length >= 5) {
-            return Math.max(max, parseInt(parts[4]) || 0);
+        const createdRows: TaskRow[] = [];
+        
+        // เราต้องใช้ for...of loop เพราะเราต้อง 'await' ทีละตัว
+        // เพื่อให้เลข counter ที่ได้จาก server ไม่ซ้ำกัน
+        for (const row of rowsToCreate) {
+          try {
+            // 1. โทรหา Backend เพื่อขอเลขใหม่ (Atomic)
+            const newCounter = await getNextTaskCounter(selectedProject);
+            
+            // 2. สร้าง ID โดยใช้เลขที่ปลอดภัยแล้ว
+            const taskId = generateTaskId(currentProject.abbr, row.activity, rows, activities, newCounter);
+            
+            // 3. สร้าง Task (ซึ่งจะใช้ taskId เป็น Document ID)
+            await createTask(selectedProject, { ...row, id: taskId, rev: row.lastRev || '00' });
+            
+            // 4. เก็บผลลัพธ์เพื่ออัปเดตตาราง
+            createdRows.push({ ...row, id: taskId, firestoreId: taskId }); // firestoreId ก็คือ taskId
+          
+          } catch (error) {
+            console.error("Error creating task one by one:", error);
+            // หยุดการสร้างทันทีถ้ามีข้อผิดพลาด
+            throw new Error(`Failed to create task: ${row.relateDrawing}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
           }
-          return max;
-        }, 0);
-        let counter = maxRunning + 1;
-        const createPromises = rowsToCreate.map(async (row) => {
-          const taskId = row.id || generateTaskId(currentProject.abbr, row.activity, rows, activities, counter++);
-          const newFirestoreId = await createTask(selectedProject, { ...row, id: taskId, rev: row.lastRev || '00' });
-          return { ...row, id: taskId, firestoreId: newFirestoreId };
-        });
-        const createdRows = await Promise.all(createPromises);
+        }
+      // ✅ ========== สิ้นสุดโค้ดที่แก้ไขแล้ว ========== ✅
+
         finalRows = rows.map(row => {
           const created = createdRows.find(cr => cr.relateDrawing === row.relateDrawing && !row.firestoreId);
           return created || row;
@@ -970,7 +984,8 @@ const ProjectsPage = () => {
     setEditChangesMap(prev => ({ ...prev, [idx]: [] }));
   };
 
-  const handleCancelEdit = (idx: number) => {
+  // ✅ 1. แก้ไขชื่อฟังก์ชัน (เพิ่ม _) เพื่อแก้ Warning
+  const _handleCancelEdit = (idx: number) => {
     const original = originalRows.get(idx);
     if (original) {
       setRows(rows => rows.map((row, i) => i === idx ? original : row));
@@ -1018,7 +1033,10 @@ const ProjectsPage = () => {
         if (options.startDate && options.endDate) {
           start = new Date(options.startDate);
           end = new Date(options.endDate);
-          const beforeFilter = filteredRows.length;
+          
+          // ✅ 2. ลบบรรทัด 'beforeFilter' ที่ไม่ได้ใช้งาน
+          // const beforeFilter = filteredRows.length; // <--- ลบบรรทัดนี้
+          
           filteredRows = filteredRows.filter(r => {
             const taskStart = new Date(r.startDate);
             const taskEnd = new Date(r.dueDate);
