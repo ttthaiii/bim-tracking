@@ -24,7 +24,7 @@ export const getEmployeeDailyReportEntries = async (
     const reportGroupRef = collectionGroup(db, 'dailyReport');
     const q = query(reportGroupRef, where('employeeId', '==', employeeId));
     const querySnapshot = await getDocs(q);
-    
+
     console.log('Query snapshot size:', querySnapshot.size);
     const allEntries: DailyReportEntry[] = [];
 
@@ -32,6 +32,9 @@ export const getEmployeeDailyReportEntries = async (
       const data = docSnap.data();
       if (data.workhours && Array.isArray(data.workhours)) {
         const subtaskPath = docSnap.ref.path.split('/dailyReport')[0];
+        // Fix: Fallback to ID from document path if data.subtaskId is missing
+        const parentSubtaskDoc = docSnap.ref.parent.parent;
+        const entrySubtaskId = data.subtaskId || (parentSubtaskDoc ? parentSubtaskDoc.id : '');
 
         const toMillis = (value: any): number => {
           if (!value) return 0;
@@ -48,8 +51,6 @@ export const getEmployeeDailyReportEntries = async (
           const timeB = toMillis(b.timestamp || b.loggedAt);
           return timeB - timeA; // เรียงจากใหม่ไปเก่า
         });
-
-        
 
         sortedLogs.forEach((log: any, index: number) => {
           // ใช้ assignDate ถ้ามี, ไม่งั้นใช้ timestamp
@@ -104,14 +105,14 @@ export const getEmployeeDailyReportEntries = async (
               }
             }
           }
-          
+
           // Generate a truly unique ID for each individual log entry
-          const uniqueEntryId = `${docSnap.id}-${data.subtaskId}-${assignDate}-${log.timestamp?.toMillis?.() || 0}-${index}`;
+          const uniqueEntryId = `${docSnap.id}-${entrySubtaskId}-${assignDate}-${log.timestamp?.toMillis?.() || 0}-${index}`;
 
           allEntries.push({
             id: uniqueEntryId,
             employeeId: data.employeeId,
-            subtaskId: data.subtaskId,
+            subtaskId: entrySubtaskId,
             subtaskPath,
             assignDate: assignDate,
             normalWorkingHours: `${Math.floor(log.day)}:${Math.round((log.day % 1) * 60)}`,
@@ -137,7 +138,7 @@ export const getEmployeeDailyReportEntries = async (
         });
       }
     });
-    
+
     return allEntries;
   } catch (error) {
     console.error('Error fetching daily report entries from collection group:', error);
@@ -152,14 +153,14 @@ export const fetchAvailableSubtasksForEmployee = async (
   try {
     const employee = await getEmployeeByID(employeeId);
     if (!employee) return [];
-    
+
     const allSubtasks: Subtask[] = [];
     const subtaskIds = new Set<string>();
     const taskStatusCache = new Map<string, string | null>();
 
     const shouldIncludeSubtask = async (subtaskDoc: QueryDocumentSnapshot<DocumentData>) => {
       const data = subtaskDoc.data() as Subtask;
-      if ((data.subtaskStatus ?? data.subTaskStatus ?? '').toUpperCase() === 'DELETED') {
+      if ((data.subtaskStatus ?? (data as any).subTaskStatus ?? '').toUpperCase() === 'DELETED') {
         return false;
       }
       const taskRef = subtaskDoc.ref.parent?.parent;
@@ -175,15 +176,27 @@ export const fetchAvailableSubtasksForEmployee = async (
     };
 
     const appendSubtasks = async (docs: QueryDocumentSnapshot<DocumentData>[]) => {
-      for (const subtaskDoc of docs) {
-        if (subtaskIds.has(subtaskDoc.id)) continue;
-        if (!(await shouldIncludeSubtask(subtaskDoc))) continue;
-        const data = subtaskDoc.data() as Subtask;
-        allSubtasks.push({ ...data, id: subtaskDoc.id, path: subtaskDoc.ref.path });
-        subtaskIds.add(subtaskDoc.id);
-      }
+      // 1. Filter out duplicates first
+      const uniqueDocs = docs.filter(doc => !subtaskIds.has(doc.id));
+
+      // 2. Validate all docs in parallel
+      const validationResults = await Promise.all(
+        uniqueDocs.map(async (doc) => {
+          const isValid = await shouldIncludeSubtask(doc);
+          return { doc, isValid };
+        })
+      );
+
+      // 3. Add valid docs to result
+      validationResults.forEach(({ doc, isValid }) => {
+        if (isValid) {
+          const data = doc.data() as Subtask;
+          allSubtasks.push({ ...data, id: doc.id, path: doc.ref.path });
+          subtaskIds.add(doc.id);
+        }
+      });
     };
-    
+
     const subtasksGroupRef = collectionGroup(db, 'subtasks');
     const qPersonal = query(subtasksGroupRef, where('subTaskAssignee', '==', employee.fullName));
     const personalSnapshot = await getDocs(qPersonal);
@@ -225,10 +238,10 @@ export const saveDailyReportEntries = async (
     for (const entry of validEntries) {
       // Path to the subtask document, e.g., /projects/XYZ/tasks/ABC/subtasks/123
       const subtaskDocPath = entry.subtaskPath!;
-      
+
       // Path to the dailyReport document for this employee within the subtask
       const dailyReportRef = doc(db, subtaskDocPath, 'dailyReport', entry.employeeId);
-      
+
       // Ref to the subtask document itself to update its main progress
       const subtaskDocRef = doc(db, subtaskDocPath);
 
@@ -256,10 +269,10 @@ export const saveDailyReportEntries = async (
       const [year, month, day] = entry.assignDate.split('-').map(Number);
       const selectedDate = new Date(year, month - 1, day);
       selectedDate.setHours(12, 0, 0, 0); // ตั้งเวลาเป็นเที่ยงวัน
-      
+
       // สร้าง timestamp ปัจจุบัน
       const now = new Date();
-      
+
       console.log('[DEBUG] Saving work log with dates:', {
         assignDate: entry.assignDate,
         selectedDate: selectedDate.toISOString(),
@@ -299,13 +312,13 @@ export const saveDailyReportEntries = async (
       batch.update(dailyReportRef, {
         workhours: arrayUnion(workLogData)
       });
-      
+
       // 3. IMPORTANT: Update the progress on the subtask document itself.
       // This ensures the new progress is the source of truth for the next day.
       batch.update(subtaskDocRef, {
-          subTaskProgress: newProgressNumber
+        subTaskProgress: newProgressNumber
       });
-      
+
       console.log(`[DEBUG] Queued update for dailyReport ${entry.employeeId}. Appending to workhours.`);
       console.log(`[DEBUG] Queued update for subtask ${entry.subtaskId}. Setting subTaskProgress to ${newProgressNumber}.`);
     }
@@ -318,18 +331,6 @@ export const saveDailyReportEntries = async (
   }
 };
 
-export interface UploadedFile {
-  id: string;
-  employeeId: string;
-  subtaskId: string;
-  subtaskPath?: string;
-  workDate: string;
-  fileName: string;
-  fileURL: string;
-  storagePath?: string;
-  fileUploadedAt?: Timestamp;
-  subtaskName: string;
-}
 
 export const getUploadedFilesForEmployee = async (employeeId: string): Promise<UploadedFile[]> => {
   try {
@@ -349,8 +350,8 @@ export const getUploadedFilesForEmployee = async (employeeId: string): Promise<U
         const assignDate = log.assignDate
           ? log.assignDate
           : log.loggedAt?.toDate?.().toISOString().split('T')[0]
-            || log.timestamp?.toDate?.().toISOString().split('T')[0]
-            || '';
+          || log.timestamp?.toDate?.().toISOString().split('T')[0]
+          || '';
 
         const addFile = (fileData: any, suffix: string) => {
           if (!fileData?.fileName || !fileData?.fileURL) return;

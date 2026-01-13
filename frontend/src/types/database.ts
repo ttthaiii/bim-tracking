@@ -82,8 +82,8 @@ export type DisabledState = true | false | undefined;
 export interface DailyReportEntry {
   id: string; // Unique ID for the row in the UI
   employeeId: string;
-  assignDate: string; 
-  subtaskId: string; 
+  assignDate: string;
+  subtaskId: string;
   subtaskPath?: string; // Full path to the selected subtask document
   normalWorkingHours: string;
   otWorkingHours: string;
@@ -97,14 +97,14 @@ export interface DailyReportEntry {
   loggedAt?: Timestamp;     // เวลาที่บันทึกจริง (สำหรับข้อมูลใหม่)
   oldProgress?: string;     // Progress value from previous submission
   isExistingData?: boolean; // Flag to identify if this is existing data
-  
+
   // New field for display
   relateDrawing: string; // e.g., "Project Abbr - Subtask Name"
 
   // Fields copied from Subtask for convenience
   subTaskName: string;
   subTaskCategory: string;
-  internalRev?: string; 
+  internalRev?: string;
   subTaskScale?: string;
   project?: string; // This will hold the resolved Project ID
   taskName?: string;
@@ -120,7 +120,7 @@ export interface User {
   employeeId: string;
   fullName: string;
   fullNameEn?: string;
-  password?: string; 
+  password?: string;
   role: string;
   username: string;
 }
@@ -145,4 +145,5 @@ export interface UploadedFile {
   fileURL: string;
   storagePath?: string;
   fileUploadedAt?: Timestamp;
+  subtaskName?: string;
 }

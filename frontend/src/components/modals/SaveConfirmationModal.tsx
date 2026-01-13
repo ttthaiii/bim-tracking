@@ -10,13 +10,15 @@ interface SaveConfirmationModalProps {
   data: SaveData;
   onConfirm: () => void;
   onCancel: () => void;
+  isLoading?: boolean; // ✅ Added isLoading prop
 }
 
-export default function SaveConfirmationModal({ 
-  isOpen, 
-  data, 
-  onConfirm, 
-  onCancel 
+export default function SaveConfirmationModal({
+  isOpen,
+  data,
+  onConfirm,
+  onCancel,
+  isLoading = false // ✅ Default to false
 }: SaveConfirmationModalProps) {
   if (!isOpen) return null;
 
@@ -175,11 +177,11 @@ export default function SaveConfirmationModal({
                             {item.changes.map((change, changeIdx) => {
                               const parts = change.split('→');
                               const fieldName = change.split(':')[0];
-                              
+
                               if (parts.length === 2) {
                                 const before = parts[0].split(':')[1]?.trim() || '-';
                                 const after = parts[1].trim();
-                                
+
                                 return (
                                   <tr key={`change-${changeIdx}`}>
                                     <td style={{ padding: '6px 8px', border: '1px solid #e5e7eb', background: '#fff', fontWeight: 500, fontSize: '11px' }}>
@@ -246,7 +248,7 @@ export default function SaveConfirmationModal({
                               const parts = change.split(':');
                               const fieldName = parts[0].trim();
                               const value = parts[1]?.trim() || '-';
-                              
+
                               return (
                                 <tr key={`change-${changeIdx}`}>
                                   <td style={{ padding: '6px 8px', border: '1px solid #e5e7eb', background: '#fff', fontWeight: 500, fontSize: '11px' }}>
@@ -279,21 +281,24 @@ export default function SaveConfirmationModal({
         }}>
           <button
             onClick={onCancel}
+            disabled={isLoading}
             style={{
               padding: '10px 20px',
               border: '1px solid #d1d5db',
               borderRadius: '6px',
               fontSize: '14px',
               fontWeight: 500,
-              color: '#374151',
+              color: isLoading ? '#9ca3af' : '#374151',
               background: '#fff',
-              cursor: 'pointer'
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.7 : 1
             }}
           >
             ยกเลิก
           </button>
           <button
             onClick={onConfirm}
+            disabled={isLoading}
             style={{
               padding: '10px 20px',
               border: 'none',
@@ -301,12 +306,21 @@ export default function SaveConfirmationModal({
               fontSize: '14px',
               fontWeight: 500,
               color: '#fff',
-              background: '#3b82f6',
-              cursor: 'pointer',
-              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)'
+              background: isLoading ? '#93c5fd' : '#3b82f6',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
             }}
           >
-            ยืนยันการบันทึก
+            {isLoading && (
+              <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            )}
+            {isLoading ? 'กำลังบันทึก...' : 'ยืนยันการบันทึก'}
           </button>
         </div>
       </div>

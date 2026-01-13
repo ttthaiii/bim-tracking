@@ -24,9 +24,9 @@ interface SubtaskAutocompleteProps {
 
 const formatSubtaskDisplay = (subtask: Subtask, projects: Project[]): string => {
   // Comprehensive project lookup logic
-  const projectObj = projects.find(p => p.id === subtask.projectId) || 
-                     projects.find(p => p.id === subtask.project) ||
-                     projects.find(p => p.name === subtask.project);
+  const projectObj = projects.find(p => p.id === subtask.projectId) ||
+    projects.find(p => p.id === subtask.project) ||
+    projects.find(p => p.name === subtask.project);
 
   let projectDisplay = 'N/A';
   if (projectObj) {
@@ -41,8 +41,11 @@ const formatSubtaskDisplay = (subtask: Subtask, projects: Project[]): string => 
   const subTaskName = subtask.subTaskName || 'N/A';
   const item = subtask.item || '';
   const internalRev = subtask.internalRev ? ` (Rev.${subtask.internalRev})` : '';
-  
-  return item ? 
+
+  // Fix: Show item only if it's not empty and not "N/A"
+  const showItem = item && item !== 'N/A';
+
+  return showItem ?
     `${projectDisplay} - ${taskName} - ${subTaskName} - ${item}${internalRev}` :
     `${projectDisplay} - ${taskName} - ${subTaskName}${internalRev}`;
 };
@@ -79,7 +82,7 @@ const customStyles: StylesConfig<SubtaskOption, false> = {
     padding: '4px',
     color: '#6b7280', // gray-500
     '&:hover': {
-        color: '#111827', // gray-900
+      color: '#111827', // gray-900
     }
   }),
   option: (provided, state) => ({
@@ -89,26 +92,26 @@ const customStyles: StylesConfig<SubtaskOption, false> = {
     fontSize: '12px',
   }),
   placeholder: (provided) => ({
-      ...provided,
-      color: '#9ca3af', // gray-400
-      fontSize: '12px',
+    ...provided,
+    color: '#9ca3af', // gray-400
+    fontSize: '12px',
   }),
   singleValue: (provided) => ({
-      ...provided,
-      color: '#1f2937', // gray-800
-      fontSize: '12px',
+    ...provided,
+    color: '#1f2937', // gray-800
+    fontSize: '12px',
   })
 };
 
-export const SubtaskAutocomplete: React.FC<SubtaskAutocompleteProps> = ({ 
-    entryId, 
-    value, 
-    options, 
-    allProjects,
-    selectedSubtaskIds = new Set(), // กำหนดค่าเริ่มต้นเป็น empty Set
-    onChange, 
-    onFocus,
-    isDisabled
+export const SubtaskAutocomplete: React.FC<SubtaskAutocompleteProps> = ({
+  entryId,
+  value,
+  options,
+  allProjects,
+  selectedSubtaskIds = new Set(), // กำหนดค่าเริ่มต้นเป็น empty Set
+  onChange,
+  onFocus,
+  isDisabled
 }) => {
 
   const subtaskOptions: SubtaskOption[] = options
@@ -117,10 +120,10 @@ export const SubtaskAutocomplete: React.FC<SubtaskAutocompleteProps> = ({
       return !selectedSubtaskIds.has(subtask.path || '') || subtask.path === value;
     })
     .map(subtask => ({
-    value: subtask.path || '',
-    label: formatSubtaskDisplay(subtask, allProjects),
-    subtask: subtask,
-  }));
+      value: subtask.path || '',
+      label: formatSubtaskDisplay(subtask, allProjects),
+      subtask: subtask,
+    }));
 
   const selectedValue = subtaskOptions.find(option => option.value === value) || null;
 

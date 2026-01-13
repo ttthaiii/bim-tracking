@@ -16,6 +16,14 @@ export interface EmployeeOptionItem {
   role: string;
 }
 
+// Basic in-memory cache
+let globalCache: {
+  data: EmployeeOptionItem[];
+  timestamp: number;
+} | null = null;
+
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
 export const useEmployeeOptions = (enabled: boolean) => {
   const [options, setOptions] = useState<EmployeeOptionItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -24,6 +32,13 @@ export const useEmployeeOptions = (enabled: boolean) => {
     if (!enabled) return;
 
     const fetchEmployees = async () => {
+      // Check cache first
+      if (globalCache && Date.now() - globalCache.timestamp < CACHE_DURATION) {
+        console.log('⚡ Using cached employee list');
+        setOptions(globalCache.data);
+        return;
+      }
+
       try {
         setLoading(true);
         const usersRef = collection(db, 'users');
@@ -37,6 +52,13 @@ export const useEmployeeOptions = (enabled: boolean) => {
             role: doc.role || '',
           }))
           .sort((a, b) => a.value.localeCompare(b.value));
+
+        // Update cache
+        globalCache = {
+          data: employees,
+          timestamp: Date.now()
+        };
+
         setOptions(employees);
       } catch (err) {
         console.error('Failed to load employees for autocomplete:', err);

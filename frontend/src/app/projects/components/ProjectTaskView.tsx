@@ -233,6 +233,7 @@ const ProjectsPage = () => {
   const [historyPreviewFile, setHistoryPreviewFile] = useState<{ name: string; url: string } | null>(null);
   const [isHistoryPreviewOpen, setIsHistoryPreviewOpen] = useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false); // ✅ Added isSaving state
 
   const formatDisplayValue = (value: any): string => {
     if (value === undefined || value === null) return '-';
@@ -403,7 +404,7 @@ const ProjectsPage = () => {
 
   useEffect(() => {
     if (!cacheLoaded || allTasksCache.length === 0) return;
-    
+
     let filteredTasks = allTasksCache;
     if (selectedProject !== "all") {
       filteredTasks = filteredTasks.filter(t => t.projectId === selectedProject);
@@ -414,7 +415,7 @@ const ProjectsPage = () => {
     if (filterStatus) {
       filteredTasks = filteredTasks.filter(t => t.currentStep === filterStatus);
     }
-    
+
     const taskRows = filteredTasks.map(task => convertTaskToRow(task));
     setRows([...taskRows, ...initialRows]);
     setEditingRows(new Set());
@@ -425,7 +426,7 @@ const ProjectsPage = () => {
     setEditAttachmentErrors({});
     setEditChangesMap({});
   }, [cacheLoaded, allTasksCache, selectedProject, filterActivity, filterStatus]);
-  
+
   useEffect(() => {
     const loadProjects = async () => {
       try {
@@ -443,15 +444,15 @@ const ProjectsPage = () => {
 
   useEffect(() => {
     if (!cacheLoaded || allTasksCache.length === 0) return;
-    
+
     let tasksToCheck = allTasksCache;
     if (selectedProject !== "all") {
       tasksToCheck = allTasksCache.filter(t => t.projectId === selectedProject);
     }
-    
+
     const needsRevision = tasksToCheck.filter(t => {
       const isWorkRequest = t.taskCategory === 'Work Request';
-      
+
       // ✅ เงื่อนไข 1: เช็คสถานะตามประเภทเอกสาร
       if (isWorkRequest) {
         // Work Request: ต้องเป็นสถานะ REVISION_REQUESTED
@@ -464,67 +465,67 @@ const ProjectsPage = () => {
           return false;
         }
       }
-      
+
       // ✅ เงื่อนไข 2: เช็คว่ามี Rev. ถัดไปในระบบแล้วหรือยัง
       const baseName = t.taskName.replace(/\s+REV\.\d+$/i, '');
       const currentRev = parseInt(t.rev || '0');
       const nextRev = String(currentRev + 1).padStart(2, '0');
       const nextRevName = `${baseName} REV.${nextRev}`;
-      
-      const hasNextRev = tasksToCheck.some(task => 
-        task.taskName === nextRevName || 
-        (task.taskName.replace(/\s+REV\.\d+$/i, '') === baseName && 
-         parseInt(task.rev || '0') > currentRev)
+
+      const hasNextRev = tasksToCheck.some(task =>
+        task.taskName === nextRevName ||
+        (task.taskName.replace(/\s+REV\.\d+$/i, '') === baseName &&
+          parseInt(task.rev || '0') > currentRev)
       );
-      
+
       return !hasNextRev;
     });
-    
+
     setPendingRevCount(needsRevision.length);
   }, [allTasksCache, cacheLoaded, selectedProject]);
 
   const handleCreateProject = async (projectData: { name: string; code: string; leader: string }) => {
-      try {
-        await createProject(projectData);
-        setIsCreateModalOpen(false);
-        const projectsData = await getProjectDetails();
-        setProjects(projectsData);
-        
-        // --- ส่วนที่แก้ไข: เรียกใช้ SuccessModal ---
-        setSuccessMessage('สร้างโปรเจกต์สำเร็จ');
-        setShowSuccessModal(true);
-        // ------------------------------------
+    try {
+      await createProject(projectData);
+      setIsCreateModalOpen(false);
+      const projectsData = await getProjectDetails();
+      setProjects(projectsData);
 
-      } catch (error) {
-        console.error('Error creating project:', error);
-    
-        // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
-        setErrorMessage('เกิดข้อผิดพลาดในการสร้างโปรเจกต์');
-        setShowErrorModal(true);
-        // ------------------------------------
-      }
-    };
+      // --- ส่วนที่แก้ไข: เรียกใช้ SuccessModal ---
+      setSuccessMessage('สร้างโปรเจกต์สำเร็จ');
+      setShowSuccessModal(true);
+      // ------------------------------------
 
-    const handleUpdateLeader = async (projectId: string, newLeader: string) => {
-      try {
-        await updateProjectLeader(projectId, newLeader);
-        const projectsData = await getProjectDetails();
-        setProjects(projectsData);
-  
-        // --- ส่วนที่แก้ไข ---
-        setSuccessMessage('อัพเดท Leader สำเร็จ');
-        setShowSuccessModal(true);
-        // --------------------
-  
-      } catch (error) {
-        console.error('Error updating leader:', error);
-  
-        // --- ส่วนที่แก้ไข ---
-        setErrorMessage('เกิดข้อผิดพลาดในการอัพเดท Leader');
-        setShowErrorModal(true);
-        // --------------------
-      }
-    };
+    } catch (error) {
+      console.error('Error creating project:', error);
+
+      // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
+      setErrorMessage('เกิดข้อผิดพลาดในการสร้างโปรเจกต์');
+      setShowErrorModal(true);
+      // ------------------------------------
+    }
+  };
+
+  const handleUpdateLeader = async (projectId: string, newLeader: string) => {
+    try {
+      await updateProjectLeader(projectId, newLeader);
+      const projectsData = await getProjectDetails();
+      setProjects(projectsData);
+
+      // --- ส่วนที่แก้ไข ---
+      setSuccessMessage('อัพเดท Leader สำเร็จ');
+      setShowSuccessModal(true);
+      // --------------------
+
+    } catch (error) {
+      console.error('Error updating leader:', error);
+
+      // --- ส่วนที่แก้ไข ---
+      setErrorMessage('เกิดข้อผิดพลาดในการอัพเดท Leader');
+      setShowErrorModal(true);
+      // --------------------
+    }
+  };
 
   const markRowEdited = (idx: number) => {
     const row = rows[idx];
@@ -603,7 +604,7 @@ const ProjectsPage = () => {
   };
 
   const attachmentErrorsPresent = useMemo(() => Object.values(editAttachmentErrors).some(Boolean), [editAttachmentErrors]);
-  const saveDisabled = attachmentErrorsPresent || isProjectLocked;
+  const saveDisabled = attachmentErrorsPresent || isProjectLocked || isSaving; // ✅ Added isSaving check
 
   const handleSaveEditRow = (idx: number) => {
     if (isProjectLocked) {
@@ -672,7 +673,7 @@ const ProjectsPage = () => {
       return;
     }
     const rowToDelete = rows[idx];
-    
+
     const showError = (message: string) => {
       setErrorMessage(message);
       setShowErrorModal(true);
@@ -682,24 +683,24 @@ const ProjectsPage = () => {
       showError('ไม่สามารถลบงานที่เป็น Work Request ได้');
       return;
     }
-    
+
     const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
-    
+
     if (isEmptyRow && idx === rows.length - 1) {
       showError('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
       return;
     }
-    
+
     if (rowToDelete.statusDwg) {
       showError('ไม่สามารถลบแถวที่มีสถานะเอกสารแล้วได้');
       return;
     }
-    
+
     if (rowToDelete.progress && rowToDelete.progress > 0) {
       showError('ไม่สามารถลบงานที่มีความคืบหน้าแล้วได้');
       return;
     }
-    
+
     setDeleteTarget({ idx, row: rowToDelete });
     setShowDeleteModal(true);
   };
@@ -821,8 +822,9 @@ const ProjectsPage = () => {
   };
 
   const confirmSave = async () => {
-    setShowSaveModal(false);
+    // setShowSaveModal(false); // ❌ Don't close immediately
     try {
+      setIsSaving(true); // ✅ Start saving state
       const currentProject = projects.find(p => p.id === selectedProject);
       if (!currentProject) return;
       const updatePromises = saveModalData.updated.map(async (updatedItem) => {
@@ -919,6 +921,7 @@ const ProjectsPage = () => {
       }
       setSuccessMessage(`บันทึกสำเร็จ ${saveModalData.updated.length} รายการแก้ไข และ ${rowsToCreate.length} รายการใหม่`);
       setShowSuccessModal(true);
+      setShowSaveModal(false); // ✅ Close modal on success
       setEditingRows(new Set());
       setEditedRows(new Set());
       setOriginalRows(new Map());
@@ -931,6 +934,9 @@ const ProjectsPage = () => {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setErrorMessage('เกิดข้อผิดพลาดในการบันทึก: ' + errorMessage);
       setShowErrorModal(true);
+      setShowSaveModal(false); // ✅ Close modal on error
+    } finally {
+      setIsSaving(false); // ✅ Reset saving state
     }
   };
 
@@ -941,13 +947,13 @@ const ProjectsPage = () => {
     }
     const row = rows[idx];
     const isWorkRequest = row.activity === 'Work Request';
-    
+
     // ✅ Work Request: แก้ไขได้เฉพาะสถานะ PENDING_BIM
     if (isWorkRequest && row.statusDwg !== 'PENDING_BIM') {
       alert('⚠️ แก้ไข Work Request ได้เฉพาะสถานะ "รอ BIM รับงาน" เท่านั้น\n\nถ้าสถานะเป็น "ขอแก้ไข" → กรุณาคลิกปุ่ม "Add new Rev." เพื่อสร้างแถวใหม่');
       return;
     }
-    
+
     setOriginalRows(prev => {
       const newMap = new Map(prev);
       if (!prev.has(idx)) {
@@ -1082,14 +1088,14 @@ const ProjectsPage = () => {
     <div style={{ minHeight: "100vh", background: "#f0f2f5" }}>
       <div style={{ maxWidth: "100%", margin: "35px auto 0 auto" }}>
         <div style={{ marginBottom: "24px", display: "flex", gap: "16px", alignItems: "center" }}>
-        <button onClick={() => setIsCreateModalOpen(true)} style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
-          <span style={{ color: "#6366f1", fontWeight: "bold" }}>+</span> สร้างโครงการใหม่
-        </button>
-        <button onClick={() => setIsUserModalOpen(true)} style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
-          <span style={{ color: "#6366f1", fontWeight: "bold" }}>👥</span> จัดการสมาชิก
-        </button>
-        <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onSubmit={handleCreateProject} onViewProjects={() => { setIsCreateModalOpen(false); setIsProjectListOpen(true); }} />
-        <ProjectListModal isOpen={isProjectListOpen} onClose={() => setIsProjectListOpen(false)} projects={projects} onUpdateLeader={handleUpdateLeader} />
+          <button onClick={() => setIsCreateModalOpen(true)} style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
+            <span style={{ color: "#6366f1", fontWeight: "bold" }}>+</span> สร้างโครงการใหม่
+          </button>
+          <button onClick={() => setIsUserModalOpen(true)} style={{ padding: "8px 16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", color: "#374151", fontWeight: 500 }}>
+            <span style={{ color: "#6366f1", fontWeight: "bold" }}>👥</span> จัดการสมาชิก
+          </button>
+          <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onSubmit={handleCreateProject} onViewProjects={() => { setIsCreateModalOpen(false); setIsProjectListOpen(true); }} />
+          <ProjectListModal isOpen={isProjectListOpen} onClose={() => setIsProjectListOpen(false)} projects={projects} onUpdateLeader={handleUpdateLeader} />
           <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} disabled={loading} style={{ padding: "8px 12px", width: "200px", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", backgroundColor: loading ? "#f3f4f6" : "#fff", color: "#374151", cursor: loading ? "not-allowed" : "pointer" }}>
             <option value="all">ทุกโครงการ</option>
             {projects.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
@@ -1129,14 +1135,14 @@ const ProjectsPage = () => {
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                         <span>STATUS DWG.</span>
-                          <select 
-                          value={filterStatus} 
+                        <select
+                          value={filterStatus}
                           onChange={e => setFilterStatus(e.target.value)}
                           onClick={e => e.stopPropagation()}
                           style={{ width: "20px", padding: "0", fontSize: "10px", border: "1px solid #fff", borderRadius: "3px", background: "#fff", color: "#000", cursor: "pointer" }}
                         >
                           <option value="">ทั้งหมด</option>
-                          
+
                           {/* ✅ สถานะ Work Request */}
                           <optgroup label="Work Request">
                             <option value="PENDING_BIM">รอ BIM รับงาน</option>
@@ -1145,7 +1151,7 @@ const ProjectsPage = () => {
                             <option value="REVISION_REQUESTED">ขอแก้ไข</option>
                             <option value="COMPLETED">เสร็จสิ้น</option>
                           </optgroup>
-                          
+
                           {/* ✅ สถานะเอกสาร RFA */}
                           <optgroup label="เอกสาร RFA">
                             <option value="PENDING_REVIEW">รอตรวจสอบ</option>
@@ -1168,215 +1174,215 @@ const ProjectsPage = () => {
                 </thead>
                 <tbody>
                   {rows.map((row, idx) => {
-                  const isNewRow = !row.id;
-                  const isEditing = editingRows.has(idx);
-                  const isWorkRequest = row.activity === 'Work Request';
-                  const isWorkRequestEditable = isWorkRequest && row.statusDwg === 'PENDING_BIM';
-                  const isLockRow = isWorkRequest && row.statusDwg !== 'PENDING_BIM';
-                  const isEditable = !isProjectLocked && (isNewRow || (isEditing && (!isWorkRequest || isWorkRequestEditable)));
-                  const actionsDisabled = isProjectLocked || isLockRow;
-                  const changes = getRowChanges(idx, row);
-                  const noteValue = editNotes[idx] ?? '';
-                  const attachmentFile = editAttachments[idx] || null;
-                  const attachmentError = editAttachmentErrors[idx] || null;
+                    const isNewRow = !row.id;
+                    const isEditing = editingRows.has(idx);
+                    const isWorkRequest = row.activity === 'Work Request';
+                    const isWorkRequestEditable = isWorkRequest && row.statusDwg === 'PENDING_BIM';
+                    const isLockRow = isWorkRequest && row.statusDwg !== 'PENDING_BIM';
+                    const isEditable = !isProjectLocked && (isNewRow || (isEditing && (!isWorkRequest || isWorkRequestEditable)));
+                    const actionsDisabled = isProjectLocked || isLockRow;
+                    const changes = getRowChanges(idx, row);
+                    const noteValue = editNotes[idx] ?? '';
+                    const attachmentFile = editAttachments[idx] || null;
+                    const attachmentError = editAttachmentErrors[idx] || null;
 
-                  return (
-                    <React.Fragment key={row.firestoreId || `row-${idx}`}>
-                    <tr style={{ 
-                        borderBottom: "1px solid #e5e7eb", 
-                        background: highlightedRow === idx 
-                          ? "#fef08a" 
-                          : isWorkRequest 
-                          ? "#fef9c3"
-                          : isEditing 
-                          ? "#fff7ed" 
-                          : idx % 2 === 0 
-                          ? "#f9fafb" 
-                          : "#fff",
-                        transition: "background-color 0.15s ease-out",
-                        cursor: isProjectLocked ? "default" : "pointer"
-                      }} onMouseEnter={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = "#e0f2fe"; } }} onMouseLeave={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff"; } }}>
-                        <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
-                        <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
-                          <input type="text" value={row.relateDrawing} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
-                        </td>                      
-                        <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                          {isWorkRequest ? (
-                            <div style={{ width: "100%", padding: "4px 6px", fontSize: 10, color: "#92400e", fontWeight: 600, backgroundColor: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "4px" }}>
-                              Work Request
-                            </div>
-                          ) : (
-                            <select value={row.activity} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "activity", e.target.value)} disabled={activitiesLoading || !isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff", cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer" }}>
-                              <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
-                              {activities.map(act => (<option key={act.id} value={act.activityName}>{act.activityName}</option>))}
-                            </select>
-                          )}
-                        </td>
-                        <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                          <input type="date" value={row.startDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "startDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
-                        </td>
-                        <td style={{ padding: "6px 10px", fontSize: 10 }}>
-                          <input type="date" value={row.dueDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "dueDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
-                        </td>
-                        <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
-                          {row.statusDwg ? translateStatus(row.statusDwg, isWorkRequest) : ""}
-                        </td>
-                        <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            {row.link ? (
-                              <a
-                                href={row.link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ color: "#3b82f6", textDecoration: "none", fontSize: "16px" }}
-                                title="คลิกเพื่อดูไฟล์"
-                              >
-                                📎
-                              </a>
-                            ) : (
-                              <span style={{ color: "#9ca3af" }}>-</span>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ padding: "4px 6px", fontSize: 10 }}>{row.docNo}</td>
-                        <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
-                          {row.lastRev || "00"}
-                        </td>
-                        <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
-                            {actionsDisabled ? (
-                              <div
-                                style={{
-                                  width: "28px",
-                                  height: "28px",
-                                  borderRadius: "6px",
-                                  background: isProjectLocked ? "#e5e7eb" : "#fee2e2",
-                                  border: `1px solid ${isProjectLocked ? "#d1d5db" : "#fecaca"}`,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  color: isProjectLocked ? "#6b7280" : "#dc2626",
-                                  fontSize: "16px",
-                                  cursor: "not-allowed"
-                                }}
-                                title={isProjectLocked ? "เลือกรายการโครงการก่อน" : "แถวนี้ไม่อนุญาตให้แก้ไข"}
-                              >
-                                🔒
+                    return (
+                      <React.Fragment key={row.firestoreId || `row-${idx}`}>
+                        <tr style={{
+                          borderBottom: "1px solid #e5e7eb",
+                          background: highlightedRow === idx
+                            ? "#fef08a"
+                            : isWorkRequest
+                              ? "#fef9c3"
+                              : isEditing
+                                ? "#fff7ed"
+                                : idx % 2 === 0
+                                  ? "#f9fafb"
+                                  : "#fff",
+                          transition: "background-color 0.15s ease-out",
+                          cursor: isProjectLocked ? "default" : "pointer"
+                        }} onMouseEnter={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = "#e0f2fe"; } }} onMouseLeave={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff"; } }}>
+                          <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
+                            <input type="text" value={row.relateDrawing} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
+                          </td>
+                          <td style={{ padding: "6px 10px", fontSize: 10 }}>
+                            {isWorkRequest ? (
+                              <div style={{ width: "100%", padding: "4px 6px", fontSize: 10, color: "#92400e", fontWeight: 600, backgroundColor: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "4px" }}>
+                                Work Request
                               </div>
                             ) : (
-                              <>
-                                <button
-                                  onClick={() => handleEdit(idx)}
-                                  style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#e0f2fe", border: "1px solid #bfdbfe", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "14px" }}
-                                  title="แก้ไข"
+                              <select value={row.activity} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "activity", e.target.value)} disabled={activitiesLoading || !isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (idx % 2 === 0 ? "#f9fafb" : "#fff") : activitiesLoading ? "#f3f4f6" : "#fff", cursor: !isEditable ? "not-allowed" : activitiesLoading ? "not-allowed" : "pointer" }}>
+                                <option value="">{activitiesLoading ? "กำลังโหลด..." : "เลือก Activity"}</option>
+                                {activities.map(act => (<option key={act.id} value={act.activityName}>{act.activityName}</option>))}
+                              </select>
+                            )}
+                          </td>
+                          <td style={{ padding: "6px 10px", fontSize: 10 }}>
+                            <input type="date" value={row.startDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "startDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
+                          </td>
+                          <td style={{ padding: "6px 10px", fontSize: 10 }}>
+                            <input type="date" value={row.dueDate} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "dueDate", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
+                          </td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
+                            {row.statusDwg ? translateStatus(row.statusDwg, isWorkRequest) : ""}
+                          </td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              {row.link ? (
+                                <a
+                                  href={row.link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{ color: "#3b82f6", textDecoration: "none", fontSize: "16px" }}
+                                  title="คลิกเพื่อดูไฟล์"
                                 >
-                                  ✎
-                                </button>
-                                {isEditing && (
-                                  <button
-                                    onClick={() => handleSaveEditRow(idx)}
-                                    style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#10b981", border: "none", color: "white", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "14px", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)" }}
-                                    title="บันทึก"
-                                  >
-                                    ✔
-                                  </button>
-                                )}
-                              </>
-                            )}
-                            {row.firestoreId && (
-                              <button
-                                onClick={() => handleViewHistory(idx)}
-                                style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#f3f4f6", border: "1px solid #e5e7eb", cursor: "pointer", color: "#111827", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
-                                title="ประวัติการแก้ไข"
-                              >
-                                🕘
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ padding: "2px 4px", fontSize: 10, textAlign: "center" }}>
-                          {(() => {
-                            const isEmptyRow = !row.id && !row.relateDrawing && !row.activity && !row.startDate && !row.dueDate;
-                            const isLastEmptyRow = isEmptyRow && idx === rows.length - 1;
-                            const hasStatus = !!row.statusDwg;
-                            const hasProgress = row.progress && row.progress > 0;
-                            if (isProjectLocked) {
-                              return <span style={{ color: "#9ca3af" }} title="เลือกรายการโครงการก่อน">🔒</span>;
-                            }
-                            if (isLastEmptyRow || hasStatus || hasProgress) {
-                              return <span style={{ color: "#9ca3af" }}>-</span>;
-                            }
-                            return (<button onClick={() => handleDelete(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: "#ef4444", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }} title="ลบ"><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg></button>);
-                          })()}
-                        </td>
-
-                      </tr>
-                      {isEditing && (
-                        <tr>
-                          <td colSpan={11} style={{ background: "#f9fafb", padding: "12px" }}>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
-                              <div style={{ flex: "1 1 280px" }}>
-                                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#1f2937", marginBottom: "4px" }}>
-                                  หมายเหตุการแก้ไข
-                                </label>
-                                <textarea
-                                  value={noteValue}
-                                  onChange={(e) => handleEditNoteChange(idx, e.target.value)}
-                                  rows={3}
-                                  style={{ width: "100%", padding: "6px", border: "1px solid #d1d5db", borderRadius: "4px", fontSize: "12px", color: "#111827", background: "#fff" }}
-                                  placeholder="อธิบายเหตุผลหรือรายละเอียดการแก้ไข"
-                                />
-                              </div>
-                              <div style={{ flex: "1 1 240px" }}>
-                                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#1f2937", marginBottom: "4px" }}>
-                                  แนบไฟล์อ้างอิง (สูงสุด 25MB)
-                                </label>
-                                <input
-                                  type="file"
-                                  onChange={(e) => handleEditAttachmentChange(idx, e.target.files?.[0] || null)}
-                                  style={{ fontSize: "12px" }}
-                                />
-                                {attachmentFile && (
-                                  <p style={{ fontSize: "11px", color: "#4b5563", marginTop: "4px" }}>
-                                    {attachmentFile.name} ({(attachmentFile.size / (1024 * 1024)).toFixed(2)} MB)
-                                  </p>
-                                )}
-                                {attachmentError && (
-                                  <p style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px" }}>{attachmentError}</p>
-                                )}
-                              </div>
-                            </div>
-                            <div style={{ marginTop: "12px" }}>
-                              <div style={{ fontSize: "12px", fontWeight: 600, color: "#111827", marginBottom: "6px" }}>ฟิลด์ที่แก้ไข</div>
-                              {changes.length > 0 ? (
-                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-                                  <thead>
-                                    <tr>
-                                      <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>ฟิลด์</th>
-                                      <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>ก่อนแก้ไข</th>
-                                      <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>หลังแก้ไข</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {changes.map((change, changeIdx) => (
-                                      <tr key={`change-${idx}-${changeIdx}`}>
-                                        <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", fontWeight: 500 }}>{change.label}</td>
-                                        <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280" }}>{change.before}</td>
-                                        <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#2563eb", fontWeight: 500 }}>{change.after}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                                  📎
+                                </a>
                               ) : (
-                                <p style={{ fontSize: "11px", color: "#6b7280" }}>ยังไม่มีการเปลี่ยนแปลงข้อมูล</p>
+                                <span style={{ color: "#9ca3af" }}>-</span>
                               )}
                             </div>
                           </td>
+                          <td style={{ padding: "4px 6px", fontSize: 10 }}>{row.docNo}</td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
+                            {row.lastRev || "00"}
+                          </td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                              {actionsDisabled ? (
+                                <div
+                                  style={{
+                                    width: "28px",
+                                    height: "28px",
+                                    borderRadius: "6px",
+                                    background: isProjectLocked ? "#e5e7eb" : "#fee2e2",
+                                    border: `1px solid ${isProjectLocked ? "#d1d5db" : "#fecaca"}`,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    color: isProjectLocked ? "#6b7280" : "#dc2626",
+                                    fontSize: "16px",
+                                    cursor: "not-allowed"
+                                  }}
+                                  title={isProjectLocked ? "เลือกรายการโครงการก่อน" : "แถวนี้ไม่อนุญาตให้แก้ไข"}
+                                >
+                                  🔒
+                                </div>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => handleEdit(idx)}
+                                    style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#e0f2fe", border: "1px solid #bfdbfe", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "14px" }}
+                                    title="แก้ไข"
+                                  >
+                                    ✎
+                                  </button>
+                                  {isEditing && (
+                                    <button
+                                      onClick={() => handleSaveEditRow(idx)}
+                                      style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#10b981", border: "none", color: "white", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "14px", boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)" }}
+                                      title="บันทึก"
+                                    >
+                                      ✔
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                              {row.firestoreId && (
+                                <button
+                                  onClick={() => handleViewHistory(idx)}
+                                  style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#f3f4f6", border: "1px solid #e5e7eb", cursor: "pointer", color: "#111827", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}
+                                  title="ประวัติการแก้ไข"
+                                >
+                                  🕘
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: "2px 4px", fontSize: 10, textAlign: "center" }}>
+                            {(() => {
+                              const isEmptyRow = !row.id && !row.relateDrawing && !row.activity && !row.startDate && !row.dueDate;
+                              const isLastEmptyRow = isEmptyRow && idx === rows.length - 1;
+                              const hasStatus = !!row.statusDwg;
+                              const hasProgress = row.progress && row.progress > 0;
+                              if (isProjectLocked) {
+                                return <span style={{ color: "#9ca3af" }} title="เลือกรายการโครงการก่อน">🔒</span>;
+                              }
+                              if (isLastEmptyRow || hasStatus || hasProgress) {
+                                return <span style={{ color: "#9ca3af" }}>-</span>;
+                              }
+                              return (<button onClick={() => handleDelete(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: "#ef4444", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }} title="ลบ"><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg></button>);
+                            })()}
+                          </td>
+
                         </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+                        {isEditing && (
+                          <tr>
+                            <td colSpan={11} style={{ background: "#f9fafb", padding: "12px" }}>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+                                <div style={{ flex: "1 1 280px" }}>
+                                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#1f2937", marginBottom: "4px" }}>
+                                    หมายเหตุการแก้ไข
+                                  </label>
+                                  <textarea
+                                    value={noteValue}
+                                    onChange={(e) => handleEditNoteChange(idx, e.target.value)}
+                                    rows={3}
+                                    style={{ width: "100%", padding: "6px", border: "1px solid #d1d5db", borderRadius: "4px", fontSize: "12px", color: "#111827", background: "#fff" }}
+                                    placeholder="อธิบายเหตุผลหรือรายละเอียดการแก้ไข"
+                                  />
+                                </div>
+                                <div style={{ flex: "1 1 240px" }}>
+                                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#1f2937", marginBottom: "4px" }}>
+                                    แนบไฟล์อ้างอิง (สูงสุด 25MB)
+                                  </label>
+                                  <input
+                                    type="file"
+                                    onChange={(e) => handleEditAttachmentChange(idx, e.target.files?.[0] || null)}
+                                    style={{ fontSize: "12px" }}
+                                  />
+                                  {attachmentFile && (
+                                    <p style={{ fontSize: "11px", color: "#4b5563", marginTop: "4px" }}>
+                                      {attachmentFile.name} ({(attachmentFile.size / (1024 * 1024)).toFixed(2)} MB)
+                                    </p>
+                                  )}
+                                  {attachmentError && (
+                                    <p style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px" }}>{attachmentError}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div style={{ marginTop: "12px" }}>
+                                <div style={{ fontSize: "12px", fontWeight: 600, color: "#111827", marginBottom: "6px" }}>ฟิลด์ที่แก้ไข</div>
+                                {changes.length > 0 ? (
+                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+                                    <thead>
+                                      <tr>
+                                        <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>ฟิลด์</th>
+                                        <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>ก่อนแก้ไข</th>
+                                        <th style={{ padding: "6px", background: "#eff6ff", border: "1px solid #dbeafe", textAlign: "left" }}>หลังแก้ไข</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {changes.map((change, changeIdx) => (
+                                        <tr key={`change-${idx}-${changeIdx}`}>
+                                          <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", fontWeight: 500 }}>{change.label}</td>
+                                          <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280" }}>{change.before}</td>
+                                          <td style={{ padding: "6px", border: "1px solid #e5e7eb", background: "#fff", color: "#2563eb", fontWeight: 500 }}>{change.after}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                ) : (
+                                  <p style={{ fontSize: "11px", color: "#6b7280" }}>ยังไม่มีการเปลี่ยนแปลงข้อมูล</p>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1412,7 +1418,7 @@ const ProjectsPage = () => {
         </div>
       </div>
       <style>{` @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.1); } } `}</style>
-      <SaveConfirmationModal isOpen={showSaveModal} data={saveModalData} onConfirm={confirmSave} onCancel={() => setShowSaveModal(false)} />
+      <SaveConfirmationModal isOpen={showSaveModal} data={saveModalData} onConfirm={confirmSave} onCancel={() => !isSaving && setShowSaveModal(false)} isLoading={isSaving} />
       <SuccessModal isOpen={showSuccessModal} message={successMessage} onClose={() => setShowSuccessModal(false)} />
       <AddRevisionModal isOpen={showAddRevModal} tasks={rows.filter(r => r.firestoreId).map(r => ({ id: r.id, taskName: r.relateDrawing, taskCategory: r.activity, currentStep: r.statusDwg, rev: r.lastRev }))} onSelect={handleSelectTaskForRevision} onClose={() => setShowAddRevModal(false)} />
       <DeleteConfirmModal isOpen={showDeleteModal} taskName={deleteTarget?.row.relateDrawing || ''} onConfirm={confirmDelete} onCancel={() => { setShowDeleteModal(false); setDeleteTarget(null); }} />
@@ -1523,7 +1529,7 @@ const ProjectsPage = () => {
         isOpen={showErrorModal}
         message={errorMessage}
         onClose={() => setShowErrorModal(false)}
-      />   
+      />
     </div>
   );
 };
