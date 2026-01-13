@@ -57,6 +57,10 @@
             1. **Root Cause**: Sequential `await` loop in `fetchAvailableSubtasksForEmployee` (N+1 problem) causing slow loading times.
             2. **Action**: Refactor to use `Promise.all` for parallel subtask validation.
             3. **Status**: Fixed
+        - **[T-003-EX-9]**: Production Deployment Failure
+            1. **Root Cause**: Firebase App Hosting detected custom build command warning ("your build command is NOT 'next build'"). `package.json` uses `next build --turbopack` which might not be supported in production.
+            2. **Action**: Revert to standard `next build` command in `package.json`.
+            3. **Status**: Fixed
 
 ## 4. Project Management Page (`/projects`)
 - [x] [T-004] Project Management System (F-004)
