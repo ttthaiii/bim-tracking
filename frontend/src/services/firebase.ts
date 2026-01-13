@@ -1,5 +1,10 @@
-import { db } from '../lib/firebase';
+// ✅ 1. แก้ไข import 'app' ให้เป็น default import
+import app, { db } from '../lib/firebase';
 import { collection, getDocs, doc, updateDoc, serverTimestamp, setDoc, Timestamp, query, where, addDoc, getDoc, arrayUnion } from 'firebase/firestore';
+
+// ✅ 2. เพิ่ม import สำหรับ 'firebase/functions'
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
 import { Project, Task, RelateWork, Subtask } from '../types/database';
 
 export interface UserRecord {
@@ -188,6 +193,25 @@ export const updateTask = async (taskId: string, data: Partial<Task>, historyEnt
     }
     await updateDoc(taskRef, payload);
 };
+
+// ✅ 3. โค้ดส่วนที่เพิ่มใหม่ (สำหรับเรียก Cloud Function)
+// บรรทัดนี้ถูกต้องแล้ว เพราะ 'app' คือ default import
+const functions = getFunctions(app, 'asia-southeast1');
+
+// 2. สร้างตัวเรียก Function 'getNextTaskCounter'
+const _getNextTaskCounter = httpsCallable(functions, 'getNextTaskCounter');
+
+// 3. สร้าง Funtion ให้ Component เรียกใช้ง่ายๆ
+export const getNextTaskCounter = async (projectId: string): Promise<number> => {
+  try {
+    const result = await _getNextTaskCounter({ projectId });
+    return (result.data as { newCount: number }).newCount;
+  } catch (error) {
+    console.error("Error calling getNextTaskCounter:", error);
+    throw new Error("Failed to get next task counter from server.");
+  }
+};
+// ✅ 3. สิ้นสุดโค้ดส่วนที่เพิ่มใหม่
 
 export const createTask = async (projectId: string, taskData: any) => {
     const taskId = taskData.id;

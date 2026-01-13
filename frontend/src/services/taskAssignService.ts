@@ -107,27 +107,27 @@ export const getEmployeeDailyReportEntries = async (
           }
 
           // Generate a truly unique ID for each individual log entry
-          const uniqueEntryId = `${docSnap.id}-${entrySubtaskId}-${assignDate}-${log.timestamp?.toMillis?.() || 0}-${index}`;
+          const uniqueEntryId = `${docSnap.id}-${log.subtaskId || data.subtaskId}-${assignDate}-${log.timestamp?.toMillis?.() || 0}-${index}`;
 
           allEntries.push({
             id: uniqueEntryId,
-            employeeId: data.employeeId,
-            subtaskId: entrySubtaskId,
+            employeeId: log.employeeId || data.employeeId,
+            subtaskId: log.subtaskId || data.subtaskId,
             subtaskPath,
             assignDate: assignDate,
             normalWorkingHours: `${Math.floor(log.day)}:${Math.round((log.day % 1) * 60)}`,
             otWorkingHours: `${Math.floor(log.ot)}:${Math.round((log.ot % 1) * 60)}`,
             progress: `${log.progress}%`,
             note: log.note,
-            taskName: data.taskName || '',
-            subTaskName: data.subTaskName || '',
-            item: data.item || '',
-            subTaskCategory: data.subTaskCategory || '',
-            internalRev: data.internalRev || '',
-            subTaskScale: data.subTaskScale || '',
-            project: data.project || '',
+            taskName: log.taskName || data.taskName || '',
+            subTaskName: log.subTaskName || data.subTaskName || '',
+            item: log.item || data.item || '',
+            subTaskCategory: log.subTaskCategory || data.subTaskCategory || '',
+            internalRev: log.internalRev || data.internalRev || '',
+            subTaskScale: log.subTaskScale || data.subTaskScale || '',
+            project: log.project || data.project || '',
             timestamp: log.timestamp,
-            loggedAt: log.loggedAt, // เพิ่ม loggedAt
+            loggedAt: log.loggedAt,
             status: 'pending',
             relateDrawing: '',
             fileName,

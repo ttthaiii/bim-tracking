@@ -21,7 +21,7 @@ export const uploadFileToSubtask = async (
       lastUpdate: new Date()
     });
     
-    return cdnURL;
+    return downloadURL;
   } catch (error) {
     console.error('Error uploading file:', error);
     throw new Error('Failed to upload file');
@@ -61,8 +61,8 @@ export const uploadFileForDailyReport = async (
     console.log('File uploaded successfully');
     
     // 4. Get download URL
-    const downloadURL = await getDownloadURL(storageRef);
-    console.log('Download URL obtained:', downloadURL);
+    //const downloadURL = await getDownloadURL(storageRef);
+    //console.log('Download URL obtained:', downloadURL);
     
     // 5. Save file info to uploadedFiles collection
     const fileCDNPath = storagePath
@@ -78,13 +78,15 @@ export const uploadFileForDailyReport = async (
     await runTransaction(db, async (tx) => {
       const snapshot = await tx.get(dailyReportDocRef);
 
-      if (!snapshot.exists()) {
-        throw new Error('ไม่พบข้อมูลบันทึกงานประจำวันสำหรับงานนี้');
-      }
+      // --- 1. แก้ไขตรงนี้ ---
+      // ถ้า snapshot ไม่มี (เอกสารใหม่) ให้ใช้ object ว่าง
+      // ถ้ามี ก็ดึงข้อมูลออกมา
+      const data = snapshot.exists() ? snapshot.data() : {};
+      
+      // ดึง workhours เดิม (ถ้ามี) หรือใช้ array ว่าง (ถ้าไม่มี)
+      const workhours = Array.isArray(data?.workhours) ? [...data.workhours] : [];
 
-      const data = snapshot.data() || {};
-      const workhours = Array.isArray(data.workhours) ? [...data.workhours] : [];
-
+      // ... (ส่วนของ normalizeToDateString ไม่เปลี่ยนแปลง) ...
       const normalizeToDateString = (value: any): string | null => {
         if (!value) return null;
         if (typeof value === 'string') {
@@ -99,6 +101,7 @@ export const uploadFileForDailyReport = async (
         return null;
       };
 
+      // ... (ส่วนของ targetIndex ไม่เปลี่ยนแปลง) ...
       let targetIndex = -1;
       for (let i = workhours.length - 1; i >= 0; i -= 1) {
         const log = workhours[i];
@@ -109,6 +112,7 @@ export const uploadFileForDailyReport = async (
         }
       }
 
+      // ... (ส่วนของ applyFileMetadata ไม่เปลี่ยนแปลง) ...
       const applyFileMetadata = (log: any = {}, override?: {
         fileName?: string;
         fileURL?: string;
@@ -117,6 +121,7 @@ export const uploadFileForDailyReport = async (
         subtaskPath?: string;
         fileUploadedAt?: Timestamp | Date | string | null;
       }) => {
+        // ... (โค้ดภายใน applyFileMetadata เหมือนเดิม) ...
         const resolvedUploadedAt = override?.fileUploadedAt;
         let uploadedAtValue: Timestamp | undefined = fileUploadedAt;
 
@@ -142,6 +147,7 @@ export const uploadFileForDailyReport = async (
         };
       };
 
+      // ... (ส่วนของการ push/update workhours ไม่เปลี่ยนแปลง) ...
       if (targetIndex === -1) {
         const defaultLoggedAt = Timestamp.fromDate(new Date(`${workDate}T12:00:00`));
         workhours.push(
@@ -159,7 +165,7 @@ export const uploadFileForDailyReport = async (
         workhours[targetIndex] = applyFileMetadata(workhours[targetIndex]);
       }
 
-      // Clean up legacy uploadedFiles array if still present
+      // ... (ส่วนของ cleanup legacy ไม่เปลี่ยนแปลง) ...
       workhours.forEach((log, index) => {
         if (log?.uploadedFiles) {
           const legacy = Array.isArray(log.uploadedFiles) ? log.uploadedFiles : [];
@@ -180,7 +186,13 @@ export const uploadFileForDailyReport = async (
         }
       });
 
-      tx.update(dailyReportDocRef, { workhours });
+      // --- 2. แก้ไขตรงนี้ ---
+      // เปลี่ยนจาก tx.update() เป็น tx.set() พร้อม { merge: true }
+      // tx.set จะสร้างเอกสารใหม่ถ้ายังไม่มี หรือ อัปเดตข้อมูลถ้ามีอยู่แล้ว
+      tx.set(dailyReportDocRef, { 
+        workhours: workhours,
+        employeeId: employeeId // เพิ่ม employeeId ไว้ด้วยเผื่อเป็นเอกสารใหม่
+      }, { merge: true }); // merge: true สำคัญมาก! เพื่อไม่ให้เขียนทับ field อื่น
     });
     console.log('File metadata saved into workhours entry');
 
@@ -211,7 +223,6 @@ export const uploadTaskEditAttachment = async (
   const storageRef = ref(storage, storagePath);
 
   await uploadBytes(storageRef, file);
-  const downloadURL = await getDownloadURL(storageRef);
 
   const cdnURL = `https://bim-tracking-cdn.ttthaiii30.workers.dev/${storagePath
     .split('/')

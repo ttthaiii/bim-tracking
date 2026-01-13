@@ -2,6 +2,9 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 
+// ✅ 1. เพิ่ม import 'onCall' และ 'CallableRequest'
+import { onCall, CallableRequest } from "firebase-functions/v2/https";
+
 admin.initializeApp();
 const db = admin.firestore();
 
@@ -194,6 +197,49 @@ export const aggregateTaskData = onDocumentWritten(
       logger.info(`✅ Successfully updated parent task '${taskId}'!`);
     } catch (error) {
       logger.error(`❌ Error updating parent task '${taskId}':`, error);
+    }
+  }
+);
+
+// ✅ 2. เพิ่ม Type 'CallableRequest' ให้กับ 'request'
+export const getNextTaskCounter = onCall(
+  { region: "asia-southeast1" },
+  async (request: CallableRequest) => {
+    // 1. รับ projectId จาก frontend
+    const projectId = request.data.projectId;
+    if (!projectId) {
+      logger.error("No projectId provided for getNextTaskCounter");
+      throw new Error("Missing projectId.");
+    }
+
+    const counterRef = db.doc(`projectCounters/${projectId}`);
+    logger.info(`Getting next task number for project: ${projectId}`);
+
+    try {
+      // 2. ใช้ Transaction เพื่อรับประกันว่าไม่มีใครแย่ง
+      const newCount = await db.runTransaction(async (t) => {
+        const counterDoc = await t.get(counterRef);
+
+        // 3. อ่านเลขปัจจุบัน (ถ้าไม่มี ให้เริ่มที่ 0)
+        const currentNumber = counterDoc.data()?.currentTaskNumber || 0;
+        
+        // 4. บวก 1
+        const nextNumber = currentNumber + 1;
+
+        // 5. เขียนเลขใหม่กลับไปที่ DB
+        t.set(counterRef, { currentTaskNumber: nextNumber }, { merge: true });
+
+        // 6. คืนค่าเลขใหม่
+        return nextNumber;
+      });
+
+      logger.info(`Successfully generated new task number: ${newCount} for project: ${projectId}`);
+      // 7. ส่งเลขใหม่กลับไปให้ Frontend
+      return { newCount: newCount };
+
+    } catch (error) {
+      logger.error(`Error generating task number for ${projectId}:`, error);
+      throw new Error("Could not generate task number.");
     }
   }
 );

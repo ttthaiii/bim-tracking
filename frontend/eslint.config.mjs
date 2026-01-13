@@ -28,6 +28,14 @@ const eslintConfig = [
 
       // หรือถ้าอยากให้แค่เตือน แต่ไม่หยุด build ให้ใช้ "warn"
       // "@typescript-eslint/no-explicit-any": "warn",
+      
+      '@typescript-eslint/no-unused-vars': [
+          'warn',
+          {
+            varsIgnorePattern: '^_', // <-- เพิ่มบรรทัดนี้
+            argsIgnorePattern: '^_', // <-- และบรรทัดนี้
+          },
+        ],
     },
   },
 ];
