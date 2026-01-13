@@ -14,9 +14,10 @@ const nextConfig = {
       NEXT_PUBLIC_FIREBASE_APP_ID: firebaseConfig.appId || '',
     };
   })(),
-  // Scope Turbopack to the frontend workspace so it stops auto-picking the repo root.
-  root: __dirname,
-},
+  turbopack: {
+    // Scope Turbopack to the frontend workspace so it stops auto-picking the repo root.
+    root: __dirname,
+  },
   eslint: {
     // Warning: This allows production builds to successfully complete even if
     // your project has ESLint errors.
