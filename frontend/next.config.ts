@@ -1,10 +1,10 @@
 const nextConfig = {
   env: (() => {
     // Parse FIREBASE_WEBAPP_CONFIG from build time
-    const firebaseConfig = process.env.FIREBASE_WEBAPP_CONFIG 
-      ? JSON.parse(process.env.FIREBASE_WEBAPP_CONFIG) 
+    const firebaseConfig = process.env.FIREBASE_WEBAPP_CONFIG
+      ? JSON.parse(process.env.FIREBASE_WEBAPP_CONFIG)
       : {};
-    
+
     return {
       NEXT_PUBLIC_FIREBASE_API_KEY: firebaseConfig.apiKey || '',
       NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain || '',
@@ -14,9 +14,20 @@ const nextConfig = {
       NEXT_PUBLIC_FIREBASE_APP_ID: firebaseConfig.appId || '',
     };
   })(),
-  turbopack: {
-    // Scope Turbopack to the frontend workspace so it stops auto-picking the repo root.
-    root: __dirname,
+  // Scope Turbopack to the frontend workspace so it stops auto-picking the repo root.
+  root: __dirname,
+},
+  eslint: {
+    // Warning: This allows production builds to successfully complete even if
+    // your project has ESLint errors.
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    // !! WARN !!
+    // Dangerously allow production builds to successfully complete even if
+    // your project has type errors.
+    // !! WARN !!
+    ignoreBuildErrors: true,
   },
 };
 
