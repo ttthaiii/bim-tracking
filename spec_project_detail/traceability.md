@@ -13,6 +13,7 @@
 | [F-007] | Document Tracking | `src/app/document-tracking` | Existing |
 | [F-008] | All Assign Filter | `src/app/tasks` | Existing |
 | [F-009] | Task Table Enhancements | `src/app/tasks` | New |
+| [F-003] | Daily Reporting (Future Filter) | `src/app/daily-report` | Update |
 
 ## 2. Data Traceability
 
@@ -32,4 +33,10 @@
         - **UI/UX**: `DailyReportView.tsx` - Set default state.
         - **State**: `selectedAssignee` defaults to `currentUser.employeeId`.
     - **Confirmed Behavior**: Loading dashboard shows user's own reports.
+- [ ] **[T-020] Task Table Loading State**
+    - **Concept/Goal**: Visual feedback during async operations.
+    - **Implementation Details**:
+        - **UI/UX**: `LoadingOverlay` component.
+        - **Logic**: Wrap `fetchProjectData` with `setLoading(true/false)`.
+    - **Confirmed Behavior**: Screen blurs and shows spinner while data is loading.
 ```

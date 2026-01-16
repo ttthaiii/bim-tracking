@@ -83,6 +83,35 @@
             1. **Root Cause**: Progress editing allows values conflicting with future/past logs.
             2. **Action**: Implement context-aware validation (min/max based on adjacent history).
             3. **Status**: Fixed
+        - **[T-003-EX-14]**: Progress Input UX (Clamping Bug)
+            1. **Root Cause**: Strict `min` clamping during typing prevents entering multi-digit numbers (e.g., typing '5' for '55' incorrectly clamps to '50' if min=50).
+            2. **Action**: Relax `onChange` to only clamp `max`. Enforce `min` on `onBlur`.
+            3. **Status**: In Internal Review
+        - **[T-003-EX-15]**: Subtask Visibility after Regression (State)
+            1. **Root Cause**: Subtasks disappear from dropdown after lowering progress from 100%. `fetchAllData` may return stale data or race with Firestore update.
+            2. **Action**: Optimistically update `availableSubtasks` local state with new progress values immediately after `saveDailyReportEntries`.
+            3. **Status**: Fixed
+        - **[T-003-EX-16]**: Stale Data after Save (Race Condition)
+            1. **Root Cause**: `fetchAllData` is called immediately after save. Firestore reads (especially `collectionGroup`) may return stale data due to index lag, overwriting the "successful" local state with old values (reverting 75% -> 60%).
+            2. **Action**: Remove `fetchAllData` call on success. Rely completely on local optimistic updates for both `dailyReportEntries` and `availableSubtasks`.
+            3. **Status**: Fixed
+        - **[T-003-EX-17]**: Relate Drawing Empty & Persistence Failure
+            1. **Root Cause (Visual)**: `handleRelateDrawingChange` may not populate `subTaskName`/`taskName`, causing `generateRelateDrawingText` to return empty string (showing only 'x').
+            2. **Root Cause (Persistence)**: Optimistic update of `availableSubtasks` might fail if `subtaskId` mismatch, or filter logic in `SubtaskAutocomplete` is too aggressive.
+            3. **Action**:
+                - Enrich `handleRelateDrawingChange` to copy all fields.
+                - Refine `handleConfirmSubmit` to ensure `relateDrawing` is generated from `availableSubtasks` lookups if needed.
+                - Verify `availableSubtasks` update logic (use `path` if needed).
+            4. **Status**: Fixed
+        - **[T-003-EX-18]**: Inconsistent Relate Drawing & Persistence Regression (Parentheses vs Underscore)
+            1. **Root Cause (Visual)**: `SubtaskAutocomplete` displays hyphens/parentheses, but `page.tsx` generates underscores. Optimistic update might be mixing these, or `relateDrawing` logic is inconsistent.
+            2. **Root Cause (Persistence)**: If the `subtaskId` is lost or matches incorrectly, `availableSubtasks` isn't updated, hiding the task from dropdowns.
+            3. **Action**: Standardize `relateDrawing` generation to ALWAYS use underscores in `handleRelateDrawingChange` and `handleConfirmSubmit`. Ensure `subtaskList` finder logic is absolutely robust (check `id` AND `path`).
+            4. **Status**: Fixed
+        - **[T-003-EX-19]**: Future Date Filter shows Non-Leave Tasks (Meeting/Training)
+            1. **Root Cause**: `NON_WORK_KEYWORDS` included 'meeting'/'ประชุม', causing them to appear in future date selection which should strictly be 'Leave' only.
+            2. **Action**: Introduce `LEAVE_KEYWORDS` (['ลางาน']) and update `isFutureDate` filter logic to use this stricter set.
+            3. **Status**: Fixed
 
 ## 4. Project Management Page (`/projects`)
 - [x] [T-004] Project Management System (F-004)
@@ -110,6 +139,9 @@
 
 ## 6. Task Assignment Page (`/task-assignment`)
 - [x] [T-006] Task Assignment Features (F-006)
+- [ ] [T-020] Task Table Loading State (F-009)
+    - **Goal**: Add visual feedback (blur + spinner) during data fetching.
+    - **Priority**: High (UX)
 
 ## 7. Document Tracking Page (`/document-tracking`)
 - [x] [T-007] Document Tracking Features (F-007)
@@ -121,6 +153,10 @@
 - [ ] [T-009] Final Verification and Handover
 
     - **Error Logs**:
+        - **[T-005-EX-1]**: New row visible in All Assign filter
+            1. **Root Cause**: `rows` state initialized with default empty row even when `selectedProject` is 'all_assign'.
+            2. **Action**: Set `rows` to empty array `[]` when 'all_assign' is selected.
+            3. **Status**: Fixed
         - **[T-ENV-001]**: Node.js Version Mismatch
             1. **Root Cause**: Next.js 15 requires Node >= 18, but system uses v16.
             2. **Action**: Found valid Node v20 environment at `/Volumes/BriteBrain/IDE/nvm`.

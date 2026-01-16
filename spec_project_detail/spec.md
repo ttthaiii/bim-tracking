@@ -24,6 +24,7 @@
 - **Logic Refinements**:
     - **Deletion**: Uses "Soft Delete" strategy (status="deleted") to maintain audit trail.
     - **Validation**: Progress input is strictly bounded by previous and next day's entries.
+    - **Future Date Filtering**: Restricts future date task selection to "Leave" (ลางาน) only.
 
 ### [F-004] Project Management
 - **Description**: Manage projects.
@@ -51,6 +52,7 @@
     - **Due Date Column**: Display `endDate` or `dueDate`.
     - **Sorting**: Clickable headers to sort ASC/DESC.
     - **Filters**: Filter by Assignee Name and Date Range.
+    - **UX**: Loading Overlay (Blur + Spinner) during data fetch.
 
 ### [F-007] Document Tracking
 - **Description**: Track documents related to BIM.

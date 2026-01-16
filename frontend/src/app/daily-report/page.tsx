@@ -58,6 +58,15 @@ const formatDateForDisplay = (dateString: string): string => {
 
 const NON_WORK_KEYWORDS = ['ลา', 'ประชุม', 'meeting'];
 
+// T-003-EX-19 Strict Leave keywords
+const LEAVE_KEYWORDS = ['ลางาน'];
+
+const includesLeaveKeyword = (value?: string | null): boolean => {
+  if (!value) return false;
+  const lowerValue = value.toLowerCase();
+  return LEAVE_KEYWORDS.some(keyword => lowerValue.includes(keyword.toLowerCase()));
+};
+
 const includesNonWorkKeyword = (value?: string | null): boolean => {
   if (!value) return false;
   const lowerValue = value.toLowerCase();
@@ -226,14 +235,26 @@ const SUPERVISOR_ROLES = ['BimManager', 'BimLeader'];
 
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
   if (!entry.subtaskId) return '';
-  const project = projects.find(p => p.id === entry.project);
-  const parts = [];  // ✅ เปลี่ยนเป็น const
-  if (project) parts.push(project.abbr);
+
+  // Try to resolve project abbreviation
+  const projectObj = projects.find(p => p.id === (entry as any).projectId || p.id === entry.project) ||
+    projects.find(p => p.name === entry.project);
+
+  const abbr = projectObj?.abbr || entry.project || 'N/A';
+
+  const parts = [abbr];
+
   if (entry.taskName) parts.push(entry.taskName);
+  else parts.push('N/A'); // Ensure structure matches Project_Task_Subtask
+
   if (entry.subTaskName) parts.push(entry.subTaskName);
+  else parts.push('N/A');
+
   // Fix: Show item only if it's not empty and not "N/A"
   if (entry.item && entry.item !== 'N/A') parts.push(entry.item);
-  return parts.length > 0 ? `(${parts.join(' - ')})` : '';
+
+  // Use underscores instead of " - " and NO parentheses
+  return parts.join('_');
 };
 
 export default function DailyReport() {
@@ -528,9 +549,11 @@ export default function DailyReport() {
   // Filter subtasks based on whether the date is in the future
   useEffect(() => {
     if (isFutureDate) {
-      // วันในอนาคต: แสดงเฉพาะงานลา
+      // T-003-EX-19: วันในอนาคต STRICTLY แสดงเฉพาะงาน "ลา" เท่านั้น (ไม่รวมประชุม/Meeting)
       const leaveTasks = availableSubtasks.filter(
-        subtask => includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
+        subtask => includesLeaveKeyword(subtask.taskName) ||
+          includesLeaveKeyword(subtask.subTaskName) ||
+          includesLeaveKeyword(subtask.item)
       );
       setFilteredSubtasks(leaveTasks);
     } else {
@@ -877,18 +900,21 @@ export default function DailyReport() {
     // Calculate bounds
     const { min, max } = getProgressBounds(entry.subtaskId);
 
+    // UX Fix: Only clamp MAX while typing. Allow typing numbers lower than min temporarily (e.g. typing "5" when min is "50")
+    // Also allow typing nothing (temporarily)
     const clampedProgress = Number.isNaN(parsedProgress)
       ? null
-      : Math.min(Math.max(parsedProgress, min), max);
+      : Math.min(parsedProgress, max);
 
     // Allow typing intermediate values, but valid only if number
     const sanitizedValue = clampedProgress !== null ? String(clampedProgress) : newProgressValue;
-    const initialProgress = entry.initialProgress || 0; // Keep just in case, but rely on bounds
+    // const initialProgress = entry.initialProgress || 0; // Unused
 
     let progressError = '';
 
-    // Improved Validation Message
+    // Improved Validation Message for UX
     if (clampedProgress !== null) {
+      // Show error if below min strictly, but don't prevent typing
       if (clampedProgress < min) progressError = `ค่าต้องไม่ต่ำกว่า ${min}% (จากวันที่ก่อนหน้า)`;
       else if (clampedProgress > max) progressError = `ค่าต้องไม่เกิน ${max}% (จากวันที่ถัดไป)`;
     }
@@ -907,10 +933,12 @@ export default function DailyReport() {
     }
 
     const currentProgress = parseInt(entry.progress, 10);
-    // const initialProgress = entry.initialProgress || 0; // Use bounds instead
     const { min, max } = getProgressBounds(entry.subtaskId);
 
-    if (isNaN(currentProgress) || currentProgress < min) {
+    // Enforce bounds strictly on blur
+    if (isNaN(currentProgress)) {
+      handleUpdateEntry(entryId, { progress: `${min}%`, progressError: '' });
+    } else if (currentProgress < min) {
       handleUpdateEntry(entryId, { progress: `${min}%`, progressError: '' });
     } else if (currentProgress > max) {
       handleUpdateEntry(entryId, { progress: `${max}%`, progressError: '' });
@@ -1076,7 +1104,7 @@ export default function DailyReport() {
       if (!dateRegex.test(selectedDate)) {
         throw new Error(`Invalid date format: ${selectedDate}`);
       }
-      const entriesToSave = entriesToSubmit.map(entry => {
+      const entriesToSave = entriesToSubmit.map((entry): DailyReportEntry => {
         const selectedFile = selectedFiles?.[entry.id];
         let fileUploadedAt = entry.fileUploadedAt;
 
@@ -1087,26 +1115,143 @@ export default function DailyReport() {
           }
         }
 
+        // --- T-003-EX-17: Robust Metadata Enrichment ---
+        let enrichedEntry = { ...entry };
+
+        // Ensure metadata is populated
+        if (enrichedEntry.subtaskId && (!enrichedEntry.taskName || !enrichedEntry.subTaskName || !enrichedEntry.project)) {
+          const subtaskMatch = availableSubtasks.find(s => s.id === enrichedEntry.subtaskId) ||
+            availableSubtasks.find(s => s.path === enrichedEntry.subtaskPath);
+
+          if (subtaskMatch) {
+            const projectObj = allProjects.find(p => p.id === subtaskMatch.projectId) ||
+              allProjects.find(p => p.id === subtaskMatch.project) ||
+              allProjects.find(p => p.name === subtaskMatch.project);
+
+            // Fill in missing metadata fields that exist on DailyReportEntry
+            enrichedEntry.taskName = subtaskMatch.taskName || '';
+            enrichedEntry.subTaskName = subtaskMatch.subTaskName || '';
+            enrichedEntry.project = projectObj?.name || subtaskMatch.project || enrichedEntry.project || '';
+            enrichedEntry.item = subtaskMatch.item || '';
+            enrichedEntry.subTaskCategory = subtaskMatch.subTaskCategory || '';
+
+            // Regenerate relateDrawing pattern: Project_Task_Subtask[_Item]
+            enrichedEntry.relateDrawing = enrichedEntry.relateDrawing ||
+              `${projectObj?.abbr || subtaskMatch.project || 'N/A'}_${subtaskMatch.taskName}_${subtaskMatch.subTaskName}${subtaskMatch.item ? `_${subtaskMatch.item}` : ''}`;
+          }
+        }
+
         return {
-          ...entry,
+          id: enrichedEntry.id,
+          employeeId,
+          subtaskId: enrichedEntry.subtaskId || '',
+          subtaskPath: enrichedEntry.subtaskPath || '',
           assignDate: selectedDate,
-          fileName: selectedFile?.fileName || entry.fileName || '',
-          fileURL: selectedFile?.fileURL || entry.fileURL || '',
-          storagePath: selectedFile?.storagePath || entry.storagePath || '',
+          normalWorkingHours: enrichedEntry.normalWorkingHours || '0:0',
+          otWorkingHours: enrichedEntry.otWorkingHours || '0:0',
+          progress: enrichedEntry.progress,
+          note: enrichedEntry.note || '',
+          fileName: selectedFile?.fileName || enrichedEntry.fileName || '',
+          fileURL: selectedFile?.fileURL || enrichedEntry.fileURL || '',
+          storagePath: selectedFile?.storagePath || enrichedEntry.storagePath || '',
           fileUploadedAt,
-        };
+          status: enrichedEntry.status as any,
+
+          // Metadata fields required by DailyReportEntry interface
+          taskName: enrichedEntry.taskName || '',
+          subTaskName: enrichedEntry.subTaskName || '',
+          project: enrichedEntry.project || '',
+          item: enrichedEntry.item || '',
+          relateDrawing: enrichedEntry.relateDrawing || '',
+          subTaskCategory: enrichedEntry.subTaskCategory || '',
+        } as DailyReportEntry;
       });
 
       await saveDailyReportEntries(employeeId, entriesToSave);
+
+      // --- Optimistic Update for Subtask Visibility ---
+      const updatedSubtasks = [...availableSubtasks];
+      let hasSubtaskUpdates = false;
+
+      entriesToSave.forEach(savedEntry => {
+        if (!savedEntry.subtaskId) return;
+        // T-003-EX-17: Improve finder logic - lookup by ID OR Path
+        const subtaskIndex = updatedSubtasks.findIndex(s => s.id === savedEntry.subtaskId || s.path === savedEntry.subtaskPath);
+
+        if (subtaskIndex !== -1) {
+          const newProgress = parseInt(savedEntry.progress.replace('%', ''), 10) || 0;
+          if (updatedSubtasks[subtaskIndex].subTaskProgress !== newProgress) {
+            updatedSubtasks[subtaskIndex] = {
+              ...updatedSubtasks[subtaskIndex],
+              subTaskProgress: newProgress
+            };
+            hasSubtaskUpdates = true;
+          }
+        }
+      });
+
+      if (hasSubtaskUpdates) {
+        console.log('🔄 Optimistically updating available subtasks');
+        setAvailableSubtasks(updatedSubtasks);
+      }
+
+      // --- Optimistic Update for Daily Report Entries (Prevent Stale Data) ---
+      // Instead of fetching data again (which might be stale), we update local state
+      const timestampNow = Timestamp.now();
+
+      setDailyReportEntries(currentEntries => {
+        return currentEntries.map(entry => {
+          const savedMatch = entriesToSave.find(s => s.id === entry.id);
+          if (savedMatch) {
+            return {
+              ...savedMatch,
+              status: 'pending' as const, // Explicitly cast to literal type
+              isExistingData: true,
+              timestamp: timestampNow, // Update timestamp to prevent overwriting by older cached data
+              oldProgress: savedMatch.progress.includes('%') ? savedMatch.progress : `${savedMatch.progress}%`,
+              // relateDrawing should be preserved from savedMatch or updated if necessary
+            };
+          }
+          return entry;
+        });
+      });
+
+      // Update cache immediately to reflect these changes
+      setTempDataCache(prev => {
+        const currentEntriesForDate = prev[selectedDate] || [];
+        // Use a functional update logic similar to above
+        const updatedCacheEntries = (prev[selectedDate] || dailyReportEntries).map(entry => {
+          const savedMatch = entriesToSave.find(s => s.id === entry.id);
+          if (savedMatch) {
+            return {
+              ...savedMatch,
+              status: 'pending' as const,
+              isExistingData: true,
+              timestamp: timestampNow,
+              oldProgress: savedMatch.progress.includes('%') ? savedMatch.progress : `${savedMatch.progress}%`,
+            };
+          }
+          return entry;
+        });
+
+        return {
+          ...prev,
+          [selectedDate]: updatedCacheEntries
+        };
+      });
+
+      // ------------------------------------------------
 
       setSuccessMessage('บันทึกข้อมูล Daily Report สำเร็จ!');
       setShowSuccessModal(true);
 
       setHasUnsavedChanges(false);
       setDeletedEntries([]); // Clear deleted entries after success
-      setTempDataCache({});
+      // Do NOT clear cache or fetchAllData to avoid race condition
+      // setTempDataCache({});  <-- REMOVED
+      // await fetchAllData(employeeId); <-- REMOVED
+
       prevWorkDateRef.current = workDate;
-      await fetchAllData(employeeId);
 
     } catch (err) {
       console.error('Error submitting daily report:', err);

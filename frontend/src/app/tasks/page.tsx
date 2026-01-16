@@ -20,6 +20,7 @@ import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
 import { getCachedProjects, getCachedTasks, getCachedSubtasks } from '@/services/cachedFirestoreService';
 import { calculateDeadlineStatus } from '@/utils/deadlineCalculator';
 import { uploadTaskEditAttachment } from '@/services/uploadService';
+import LoadingOverlay from '@/components/LoadingOverlay';
 
 interface TaskItem {
   id: string;
@@ -255,6 +256,8 @@ export default function TaskAssignment() {
         return;
       }
 
+      setLoading(true); // T-020: Start loading
+
       try {
         // ✅ 4. โค้ดส่วนที่แก้ไขสำหรับการดึงข้อมูล "All Assign" หรือ "Project" ปกติ
         if (selectedProject === 'all_assign') {
@@ -334,17 +337,15 @@ export default function TaskAssignment() {
 
             setExistingSubtasks(subtasksWithDeadline);
 
-            // Set Default Row
-            setRows([{
-              id: '1', subtaskId: '', relateDrawing: '', relateDrawingName: '', activity: '',
-              relateWork: '', item: '', internalRev: null, workScale: 'S',
-              assignee: '', deadline: '', progress: 0
-            }]);
+            // T-005-EX-1: Set Empty Row (Hide New Input) for All Assign mode
+            setRows([]);
 
           } catch (error) {
             console.error('❌ Error fetching all assigned tasks:', error);
             setErrorMessage('เกิดข้อผิดพลาดในการดึงข้อมูล All Assign');
             setShowErrorModal(true);
+          } finally {
+            setLoading(false); // T-020: Stop loading
           }
           return; // จบการทำงานสำหรับ case 'all_assign'
         }
@@ -435,6 +436,8 @@ export default function TaskAssignment() {
 
       } catch (error) {
         console.error('❌ Error fetching project data:', error);
+      } finally {
+        setLoading(false); // T-020: Stop loading
       }
     };
 
@@ -1152,7 +1155,7 @@ export default function TaskAssignment() {
       relateDrawing: editingData.relateDrawingName,
       relateWork: editingData.relateWork,
       item: editingData.item || '-',
-      internalRev: editingData.internalRev || '-',
+      internalRev: editingData.internalRev ?? null,
       workScale: editingData.workScale,
       assignee: editingData.assignee
     });
@@ -1391,6 +1394,7 @@ export default function TaskAssignment() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
+      <LoadingOverlay isLoading={loading} message="กำลังโหลดข้อมูลงาน..." />
       <Navbar />
 
       <div className="flex-1 flex flex-col px-4 py-6 overflow-hidden">
