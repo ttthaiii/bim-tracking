@@ -19,7 +19,11 @@
 ### [F-003] Daily Reporting
 - **Description**: Users submit daily work reports (timesheets).
 - **Key Components**: `frontend/src/app/daily-report`
+
 - **Data Usage**: `DailyReportEntry`
+- **Logic Refinements**:
+    - **Deletion**: Uses "Soft Delete" strategy (status="deleted") to maintain audit trail.
+    - **Validation**: Progress input is strictly bounded by previous and next day's entries.
 
 ### [F-004] Project Management
 - **Description**: Manage projects.

@@ -89,7 +89,7 @@ export interface DailyReportEntry {
   otWorkingHours: string;
   progress: string;
   note?: string;
-  status: 'pending' | 'in-progress' | 'completed';
+  status: 'pending' | 'in-progress' | 'completed' | 'deleted';
   isLeaveTask?: boolean; // Flag to identify leave-related tasks
   initialProgress?: number; // Store the initial progress from the database
   progressError?: string; // To show a tooltip-like error message

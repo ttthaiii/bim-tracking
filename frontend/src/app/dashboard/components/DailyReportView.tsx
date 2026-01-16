@@ -73,13 +73,56 @@ export default function DailyReportView() {
 
             const data = await getAllDailyReportEntries(start, end, selectedAssignee || undefined);
 
-            const enrichedData = data.map(item => {
+            let enrichedData = data.map(item => {
                 const user = users.find(u => u.employeeId === item.employeeId);
                 return {
                     ...item,
                     fullName: user?.fullName || item.employeeId
                 };
             });
+
+            // Fill Missing Dates Logic (Only if Assignee is selected)
+            if (selectedAssignee && start && end) {
+                const allDates: DailyReportSummary[] = [];
+                const currentDate = new Date(start);
+                // Ensure time is 00:00:00
+                currentDate.setHours(0, 0, 0, 0);
+                const loopEnd = new Date(end);
+                loopEnd.setHours(0, 0, 0, 0);
+
+                const empUser = users.find(u => u.employeeId === selectedAssignee);
+                const empName = empUser?.fullName || selectedAssignee;
+
+                while (currentDate <= loopEnd) {
+                    const dateStr = currentDate.toISOString().split('T')[0];
+                    const existingEntry = enrichedData.find(e => {
+                        const eDate = new Date(e.date);
+                        eDate.setHours(0, 0, 0, 0);
+                        return eDate.getTime() === currentDate.getTime();
+                    });
+
+                    if (existingEntry) {
+                        allDates.push(existingEntry);
+                    } else {
+                        // Determine generic status for missing day
+                        const dayOfWeek = currentDate.getDay();
+                        const isHoliday = dayOfWeek === 0; // Sunday
+
+                        allDates.push({
+                            id: `${selectedAssignee}-${dateStr}`,
+                            employeeId: selectedAssignee,
+                            fullName: empName,
+                            date: new Date(currentDate),
+                            totalWorkingHours: 0,
+                            totalOT: 0,
+                            status: isHoliday ? 'Holiday' : 'Missing'
+                        });
+                    }
+                    // Next day
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+                enrichedData = allDates;
+            }
 
             setEntries(enrichedData);
         } catch (error) {
@@ -193,6 +236,7 @@ export default function DailyReportView() {
                             <option value="Normal">Normal (ปกติ)</option>
                             <option value="Abnormal">Abnormal (ผิดปกติ)</option>
                             <option value="Holiday">Holiday (วันหยุด)</option>
+                            <option value="Missing">Missing (ขาดส่ง)</option>
                         </select>
                     </div>
                 </div>
@@ -271,9 +315,11 @@ export default function DailyReportView() {
                                             <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                         ${entry.status === 'Normal' ? 'bg-green-100 text-green-800' :
                                                     entry.status === 'Abnormal' ? 'bg-red-100 text-red-800' :
-                                                        'bg-gray-100 text-gray-800'}`}>
+                                                        entry.status === 'Missing' ? 'bg-red-200 text-red-900 border border-red-300' :
+                                                            'bg-gray-100 text-gray-800'}`}>
                                                 {entry.status === 'Normal' ? 'ปกติ' :
-                                                    entry.status === 'Abnormal' ? 'ผิดปกติ' : 'วันหยุด'}
+                                                    entry.status === 'Abnormal' ? 'ผิดปกติ' :
+                                                        entry.status === 'Missing' ? 'ขาดส่ง' : 'วันหยุด'}
                                             </span>
                                         </td>
                                     </tr>

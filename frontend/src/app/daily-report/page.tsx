@@ -267,6 +267,7 @@ export default function DailyReport() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const prevWorkDateRef = useRef<string>(workDate);
   const [entriesToSubmit, setEntriesToSubmit] = useState<DailyReportEntry[]>([]);
+  const [deletedEntries, setDeletedEntries] = useState<DailyReportEntry[]>([]); // Track rows for soft delete
 
   // States for History Modal
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -452,6 +453,7 @@ export default function DailyReport() {
     lastFetchedEmployeeIdRef.current = trimmedId;
     setPendingEmployeeId(prev => (prev === trimmedId ? prev : trimmedId));
     setTempDataCache({});
+    setDeletedEntries([]); // Reset deleted entries when employee changes
     setDailyReportEntries([createInitialEmptyDailyReportEntry(trimmedId, workDate, baseId, 0)]);
     setHasUnsavedChanges(false);
     fetchAllData(trimmedId);
@@ -636,56 +638,58 @@ export default function DailyReport() {
 
     console.log('Latest entries by subtask:', Object.values(latestEntriesMap));
 
-    const entriesToShow = Object.values(latestEntriesMap).map((entry: DailyReportEntry) => {
-      // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
-      const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
-      const isLeaveTask = subtask
-        ? includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
-        : includesNonWorkKeyword(entry.taskName) || includesNonWorkKeyword(entry.subTaskName) || includesNonWorkKeyword(entry.item);
+    const entriesToShow = Object.values(latestEntriesMap)
+      .filter((entry: DailyReportEntry) => entry.status !== 'deleted') // Filter out soft-deleted entries
+      .map((entry: DailyReportEntry) => {
+        // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
+        const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
+        const isLeaveTask = subtask
+          ? includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
+          : includesNonWorkKeyword(entry.taskName) || includesNonWorkKeyword(entry.subTaskName) || includesNonWorkKeyword(entry.item);
 
-      // สร้าง relateDrawing สำหรับข้อมูลเก่า
-      let relateDrawing = entry.relateDrawing;
-      if (!relateDrawing && subtask) {
-        // ค้นหา project
-        const project = allProjects.find(p => p.id === subtask.projectId) ||
-          allProjects.find(p => p.id === subtask.project) ||
-          allProjects.find(p => p.name === subtask.project);
+        // สร้าง relateDrawing สำหรับข้อมูลเก่า
+        let relateDrawing = entry.relateDrawing;
+        if (!relateDrawing && subtask) {
+          // ค้นหา project
+          const project = allProjects.find(p => p.id === subtask.projectId) ||
+            allProjects.find(p => p.id === subtask.project) ||
+            allProjects.find(p => p.name === subtask.project);
 
-        // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
-        const abbr = project?.abbr || subtask.project || 'N/A';
-        const taskName = subtask.taskName || 'N/A';
-        const subTaskName = subtask.subTaskName || 'N/A';
+          // สร้าง relateDrawing ในรูปแบบ: ตัวย่อโครงการ_TaskName_subTask_item
+          const abbr = project?.abbr || subtask.project || 'N/A';
+          const taskName = subtask.taskName || 'N/A';
+          const subTaskName = subtask.subTaskName || 'N/A';
 
-        relateDrawing = `${abbr}_${taskName}_${subTaskName}`;
-        // Fix: Append item only if it has a real value
-        if (subtask.item && subtask.item !== 'N/A') {
-          relateDrawing += `_${subtask.item}`;
+          relateDrawing = `${abbr}_${taskName}_${subTaskName}`;
+          // Fix: Append item only if it has a real value
+          if (subtask.item && subtask.item !== 'N/A') {
+            relateDrawing += `_${subtask.item}`;
+          }
         }
-      }
 
-      const matchingUploadedFile = uploadedFiles.find(file =>
-        file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate
-      );
+        const matchingUploadedFile = uploadedFiles.find(file =>
+          file.subtaskId === entry.subtaskId && file.workDate === entry.assignDate
+        );
 
-      const resolvedFileUploadedAt = entry.fileUploadedAt
-        || (matchingUploadedFile?.fileUploadedAt instanceof Timestamp
-          ? matchingUploadedFile.fileUploadedAt
-          : undefined);
+        const resolvedFileUploadedAt = entry.fileUploadedAt
+          || (matchingUploadedFile?.fileUploadedAt instanceof Timestamp
+            ? matchingUploadedFile.fileUploadedAt
+            : undefined);
 
-      return {
-        ...entry,
-        isLeaveTask,
-        initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
-        progress: isLeaveTask ? '0%' : entry.progress,
-        otWorkingHours: isLeaveTask ? '0:0' : (entry.otWorkingHours || '0:0'),
-        isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
-        relateDrawing: relateDrawing || '', // เพิ่ม relateDrawing
-        fileName: entry.fileName || matchingUploadedFile?.fileName || '',
-        fileURL: entry.fileURL || matchingUploadedFile?.fileURL || '',
-        storagePath: entry.storagePath || matchingUploadedFile?.storagePath || '',
-        fileUploadedAt: resolvedFileUploadedAt,
-      };
-    });
+        return {
+          ...entry,
+          isLeaveTask,
+          initialProgress: isLeaveTask ? 0 : (parseInt(entry.progress.replace('%', ''), 10) || 0),
+          progress: isLeaveTask ? '0%' : entry.progress,
+          otWorkingHours: isLeaveTask ? '0:0' : (entry.otWorkingHours || '0:0'),
+          isExistingData: true, // เป็นข้อมูลเก่า (มี logTimestamp)
+          relateDrawing: relateDrawing || '', // เพิ่ม relateDrawing
+          fileName: entry.fileName || matchingUploadedFile?.fileName || '',
+          fileURL: entry.fileURL || matchingUploadedFile?.fileURL || '',
+          storagePath: entry.storagePath || matchingUploadedFile?.storagePath || '',
+          fileUploadedAt: resolvedFileUploadedAt,
+        };
+      });
 
     console.log('entriesToShow', entriesToShow);
     setDailyReportEntries(entriesToShow);
@@ -798,6 +802,16 @@ export default function DailyReport() {
     }
 
     setDailyReportEntries(currentEntries => {
+      const entryToDelete = currentEntries.find(e => e.id === entryId);
+      // Track existing data for soft delete
+      if (entryToDelete && entryToDelete.isExistingData) {
+        setDeletedEntries(prev => {
+          // Avoid duplicates
+          if (prev.some(e => e.id === entryId)) return prev;
+          return [...prev, entryToDelete];
+        });
+      }
+
       const newEntries = currentEntries.filter(entry => entry.id !== entryId);
       if (newEntries.length === 0) {
         const resetEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
@@ -822,6 +836,32 @@ export default function DailyReport() {
     });
   };
 
+  // Helper to validate progress range
+  const getProgressBounds = (subtaskId: string) => {
+    if (!subtaskId) return { min: 0, max: 100 };
+
+    // Filter useful entries (ignore current date & deleted)
+    const validEntries = allDailyEntries.filter(e =>
+      e.subtaskId === subtaskId &&
+      e.status !== 'deleted' &&
+      e.assignDate !== workDate
+    );
+
+    // Find latest entry BEFORE today (Min Limit)
+    const prevEntries = validEntries.filter(e => e.assignDate < workDate);
+    prevEntries.sort((a, b) => b.assignDate.localeCompare(a.assignDate)); // Descending (newest first)
+    const prevEntry = prevEntries[0];
+    const min = prevEntry ? (parseInt(prevEntry.progress.replace('%', ''), 10) || 0) : 0;
+
+    // Find earliest entry AFTER today (Max Limit)
+    const nextEntries = validEntries.filter(e => e.assignDate > workDate);
+    nextEntries.sort((a, b) => a.assignDate.localeCompare(b.assignDate)); // Ascending (oldest first)
+    const nextEntry = nextEntries[0];
+    const max = nextEntry ? (parseInt(nextEntry.progress.replace('%', ''), 10) || 0) : 100;
+
+    return { min, max };
+  };
+
   const handleProgressInput = (entryId: string, newProgressValue: string) => {
     const entry = dailyReportEntries.find(e => e.id === entryId);
     if (!entry) return;
@@ -833,15 +873,24 @@ export default function DailyReport() {
     }
 
     const parsedProgress = parseInt(newProgressValue, 10);
+
+    // Calculate bounds
+    const { min, max } = getProgressBounds(entry.subtaskId);
+
     const clampedProgress = Number.isNaN(parsedProgress)
       ? null
-      : Math.min(Math.max(parsedProgress, 0), 100);
+      : Math.min(Math.max(parsedProgress, min), max);
+
+    // Allow typing intermediate values, but valid only if number
     const sanitizedValue = clampedProgress !== null ? String(clampedProgress) : newProgressValue;
-    const initialProgress = entry.initialProgress || 0;
+    const initialProgress = entry.initialProgress || 0; // Keep just in case, but rely on bounds
 
     let progressError = '';
-    if (clampedProgress !== null && clampedProgress < initialProgress) {
-      progressError = `ค่าต้องไม่น้อยกว่าค่าเริ่มต้น (${initialProgress}%)`;
+
+    // Improved Validation Message
+    if (clampedProgress !== null) {
+      if (clampedProgress < min) progressError = `ค่าต้องไม่ต่ำกว่า ${min}% (จากวันที่ก่อนหน้า)`;
+      else if (clampedProgress > max) progressError = `ค่าต้องไม่เกิน ${max}% (จากวันที่ถัดไป)`;
     }
 
     handleUpdateEntry(entryId, { progress: sanitizedValue, progressError });
@@ -858,12 +907,13 @@ export default function DailyReport() {
     }
 
     const currentProgress = parseInt(entry.progress, 10);
-    const initialProgress = entry.initialProgress || 0;
+    // const initialProgress = entry.initialProgress || 0; // Use bounds instead
+    const { min, max } = getProgressBounds(entry.subtaskId);
 
-    if (isNaN(currentProgress) || currentProgress < initialProgress) {
-      handleUpdateEntry(entryId, { progress: `${initialProgress}%`, progressError: '' });
-    } else if (currentProgress > 100) {
-      handleUpdateEntry(entryId, { progress: '100%', progressError: '' });
+    if (isNaN(currentProgress) || currentProgress < min) {
+      handleUpdateEntry(entryId, { progress: `${min}%`, progressError: '' });
+    } else if (currentProgress > max) {
+      handleUpdateEntry(entryId, { progress: `${max}%`, progressError: '' });
     } else {
       handleUpdateEntry(entryId, { progressError: '' });
     }
@@ -994,6 +1044,34 @@ export default function DailyReport() {
     try {
       const selectedDate = workDate;
 
+      // Handle Soft Deletions
+      if (deletedEntries.length > 0) {
+        console.log('Processing soft deletions:', deletedEntries.length);
+        const deletionPayloads = deletedEntries.map(entry => ({
+          ...entry,
+          assignDate: selectedDate, // Ensure it marks delete for THIS day
+          status: 'deleted' as const,
+          progress: '0%',
+          normalWorkingHours: '0:0',
+          otWorkingHours: '0:0',
+          note: 'Deleted',
+          // Keep IDs valid for backend path resolution
+          subtaskId: entry.subtaskId,
+          subtaskPath: entry.subtaskPath,
+          employeeId: entry.employeeId
+        }));
+        // We can send these in the same batch or separate. 
+        // saveDailyReportEntries accepts array, so we can mix them OR call it twice. 
+        // Let's mix them into entriesToSave below or handle separately.
+        // Actually, let's just append to entriesToSave?
+        // Wait, entriesToSubmit is what is passed here.
+        // We should treat deletion separately to ensure they are processed.
+
+        // Let's combine them into validEntries logic or just call save with them.
+        await saveDailyReportEntries(employeeId, deletionPayloads);
+      }
+
+
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(selectedDate)) {
         throw new Error(`Invalid date format: ${selectedDate}`);
@@ -1025,7 +1103,7 @@ export default function DailyReport() {
       setShowSuccessModal(true);
 
       setHasUnsavedChanges(false);
-
+      setDeletedEntries([]); // Clear deleted entries after success
       setTempDataCache({});
       prevWorkDateRef.current = workDate;
       await fetchAllData(employeeId);

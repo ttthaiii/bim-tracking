@@ -128,7 +128,7 @@ export const getEmployeeDailyReportEntries = async (
             project: log.project || data.project || '',
             timestamp: log.timestamp,
             loggedAt: log.loggedAt,
-            status: 'pending',
+            status: log.status || 'pending',
             relateDrawing: '',
             fileName,
             fileURL,
@@ -286,7 +286,8 @@ export const saveDailyReportEntries = async (
         note: entry.note || '',
         timestamp: now,              // เวลาที่กดบันทึก (เวลาปัจจุบัน) - ใช้จัดเรียงข้อมูลล่าสุด
         loggedAt: selectedDate,      // วันที่ที่เลือกจากปฏิทิน (Date + เวลา 12:00)
-        assignDate: entry.assignDate  // วันที่ที่เลือกจากปฏิทิน (YYYY-MM-DD)
+        assignDate: entry.assignDate,
+        status: entry.status || 'pending' // Save status (e.g., 'deleted')  // วันที่ที่เลือกจากปฏิทิน (YYYY-MM-DD)
       };
 
       if (entry.fileName) {

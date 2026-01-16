@@ -303,7 +303,7 @@ export interface DailyReportSummary {
   date: Date;
   totalWorkingHours: number; // in hours
   totalOT: number; // in hours
-  status: 'Normal' | 'Abnormal' | 'Holiday';
+  status: 'Normal' | 'Abnormal' | 'Holiday' | 'Missing';
 }
 
 function parseTime(timeStr?: string): number {
