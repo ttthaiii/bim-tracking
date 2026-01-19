@@ -94,7 +94,12 @@ export default function DailyReportView() {
                 const empName = empUser?.fullName || selectedAssignee;
 
                 while (currentDate <= loopEnd) {
-                    const dateStr = currentDate.toISOString().split('T')[0];
+                    // Fix: Use local time for date string to avoid timezone shift (which caused duplicate keys)
+                    const y = currentDate.getFullYear();
+                    const m = String(currentDate.getMonth() + 1).padStart(2, '0');
+                    const d = String(currentDate.getDate()).padStart(2, '0');
+                    const dateStr = `${y}-${m}-${d}`;
+
                     const existingEntry = enrichedData.find(e => {
                         const eDate = new Date(e.date);
                         eDate.setHours(0, 0, 0, 0);
@@ -121,6 +126,7 @@ export default function DailyReportView() {
                     // Next day
                     currentDate.setDate(currentDate.getDate() + 1);
                 }
+
                 enrichedData = allDates;
             }
 
@@ -314,7 +320,7 @@ export default function DailyReportView() {
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                         ${entry.status === 'Normal' ? 'bg-green-100 text-green-800' :
-                                                    entry.status === 'Abnormal' ? 'bg-red-100 text-red-800' :
+                                                    entry.status === 'Abnormal' ? 'bg-orange-100 text-orange-800' :
                                                         entry.status === 'Missing' ? 'bg-red-200 text-red-900 border border-red-300' :
                                                             'bg-gray-100 text-gray-800'}`}>
                                                 {entry.status === 'Normal' ? 'ปกติ' :

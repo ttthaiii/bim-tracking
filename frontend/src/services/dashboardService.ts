@@ -356,40 +356,63 @@ export async function getAllDailyReportEntries(
 
       const workhours = Array.isArray(data.workhours) ? data.workhours : [];
 
+      // Deduplicate logs within this subtask by date (Keep latest only)
+      const latestLogsByDate = new Map<string, any>();
+
       workhours.forEach((log: any) => {
-        // Determine Date
+        // Resolve Date
         let logDate: Date | null = null;
+        let dateStr = '';
         if (log.assignDate) {
-          // assignDate is YYYY-MM-DD
-          logDate = new Date(log.assignDate);
+          dateStr = log.assignDate; // YYYY-MM-DD
+          const parts = dateStr.split('-').map(Number);
+          logDate = new Date(parts[0], parts[1] - 1, parts[2]);
         } else if (log.loggedAt?.toDate) {
           logDate = log.loggedAt.toDate();
+          // Fix: Use local time for date string to match logDate
+          const y = logDate!.getFullYear();
+          const m = String(logDate!.getMonth() + 1).padStart(2, '0');
+          const d = String(logDate!.getDate()).padStart(2, '0');
+          dateStr = `${y}-${m}-${d}`;
         } else if (log.timestamp?.toDate) {
           logDate = log.timestamp.toDate();
+          // Fix: Use local time for date string to match logDate
+          const y = logDate!.getFullYear();
+          const m = String(logDate!.getMonth() + 1).padStart(2, '0');
+          const d = String(logDate!.getDate()).padStart(2, '0');
+          dateStr = `${y}-${m}-${d}`;
         }
 
-        if (!logDate) return;
+        if (!dateStr || !logDate) return;
 
-        // Filter by Date Range
-        // Set time to 0 to compare dates only
-        const checkDate = new Date(logDate);
+        // Compare Timestamps
+        const currentTimestamp = log.timestamp?.toMillis ? log.timestamp.toMillis() :
+          (log.timestamp?.getTime ? log.timestamp.getTime() : 0);
+
+        const existing = latestLogsByDate.get(dateStr);
+        if (!existing || currentTimestamp > existing.timestamp) {
+          latestLogsByDate.set(dateStr, { log, dateObj: logDate, timestamp: currentTimestamp });
+        }
+      });
+
+      // Aggregate only the latest logs
+      latestLogsByDate.forEach((value, dateStr) => {
+        const { log, dateObj } = value;
+        const checkDate = new Date(dateObj);
         checkDate.setHours(0, 0, 0, 0);
 
         if (startDate) {
-          startDate.setHours(0, 0, 0, 0);
-          if (checkDate < startDate) return;
+          const s = new Date(startDate);
+          s.setHours(0, 0, 0, 0);
+          if (checkDate < s) return;
         }
         if (endDate) {
-          endDate.setHours(0, 0, 0, 0);
-          if (checkDate > endDate) return;
+          const e = new Date(endDate);
+          e.setHours(0, 0, 0, 0);
+          if (checkDate > e) return;
         }
 
-        const dateStr = checkDate.toISOString().split('T')[0];
         const summary = getSummary(employeeId, dateStr, checkDate);
-
-        // Aggregate Hours (using string 00:00 format logic from daily-report page)
-        // Assuming data is stored as object { day: number, ot: number } in workhours based on taskAssignService
-        // Wait, taskAssignService saves day/ot as numbers (e.g. 1.5)
 
         const workingHours = typeof log.day === 'number' ? log.day : 0;
         const otHours = typeof log.ot === 'number' ? log.ot : 0;

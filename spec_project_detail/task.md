@@ -112,6 +112,10 @@
             1. **Root Cause**: `NON_WORK_KEYWORDS` included 'meeting'/'ประชุม', causing them to appear in future date selection which should strictly be 'Leave' only.
             2. **Action**: Introduce `LEAVE_KEYWORDS` (['ลางาน']) and update `isFutureDate` filter logic to use this stricter set.
             3. **Status**: Fixed
+        - **[T-003-EX-20]**: Fix "Leave" Keyword Detection Bug (False Positive on "ทางลาด")
+            1. **Root Cause**: Generic keyword 'ลา' matches 'ทางลาด' (Ramp).
+            2. **Action**: Refine `NON_WORK_KEYWORDS` to use specific 'ลางาน' (Leave Category) instead of generic 'ลา'.
+            3. **Status**: Fixed
 
 ## 4. Project Management Page (`/projects`)
 - [x] [T-004] Project Management System (F-004)
@@ -157,6 +161,10 @@
             1. **Root Cause**: `rows` state initialized with default empty row even when `selectedProject` is 'all_assign'.
             2. **Action**: Set `rows` to empty array `[]` when 'all_assign' is selected.
             3. **Status**: Fixed
+        - **[T-ENV-002]**: Firebase Import Error (IDE)
+            1. **Root Cause**: VSCode TypeScript server caching issue after fresh `npm install`.
+            2. **Action**: Reload VSCode / Restart TS Server.
+            3. **Status**: Pending User Verification
         - **[T-ENV-001]**: Node.js Version Mismatch
             1. **Root Cause**: Next.js 15 requires Node >= 18, but system uses v16.
             2. **Action**: Found valid Node v20 environment at `/Volumes/BriteBrain/IDE/nvm`.

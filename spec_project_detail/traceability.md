@@ -39,4 +39,9 @@
         - **UI/UX**: `LoadingOverlay` component.
         - **Logic**: Wrap `fetchProjectData` with `setLoading(true/false)`.
     - **Confirmed Behavior**: Screen blurs and shows spinner while data is loading.
+- [ ] **[T-003-EX-20] Fix Leave Keyword Detection**
+    - **Concept/Goal**: Prevent false positives on leave detection (e.g., 'ทางลาด').
+    - **Implementation Details**:
+        - **Logic**: Update `NON_WORK_KEYWORDS` in `page.tsx` to `['ลางาน', 'ประชุม', 'meeting']`.
+    - **Confirmed Behavior**: 'ทางลาด' input is unlocked; 'ลางาน' input is locked.
 ```

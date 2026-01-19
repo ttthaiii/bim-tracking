@@ -25,6 +25,7 @@
     - **Deletion**: Uses "Soft Delete" strategy (status="deleted") to maintain audit trail.
     - **Validation**: Progress input is strictly bounded by previous and next day's entries.
     - **Future Date Filtering**: Restricts future date task selection to "Leave" (ลางาน) only.
+    - **Keyword Logic**: Uses specific keyword "ลางาน" to identify leave tasks, preventing false positives (e.g., "ทางลาด").
 
 ### [F-004] Project Management
 - **Description**: Manage projects.
