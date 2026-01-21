@@ -143,7 +143,7 @@
 
 ## 6. Task Assignment Page (`/task-assignment`)
 - [x] [T-006] Task Assignment Features (F-006)
-- [ ] [T-020] Task Table Loading State (F-009)
+- [x] [T-020] Task Table Loading State (F-009)
     - **Goal**: Add visual feedback (blur + spinner) during data fetching.
     - **Priority**: High (UX)
 

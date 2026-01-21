@@ -56,7 +56,7 @@ const formatDateForDisplay = (dateString: string): string => {
   }).format(date).replace(/ /g, '/');
 };
 
-const NON_WORK_KEYWORDS = ['ลางาน', 'ประชุม', 'meeting'];
+const NON_WORK_KEYWORDS = ['ลางาน', 'ลาป่วย', 'ลากิจ', 'ลาพักร้อน', 'ประชุม', 'meeting'];
 
 // T-003-EX-19 Strict Leave keywords
 const LEAVE_KEYWORDS = ['ลางาน'];
