@@ -45,9 +45,12 @@ const formatSubtaskDisplay = (subtask: Subtask, projects: Project[]): string => 
   // Fix: Show item only if it's not empty and not "N/A"
   const showItem = item && item !== 'N/A';
 
+  // [T-028] Normalize subtask ID to uppercase for display
+  const subtaskIdDisplay = (subtask.id || '').toUpperCase();
+
   return showItem ?
-    `${projectDisplay} - ${taskName} - ${subTaskName} - ${item}${internalRev}` :
-    `${projectDisplay} - ${taskName} - ${subTaskName}${internalRev}`;
+    `${projectDisplay} - ${taskName} - ${subTaskName} - ${item}${internalRev} (${subtaskIdDisplay})` :
+    `${projectDisplay} - ${taskName} - ${subTaskName}${internalRev} (${subtaskIdDisplay})`;
 };
 
 // Custom styles for react-select to match the UI

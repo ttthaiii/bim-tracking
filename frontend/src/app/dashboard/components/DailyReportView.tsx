@@ -95,6 +95,11 @@ export default function DailyReportView() {
 
                 while (currentDate <= loopEnd) {
                     // Fix: Use local time for date string to avoid timezone shift (which caused duplicate keys)
+                    const now = new Date();
+                    now.setHours(0, 0, 0, 0);
+
+                    // Re-calculate local time string to prevent timezone issues
+                    // We must match the date string format used in 'enrichedData' keys or id generation
                     const y = currentDate.getFullYear();
                     const m = String(currentDate.getMonth() + 1).padStart(2, '0');
                     const d = String(currentDate.getDate()).padStart(2, '0');
@@ -112,6 +117,8 @@ export default function DailyReportView() {
                         // Determine generic status for missing day
                         const dayOfWeek = currentDate.getDay();
                         const isHoliday = dayOfWeek === 0; // Sunday
+                        // [T-022-EX-1] Fix: Check Future Date Logic Client-Side
+                        const isFuture = currentDate > now;
 
                         allDates.push({
                             id: `${selectedAssignee}-${dateStr}`,
@@ -120,8 +127,8 @@ export default function DailyReportView() {
                             date: new Date(currentDate),
                             totalWorkingHours: 0,
                             totalOT: 0,
-                            status: isHoliday ? 'Holiday' : 'Missing'
-                        });
+                            status: isFuture ? 'Future' : (isHoliday ? 'Holiday' : 'Missing')
+                        } as any); // Cast as any because 'Future' might not be fully typed in local state interfaces yet
                     }
                     // Next day
                     currentDate.setDate(currentDate.getDate() + 1);
@@ -239,10 +246,13 @@ export default function DailyReportView() {
                             onChange={(e) => setSelectedStatus(e.target.value)}
                         >
                             <option value="All">All Status</option>
+                            <option value="All">All Status</option>
                             <option value="Normal">Normal (ปกติ)</option>
                             <option value="Abnormal">Abnormal (ผิดปกติ)</option>
                             <option value="Holiday">Holiday (วันหยุด)</option>
                             <option value="Missing">Missing (ขาดส่ง)</option>
+                            <option value="Future">Future (ยังไม่ถึงกำหนด)</option>
+                            <option value="Leave">Leave (ลางาน)</option>
                         </select>
                     </div>
                 </div>
@@ -255,33 +265,33 @@ export default function DailyReportView() {
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead>
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[80px]">No.</th>
+                                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-[80px]">No.</th>
                                 <th
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                    className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                                     onClick={() => handleSort('fullName')}
                                 >
                                     Employee Name <SortIcon colKey="fullName" />
                                 </th>
                                 <th
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                    className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                                     onClick={() => handleSort('date')}
                                 >
                                     Date <SortIcon colKey="date" />
                                 </th>
                                 <th
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                    className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                                     onClick={() => handleSort('totalWorkingHours')}
                                 >
                                     Total Working Hours <SortIcon colKey="totalWorkingHours" />
                                 </th>
                                 <th
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                    className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                                     onClick={() => handleSort('totalOT')}
                                 >
                                     Total OT <SortIcon colKey="totalOT" />
                                 </th>
                                 <th
-                                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                                    className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                                     onClick={() => handleSort('status')}
                                 >
                                     Status <SortIcon colKey="status" />
@@ -308,28 +318,47 @@ export default function DailyReportView() {
                                     <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">No data found</td>
                                 </tr>
                             ) : (
-                                displayedEntries.map((entry, index) => (
-                                    <tr key={entry.id}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-[80px]">{index + 1}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{entry.fullName}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {entry.date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.totalWorkingHours.toFixed(2)} hrs</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{entry.totalOT.toFixed(2)} hrs</td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                displayedEntries.map((entry, index) => {
+                                    // [T-022] Future State Styling
+                                    const isFuture = (entry.status as any) === 'Future';
+                                    const isLeave = (entry.status as any) === 'Leave';
+
+                                    // [T-022-EX-2] Fix Name Mapping Race Condition
+                                    // Resolve name at render time to ensure latest 'users' list is used
+                                    const userObj = users.find(u => u.employeeId === entry.employeeId);
+                                    const displayName = userObj?.fullName || entry.fullName || entry.employeeId;
+
+                                    return (
+                                        <tr key={entry.id} className={isFuture ? 'bg-gray-50 opacity-60' : ''}>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-[80px]">{index + 1}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{displayName}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                                {entry.date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                {isFuture ? '-' : `${entry.totalWorkingHours.toFixed(2)} hrs`}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                {isFuture ? '-' : `${entry.totalOT.toFixed(2)} hrs`}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-center">
+                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                         ${entry.status === 'Normal' ? 'bg-green-100 text-green-800' :
-                                                    entry.status === 'Abnormal' ? 'bg-orange-100 text-orange-800' :
-                                                        entry.status === 'Missing' ? 'bg-red-200 text-red-900 border border-red-300' :
-                                                            'bg-gray-100 text-gray-800'}`}>
-                                                {entry.status === 'Normal' ? 'ปกติ' :
-                                                    entry.status === 'Abnormal' ? 'ผิดปกติ' :
-                                                        entry.status === 'Missing' ? 'ขาดส่ง' : 'วันหยุด'}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                ))
+                                                        entry.status === 'Abnormal' ? 'bg-orange-100 text-orange-800' :
+                                                            entry.status === 'Missing' ? 'bg-red-200 text-red-900 border border-red-300' :
+                                                                (entry.status as any) === 'Future' ? 'bg-gray-200 text-gray-500' :
+                                                                    (entry.status as any) === 'Leave' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                                                                        'bg-gray-100 text-gray-800'}`}>
+                                                    {entry.status === 'Normal' ? 'ปกติ' :
+                                                        entry.status === 'Abnormal' ? 'ผิดปกติ' :
+                                                            entry.status === 'Missing' ? 'ขาดส่ง' :
+                                                                (entry.status as any) === 'Future' ? 'ยังไม่ถึงกำหนด' :
+                                                                    (entry.status as any) === 'Leave' ? 'ลางาน' : 'วันหยุด'}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    )
+                                })
                             )}
                         </tbody>
                     </table>

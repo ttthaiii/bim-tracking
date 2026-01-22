@@ -21,6 +21,7 @@ import { getCachedProjects, getCachedTasks, getCachedSubtasks } from '@/services
 import { calculateDeadlineStatus } from '@/utils/deadlineCalculator';
 import { uploadTaskEditAttachment } from '@/services/uploadService';
 import LoadingOverlay from '@/components/LoadingOverlay';
+import { checkTaskHasDailyReports } from '@/services/taskService'; // [T-021] Import Deletion Guard
 
 interface TaskItem {
   id: string;
@@ -627,7 +628,8 @@ export default function TaskAssignment() {
   const generateSubTaskNumber = async (taskId: string) => {
     try {
       const taskDoc = await getDoc(doc(db, 'tasks', taskId));
-      const taskNumber = taskDoc.data()?.taskNumber;
+      // [T-028] Normalize taskNumber to uppercase
+      const taskNumber = taskDoc.data()?.taskNumber?.toUpperCase();
 
       if (!taskNumber) return null;
 
@@ -651,7 +653,8 @@ export default function TaskAssignment() {
       const nextRunningNumber = maxRunningNumber + 1;
       const paddedNumber = nextRunningNumber.toString().padStart(2, '0');
 
-      return `${taskNumber}-${paddedNumber}`;
+      // [T-028] Ensure final subtask ID is uppercase
+      return `${taskNumber}-${paddedNumber}`.toUpperCase();
     } catch (error) {
       console.error('Error generating subtask number:', error);
       return null;
@@ -752,6 +755,21 @@ export default function TaskAssignment() {
 
   // ✅ Function สำหรับลบ Task
   const handleDeleteTask = async (taskId: string) => {
+    // [T-021] Pre-check: ตรวจสอบว่ามี Daily Report หรือไม่
+    try {
+      const hasReports = await checkTaskHasDailyReports(taskId);
+      if (hasReports) {
+        setErrorMessage('ไม่สามารถลบงานนี้ได้ เนื่องจากมีการลงเวลาทำงาน (Daily Report) แล้ว');
+        setShowErrorModal(true);
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking task usage:', error);
+      setErrorMessage('เกิดข้อผิดพลาดในการตรวจสอบข้อมูลงาน');
+      setShowErrorModal(true);
+      return;
+    }
+
     // confirm() เป็น pop-up สำหรับ "ยืนยัน" ไม่ใช่ "แจ้งเตือน" จะคงไว้ตามเดิม
     if (!confirm('คุณต้องการลบ Task นี้หรือไม่?')) return;
 
@@ -1656,7 +1674,8 @@ export default function TaskAssignment() {
                       >
                         {/* SUBTASK ID - ไม่แก้ไข */}
                         <td className="px-2 py-2 text-xs text-gray-900 whitespace-normal break-words">
-                          {subtask.subTaskNumber}
+                          {/* [T-028] Display subtask ID in uppercase */}
+                          {subtask.subTaskNumber.toUpperCase()}
                           {isEdited && (
                             <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                               แก้ไขแล้ว

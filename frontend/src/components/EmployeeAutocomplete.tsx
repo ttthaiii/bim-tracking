@@ -57,6 +57,10 @@ const styles: StylesConfig<EmployeeOption, false> = {
     fontSize: '13px',
     color: '#1f2937',
   }),
+  menu: (provided) => ({
+    ...provided,
+    zIndex: 50,
+  }),
 };
 
 export const EmployeeAutocomplete: React.FC<EmployeeAutocompleteProps> = ({

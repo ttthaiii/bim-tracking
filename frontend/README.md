@@ -2,7 +2,14 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Before running the development server, setup NVM path:
+
+```bash
+export NVM_DIR="/Volumes/BriteBrain/IDE/nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+```
+
+Then, run the development server:
 
 ```bash
 npm run dev

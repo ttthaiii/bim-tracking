@@ -112,7 +112,7 @@ export const getEmployeeDailyReportEntries = async (
           allEntries.push({
             id: uniqueEntryId,
             employeeId: log.employeeId || data.employeeId,
-            subtaskId: log.subtaskId || data.subtaskId,
+            subtaskId: log.subtaskId || data.subtaskId || entrySubtaskId,
             subtaskPath,
             assignDate: assignDate,
             normalWorkingHours: `${Math.floor(log.day)}:${Math.round((log.day % 1) * 60)}`,
@@ -236,6 +236,9 @@ export const saveDailyReportEntries = async (
     }
 
     for (const entry of validEntries) {
+      // [T-028] Normalize subtaskId to uppercase before saving
+      const normalizedSubtaskId = entry.subtaskId?.toUpperCase();
+
       // Path to the subtask document, e.g., /projects/XYZ/tasks/ABC/subtasks/123
       const subtaskDocPath = entry.subtaskPath!;
 
@@ -249,7 +252,7 @@ export const saveDailyReportEntries = async (
       // This should only contain metadata about the task and employee, not logs.
       const dailyReportMainData = {
         employeeId: entry.employeeId,
-        subtaskId: entry.subtaskId,
+        subtaskId: normalizedSubtaskId,
         // Fields below are for easier querying/display if needed
         taskName: entry.taskName || '',
         subTaskName: entry.subTaskName || '',
@@ -299,8 +302,9 @@ export const saveDailyReportEntries = async (
       if (entry.storagePath) {
         workLogData.storagePath = entry.storagePath;
       }
-      if (entry.subtaskId) {
-        workLogData.subtaskId = entry.subtaskId;
+      if (normalizedSubtaskId) {
+        // [T-028] Use normalized subtaskId
+        workLogData.subtaskId = normalizedSubtaskId;
       }
       if (entry.subtaskPath) {
         workLogData.subtaskPath = entry.subtaskPath;

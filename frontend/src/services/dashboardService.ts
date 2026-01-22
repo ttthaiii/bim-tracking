@@ -1,6 +1,7 @@
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Task } from '@/types/database';
+import { fetchAvailableSubtasksForEmployee } from './taskAssignService';
 
 export const STATUS_COLORS: Record<TaskStatusCategory, string> = {
   'เสร็จสิ้น': 'rgba(16, 185, 129, 0.8)',
@@ -303,7 +304,8 @@ export interface DailyReportSummary {
   date: Date;
   totalWorkingHours: number; // in hours
   totalOT: number; // in hours
-  status: 'Normal' | 'Abnormal' | 'Holiday' | 'Missing';
+  totalLeaveHours: number; // [T-025] New: Track hours specifically for Leave tasks
+  status: 'Normal' | 'Abnormal' | 'Holiday' | 'Missing' | 'Future' | 'Leave';
 }
 
 function parseTime(timeStr?: string): number {
@@ -330,7 +332,7 @@ export async function getAllDailyReportEntries(
     }
 
     const snapshot = await getDocs(q);
-    const summaryMap = new Map<string, DailyReportSummary>();
+    const summaryMap = new Map<string, DailyReportSummary & { hasLeaveTask: boolean; hasNonLeaveTask: boolean }>();
 
     // Helper to get summary or create new
     const getSummary = (empId: string, dateStr: string, dateObj: Date) => {
@@ -343,11 +345,24 @@ export async function getAllDailyReportEntries(
           date: dateObj,
           totalWorkingHours: 0,
           totalOT: 0,
-          status: 'Normal'
+          totalLeaveHours: 0,
+          status: 'Normal',
+          hasLeaveTask: false,
+          hasNonLeaveTask: false
         });
       }
       return summaryMap.get(key)!;
     };
+
+    // [T-003-EX-23] Whitelist Strategy: Fetch VALID subtasks for the assignee
+    // This catches both Soft Deletes (taskStatus='deleted') and Hard Deletes (doc missing)
+    let validSubtaskIds: Set<string> | null = null;
+    if (assignee) {
+      // Optimization: Only run whitelist check if filtering by specific assignee
+      const validSubtasks = await fetchAvailableSubtasksForEmployee(assignee);
+      // [T-028] Normalize subtask IDs to uppercase for Set comparison
+      validSubtaskIds = new Set(validSubtasks.map(s => s.id?.toUpperCase()));
+    }
 
     snapshot.forEach(docSnap => {
       const data = docSnap.data();
@@ -360,6 +375,39 @@ export async function getAllDailyReportEntries(
       const latestLogsByDate = new Map<string, any>();
 
       workhours.forEach((log: any) => {
+        // [T-003-EX-23] Exclude orphan data (Whitelist Check)
+        // If we have a whitelist (assignee selected), allow ONLY if subtaskId is in it.
+        // If no whitelist (view all), we skip this check for performance.
+        // Check for Leave Task (Bypass Whitelist)
+        const taskName = (log.taskName || data.taskName || '').toLowerCase();
+        const subTaskName = (log.subTaskName || data.subTaskName || '').toLowerCase();
+        const category = (log.subTaskCategory || data.subTaskCategory || '').toLowerCase();
+
+        // [T-024] Strict Leave Detection (Task Name)
+        // User Requirement: Catch "Task" = "ลางาน" (Leave). Do not rely on Subtask (e.g. "ลากิจ").
+        const isLeaveLog =
+          taskName.includes('ลางาน') ||
+          taskName.includes('leave') ||
+          category.includes('ลางาน') ||
+          category.includes('leave');
+        // Note: purposefully excluding subTaskName check if strictly following "Catch Task" instruction, 
+        // but keeping it is generally safer for legacy data. 
+        // However, based on "Catch Task... without caring about Subtask", 
+        // we prioritized TaskName. I will keep subTaskName as fallback but remove specific subtypes.
+
+        const isLeaveLogFinal = isLeaveLog || subTaskName.includes('ลางาน') || subTaskName.includes('leave');
+
+        if (validSubtaskIds) {
+          const rawSubtaskId = log.subtaskId || data.subtaskId;
+          // [T-028] Normalize subtaskId to uppercase for comparison
+          const logSubtaskId = rawSubtaskId?.toUpperCase();
+          // If subtaskId is MISSING or NOT in whitelist, skip it (Treat as Orphan)
+          // UNLESS it is a Leave task (we always want to show leave)
+          if ((!logSubtaskId || !validSubtaskIds.has(logSubtaskId)) && !isLeaveLogFinal) {
+            return;
+          }
+        }
+
         // Resolve Date
         let logDate: Date | null = null;
         let dateStr = '';
@@ -414,28 +462,73 @@ export async function getAllDailyReportEntries(
 
         const summary = getSummary(employeeId, dateStr, checkDate);
 
+
         const workingHours = typeof log.day === 'number' ? log.day : 0;
         const otHours = typeof log.ot === 'number' ? log.ot : 0;
 
         summary.totalWorkingHours += workingHours;
         summary.totalOT += otHours;
+
+        // [T-025] Strict Leave Detection Logic
+        // Check keywords in taskName ONLY
+        const taskName = (log.taskName || data.taskName || '').toLowerCase();
+
+        // Strict check for "ลางาน" or "Leave" in Task Name
+        const isLeave = taskName.includes('ลางาน') || taskName.includes('leave');
+
+        if (isLeave) {
+          summary.hasLeaveTask = true;
+          summary.totalLeaveHours += workingHours;
+        } else {
+          // Note: If not strict leave, we count as non-leave for mixed day detection if needed,
+          // though T-025 mainly cares about totalLeaveHours == 8
+          summary.hasNonLeaveTask = true;
+        }
       });
     });
+
+    const now = new Date();
+    // Reset time part of 'now' to ensure clean comparison with dateObj (which is 00:00:00)
+    now.setHours(0, 0, 0, 0);
 
     return Array.from(summaryMap.values()).map(summary => {
       // Determine Status
       const dayOfWeek = summary.date.getDay(); // 0 is Sunday
-      let status: 'Normal' | 'Abnormal' | 'Holiday' = 'Normal';
+      let status: 'Normal' | 'Abnormal' | 'Holiday' | 'Future' | 'Leave' = 'Normal';
 
-      if (dayOfWeek === 0) {
+
+      // [T-022] Future Date Logic
+      if (summary.date > now) {
+        status = 'Future';
+      } else if (dayOfWeek === 0) {
         status = 'Holiday';
-      } else if (summary.totalWorkingHours < 8) {
-        status = 'Abnormal';
       } else {
-        status = 'Normal';
+        // [T-025] New Status Determination Priority
+
+        // 1. Check strict Leave (Total Leave Hours MUST be 8)
+        if (summary.totalLeaveHours === 8) {
+          status = 'Leave' as any;
+        }
+        // 2. Check Abnormal (Total Working Hours < 8)
+        else if (summary.totalWorkingHours < 8) {
+          status = 'Abnormal';
+        }
+        // 3. Normal (Total >= 8 and not pure leave)
+        else {
+          status = 'Normal';
+        }
       }
 
-      return { ...summary, status };
+      return {
+        id: summary.id,
+        employeeId: summary.employeeId,
+        fullName: summary.fullName,
+        date: summary.date,
+        totalWorkingHours: summary.totalWorkingHours,
+        totalOT: summary.totalOT,
+        totalLeaveHours: summary.totalLeaveHours,
+        status: status as any
+      };
     }).sort((a, b) => b.date.getTime() - a.date.getTime()); // Newest first
 
   } catch (error) {

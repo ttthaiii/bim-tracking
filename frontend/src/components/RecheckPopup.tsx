@@ -16,6 +16,7 @@ interface RecheckPopupProps {
   dailyReportEntries: DailyReportEntry[];
   workDate: string;
   onEdit?: () => void;
+  deletedEntries?: DailyReportEntry[];  // Add deletedEntries prop
   debug?: {
     title: string;
     selectedDate: string;
@@ -32,6 +33,7 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   dailyReportEntries,
   workDate,
   onEdit,
+  deletedEntries = [], // Default to empty array
   debug
 }) => {
   // แปลง workDate string เป็น Date object
@@ -68,7 +70,7 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
   const totalHours = calculateTotalHours();
 
   // กรอง tasks ที่มี progress 100%
-  const completedTasks = dailyReportEntries.filter(task => 
+  const completedTasks = dailyReportEntries.filter(task =>
     parseInt(task.progress.replace('%', '')) === 100
   );
 
@@ -202,195 +204,226 @@ export const RecheckPopup: React.FC<RecheckPopupProps> = ({
           color: #d1d5db;
         }
       `}</style>
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl p-8 flex gap-8 shadow-2xl border border-orange-100" style={{ minWidth: '80vw', maxHeight: '90vh' }}>
-        {/* Left side - Calendar */}
-        <div className="w-full max-w-md">
-          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl p-4 shadow-lg">
-                    <Calendar
-            onChange={(value: Value) => setSelectedDate(value)}
-            value={selectedDate}
-            className="w-full border-0 rounded-xl shadow-md bg-white text-lg custom-calendar"
-            locale="en-GB"
-            formatShortWeekday={(locale, date) =>
-              date.toLocaleDateString('en-GB', { weekday: 'short' }).replace('.', '')
-            }
-            navigationLabel={({ date, view }) => {
-              if (view === 'month') {
-                return new Intl.DateTimeFormat('en-GB', {
-                  month: 'long',
-                  year: 'numeric',
-                }).format(date);
-              }
-              return '';
-            }}
-          />
-          </div>
-          <div className="mt-6 text-center bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-200">
-            <p className="font-semibold text-lg mb-2 text-orange-800">วันที่เลือก:</p>
-            <p className="text-lg text-orange-700">
-              {selectedDate instanceof Date
-                ? new Intl.DateTimeFormat('en-GB', {
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl p-8 flex gap-8 shadow-2xl border border-orange-100" style={{ minWidth: '80vw', maxHeight: '90vh' }}>
+          {/* Left side - Calendar */}
+          <div className="w-full max-w-md">
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl p-4 shadow-lg">
+              <Calendar
+                onChange={(value: Value) => setSelectedDate(value)}
+                value={selectedDate}
+                className="w-full border-0 rounded-xl shadow-md bg-white text-lg custom-calendar"
+                locale="en-GB"
+                formatShortWeekday={(locale, date) =>
+                  date.toLocaleDateString('en-GB', { weekday: 'short' }).replace('.', '')
+                }
+                navigationLabel={({ date, view }) => {
+                  if (view === 'month') {
+                    return new Intl.DateTimeFormat('en-GB', {
+                      month: 'long',
+                      year: 'numeric',
+                    }).format(date);
+                  }
+                  return '';
+                }}
+              />
+            </div>
+            <div className="mt-6 text-center bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-200">
+              <p className="font-semibold text-lg mb-2 text-orange-800">วันที่เลือก:</p>
+              <p className="text-lg text-orange-700">
+                {selectedDate instanceof Date
+                  ? new Intl.DateTimeFormat('en-GB', {
                     day: '2-digit',
                     month: 'short',
                     year: 'numeric',
                   })
                     .format(selectedDate)
                     .replace(/ /g, '/')
-                : ''}
-            </p>
-          </div>
-          
-          {/* กำกับสีในปฏิทิน */}
-          <div className="mt-4 space-y-3 text-sm bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-100">
-            <h4 className="font-semibold text-orange-800 mb-3">สีในปฏิทิน:</h4>
-            <div className="flex items-center space-x-3">
-              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-orange-500 to-orange-600 shadow-md"></div>
-              <span className="text-gray-700 font-medium">วันที่ปัจจุบัน</span>
+                  : ''}
+              </p>
             </div>
-            <div className="flex items-center space-x-3">
-              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-slate-400 to-slate-500 shadow-md"></div>
-              <span className="text-gray-700 font-medium">วันที่เลือก</span>
-            </div>
-          </div>
-        </div>
 
-        {/* Right side - Table */}
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <h2 className="text-2xl font-semibold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-orange-800">Drawing List</h2>
-          
-          <div className="overflow-x-auto flex-1">
-            <table className="w-full border-collapse rounded-xl overflow-hidden shadow-lg">
-              <thead>
-                <tr className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg">
-                  <th className="border border-orange-300 p-4 w-16 text-lg font-semibold first:rounded-tl-xl">No</th>
-                  <th className="border border-orange-300 p-4 w-1/3 text-lg font-semibold">Relate Drawing</th>
-                  <th className="border border-orange-300 p-4 w-40 text-lg font-semibold">เวลาทำงานปกติ</th>
-                  <th className="border border-orange-300 p-4 w-40 text-lg font-semibold">เวลาโอที</th>
-                  <th className="border border-orange-300 p-4 w-48 text-lg font-semibold">Progress</th>
-                  <th className="border border-orange-300 p-4 text-lg font-semibold last:rounded-tr-xl">Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dailyReportEntries.map((task, index) => (
-                  <tr key={task.id} className="hover:bg-gradient-to-r hover:from-orange-50 hover:to-amber-50 transition-all duration-200">
-                    <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">{index + 1}</td>
-                    <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.relateDrawing}</td>
-                    <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">
-                      {task.normalWorkingHours || '-'}
-                    </td>
-                    <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">
-                      {task.otWorkingHours || '-'}
-                    </td>
-                    <td className="border border-orange-200 p-4">
-                      <div className={`text-center rounded-full py-2 px-3 text-lg font-medium shadow-sm ${
-                        parseInt(task.progress) === 100 
-                          ? 'bg-gradient-to-r from-emerald-100 to-emerald-200 text-emerald-800 border border-emerald-300' 
-                          : parseInt(task.progress) > 0 
-                          ? 'bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 border border-amber-300'
-                          : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800 border border-gray-300'
-                      }`}>
-                        {task.oldProgress && task.oldProgress !== task.progress ? (
-                          <div className="flex flex-col items-center gap-1">
-                            <span className="text-sm text-gray-500 line-through">{task.oldProgress}</span>
-                            <span className="text-green-600">{task.progress}</span>
-                          </div>
-                        ) : (
-                          task.progress
-                        )}
-                      </div>
-                    </td>
-                    <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.note || '-'}</td>
-                  </tr>
-                ))}
-                <tr className="bg-gradient-to-r from-orange-100 to-amber-100 font-semibold border-t-2 border-orange-300">
-                  <td colSpan={2} className="border border-orange-200 p-4 text-right text-lg text-orange-800">รวมชั่วโมงทั้งหมด:</td>
-                  <td className="border border-orange-200 p-4 text-center text-lg text-orange-800">
-                    {dailyReportEntries.reduce((total, task) => {
-                      if (task.normalWorkingHours && task.normalWorkingHours !== '-') {
-                        const [hours, minutes] = task.normalWorkingHours.split(':').map(Number);
-                        return total + hours + (minutes / 60);
-                      }
-                      return total;
-                    }, 0).toFixed(2)} ชั่วโมง
-                  </td>
-                  <td className="border border-orange-200 p-4 text-center text-lg text-orange-800">
-                    {dailyReportEntries.reduce((total, task) => {
-                      if (task.otWorkingHours && task.otWorkingHours !== '-') {
-                        const [hours, minutes] = task.otWorkingHours.split(':').map(Number);
-                        return total + hours + (minutes / 60);
-                      }
-                      return total;
-                    }, 0).toFixed(2)} ชั่วโมง
-                  </td>
-                  <td colSpan={2} className="border border-orange-200 p-4"></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Debug Information Section */}
-          {debug && (
-            <div className="mt-6 p-4 bg-gray-100 rounded-xl border border-gray-300 text-sm space-y-2">
-              <h3 className="font-bold text-gray-700">{debug.title}</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-gray-600">Selected Date:</p>
-                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.selectedDate}</p>
-                </div>
-                <div>
-                  <p className="text-gray-600">System Date:</p>
-                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.currentSystemDate}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-gray-600">Entry Dates:</p>
-                  <div className="font-mono bg-white px-2 py-1 rounded">
-                    {debug.entriesToSubmitDates.map((date: string, i: number) => (
-                      <span key={i} className="inline-block mr-2">{date}</span>
-                    ))}
-                  </div>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-gray-600">Timestamp:</p>
-                  <p className="font-mono bg-white px-2 py-1 rounded">{debug.timestamp}</p>
-                </div>
+            {/* กำกับสีในปฏิทิน */}
+            <div className="mt-4 space-y-3 text-sm bg-gradient-to-r from-orange-50 to-amber-50 p-4 rounded-xl border border-orange-100">
+              <h4 className="font-semibold text-orange-800 mb-3">สีในปฏิทิน:</h4>
+              <div className="flex items-center space-x-3">
+                <div className="w-4 h-4 rounded-full bg-gradient-to-r from-orange-500 to-orange-600 shadow-md"></div>
+                <span className="text-gray-700 font-medium">วันที่ปัจจุบัน</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <div className="w-4 h-4 rounded-full bg-gradient-to-r from-slate-400 to-slate-500 shadow-md"></div>
+                <span className="text-gray-700 font-medium">วันที่เลือก</span>
               </div>
             </div>
-          )}
+          </div>
 
-          <div className="flex justify-end space-x-6 mt-8">
-            <button
-              onClick={() => {
-                onClose();
-                if (onEdit) onEdit();
-              }}
-              className="px-8 py-3 bg-white border-2 border-orange-300 rounded-xl hover:bg-orange-50 text-orange-700 text-lg font-medium shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105"
-            >
-              แก้ไขข้อมูล
-            </button>
-            <button
-              onClick={handleConfirmData}
-              className="px-8 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
-            >
-              ยืนยันข้อมูล
-              {completedTasks.length > 0 && (
-                <span className="ml-2 bg-white text-indigo-600 px-2 py-1 rounded-full text-sm font-bold">
-                  {completedTasks.length}
-                </span>
-              )}
-            </button>
+          {/* Right side - Table */}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <h2 className="text-2xl font-semibold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-orange-800">Drawing List</h2>
+
+            <div className="overflow-x-auto flex-1">
+              <table className="w-full border-collapse rounded-xl overflow-hidden shadow-lg">
+                <thead>
+                  <tr className="bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg">
+                    <th className="border border-orange-300 p-4 w-16 text-lg font-semibold first:rounded-tl-xl">No</th>
+                    <th className="border border-orange-300 p-4 w-1/3 text-lg font-semibold">Relate Drawing</th>
+                    <th className="border border-orange-300 p-4 w-40 text-lg font-semibold">เวลาทำงานปกติ</th>
+                    <th className="border border-orange-300 p-4 w-40 text-lg font-semibold">เวลาโอที</th>
+                    <th className="border border-orange-300 p-4 w-48 text-lg font-semibold">Progress</th>
+                    <th className="border border-orange-300 p-4 text-lg font-semibold last:rounded-tr-xl">Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyReportEntries.map((task, index) => (
+                    <tr key={task.id} className="hover:bg-gradient-to-r hover:from-orange-50 hover:to-amber-50 transition-all duration-200">
+                      <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">{index + 1}</td>
+                      <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.relateDrawing}</td>
+                      <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">
+                        {task.normalWorkingHours || '-'}
+                      </td>
+                      <td className="border border-orange-200 p-4 text-center text-lg text-gray-900">
+                        {task.otWorkingHours || '-'}
+                      </td>
+                      <td className="border border-orange-200 p-4">
+                        <div className={`text-center rounded-full py-2 px-3 text-lg font-medium shadow-sm ${parseInt(task.progress) === 100
+                          ? 'bg-gradient-to-r from-emerald-100 to-emerald-200 text-emerald-800 border border-emerald-300'
+                          : parseInt(task.progress) > 0
+                            ? 'bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 border border-amber-300'
+                            : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800 border border-gray-300'
+                          }`}>
+                          {task.oldProgress && task.oldProgress !== task.progress ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="text-sm text-gray-500 line-through">{task.oldProgress}</span>
+                              <span className="text-green-600">{task.progress}</span>
+                            </div>
+                          ) : (
+                            task.progress
+                          )}
+                        </div>
+                      </td>
+                      <td className="border border-orange-200 p-4 text-lg text-gray-900">{task.note || '-'}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-gradient-to-r from-orange-100 to-amber-100 font-semibold border-t-2 border-orange-300">
+                    <td colSpan={2} className="border border-orange-200 p-4 text-right text-lg text-orange-800">รวมชั่วโมงทั้งหมด:</td>
+                    <td className="border border-orange-200 p-4 text-center text-lg text-orange-800">
+                      {dailyReportEntries.reduce((total, task) => {
+                        if (task.normalWorkingHours && task.normalWorkingHours !== '-') {
+                          const [hours, minutes] = task.normalWorkingHours.split(':').map(Number);
+                          return total + hours + (minutes / 60);
+                        }
+                        return total;
+                      }, 0).toFixed(2)} ชั่วโมง
+                    </td>
+                    <td className="border border-orange-200 p-4 text-center text-lg text-orange-800">
+                      {dailyReportEntries.reduce((total, task) => {
+                        if (task.otWorkingHours && task.otWorkingHours !== '-') {
+                          const [hours, minutes] = task.otWorkingHours.split(':').map(Number);
+                          return total + hours + (minutes / 60);
+                        }
+                        return total;
+                      }, 0).toFixed(2)} ชั่วโมง
+                    </td>
+                    <td colSpan={2} className="border border-orange-200 p-4"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Deleted Items Section */}
+            {deletedEntries.length > 0 && (
+              <div className="mb-4 mt-6">
+                <h3 className="text-xl font-semibold mb-2 text-red-600 flex items-center">
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  รายการที่จะถูกลบ ({deletedEntries.length})
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse rounded-xl overflow-hidden shadow-sm border border-red-200">
+                    <thead className="bg-red-50">
+                      <tr>
+                        <th className="border border-red-100 p-3 text-left text-sm font-semibold text-red-800">Relate Drawing</th>
+                        <th className="border border-red-100 p-3 text-left text-sm font-semibold text-red-800">Progress</th>
+                        <th className="border border-red-100 p-3 text-left text-sm font-semibold text-red-800">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deletedEntries.map((task, index) => (
+                        <tr key={`del-${task.id}`} className="bg-red-50/30">
+                          <td className="border border-red-100 p-3 text-sm text-gray-600 font-medium">{task.relateDrawing}</td>
+                          <td className="border border-red-100 p-3 text-sm text-gray-600">{task.progress}</td>
+                          <td className="border border-red-100 p-3 text-sm text-gray-600">{task.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Debug Information Section */}
+            {debug && (
+              <div className="mt-6 p-4 bg-gray-100 rounded-xl border border-gray-300 text-sm space-y-2">
+                <h3 className="font-bold text-gray-700">{debug.title}</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-gray-600">Selected Date:</p>
+                    <p className="font-mono bg-white px-2 py-1 rounded">{debug.selectedDate}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">System Date:</p>
+                    <p className="font-mono bg-white px-2 py-1 rounded">{debug.currentSystemDate}</p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-gray-600">Entry Dates:</p>
+                    <div className="font-mono bg-white px-2 py-1 rounded">
+                      {debug.entriesToSubmitDates.map((date: string, i: number) => (
+                        <span key={i} className="inline-block mr-2">{date}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-gray-600">Timestamp:</p>
+                    <p className="font-mono bg-white px-2 py-1 rounded">{debug.timestamp}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end space-x-6 mt-8">
+              <button
+                onClick={() => {
+                  onClose();
+                  if (onEdit) onEdit();
+                }}
+                className="px-8 py-3 bg-white border-2 border-orange-300 rounded-xl hover:bg-orange-50 text-orange-700 text-lg font-medium shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105"
+              >
+                แก้ไขข้อมูล
+              </button>
+              <button
+                onClick={handleConfirmData}
+                className="px-8 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105"
+              >
+                ยืนยันข้อมูล
+                {completedTasks.length > 0 && (
+                  <span className="ml-2 bg-white text-indigo-600 px-2 py-1 rounded-full text-sm font-bold">
+                    {completedTasks.length}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Upload Popup */}
-      <UploadPopup
-        isOpen={showUploadPopup}
-        onClose={() => setShowUploadPopup(false)}
-        onComplete={handleUploadComplete}
-        completedTasks={completedTasks}
-      />
-    </div>
+        {/* Upload Popup */}
+        <UploadPopup
+          isOpen={showUploadPopup}
+          onClose={() => setShowUploadPopup(false)}
+          onComplete={handleUploadComplete}
+          completedTasks={completedTasks}
+        />
+      </div>
     </>
   );
 }

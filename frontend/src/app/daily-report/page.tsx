@@ -557,13 +557,34 @@ export default function DailyReport() {
       );
       setFilteredSubtasks(leaveTasks);
     } else {
-      // วันปัจจุบัน/อดีต: กรองงานที่เสร็จแล้วออก (progress === 100)
-      const incompleteTasks = availableSubtasks.filter(
-        subtask => (subtask.subTaskProgress || 0) < 100
-      );
-      setFilteredSubtasks(incompleteTasks);
+      // วันปัจจุบัน/อดีต: แสดงงานที่ยังไม่เสร็จ (progress < 100)
+      // หรืองานที่เสร็จแล้ว (progress === 100) แต่ ณ วันที่เลือก (workDate) มันยังไม่เสร็จ (Retroactive Edit)
+      const validTasks = availableSubtasks.filter(subtask => {
+        const currentGlobalProgress = subtask.subTaskProgress || 0;
+        if (currentGlobalProgress < 100) return true;
+
+        // ถ้า Global บอกว่าเสร็จแล้ว (100%) ให้เช็คประวัติย้อนหลัง
+        // ถ้า ณ วันที่ workDate งานนี้ยังไม่เสร็จ (Progress ก่อนหน้านั้น < 100) ให้แสดงให้เลือกได้
+        // โดยเช็คจาก Log ล่าสุดที่ *ก่อน* วันที่เลือก
+        const prevLogs = allDailyEntries.filter(e =>
+          e.subtaskId === subtask.id &&
+          e.assignDate < workDate &&
+          e.status !== 'deleted'
+        );
+
+        if (prevLogs.length === 0) return true; // ไม่เคยมี Log มาก่อน = ยังไม่เสร็จ ณ ตอนนั้น
+
+        // Sort desc date
+        prevLogs.sort((a, b) => b.assignDate.localeCompare(a.assignDate));
+        const lastLog = prevLogs[0];
+        const lastProgress = parseInt(lastLog.progress.replace('%', ''), 10) || 0;
+
+        return lastProgress < 100;
+      });
+
+      setFilteredSubtasks(validTasks);
     }
-  }, [isFutureDate, availableSubtasks]);
+  }, [isFutureDate, availableSubtasks, allDailyEntries, workDate]);
 
   // Effect สำหรับโหลดข้อมูลจาก allDailyEntries หรือ cache เมื่อเปลี่ยนวันที่
   useEffect(() => {
@@ -688,6 +709,20 @@ export default function DailyReport() {
           if (subtask.item && subtask.item !== 'N/A') {
             relateDrawing += `_${subtask.item}`;
           }
+        } else if (!relateDrawing) {
+          // [T-003-EX-21] Fallback: ถ้าหา Subtask ปัจจุบันไม่เจอ (เช่น ถูกลบไปแล้ว) 
+          // ให้ใช้ข้อมูล Snapshot ที่บันทึกไว้ใน Entry แทน
+          const project = allProjects.find(p => p.id === (entry as any).projectId || p.id === entry.project) ||
+            allProjects.find(p => p.name === entry.project);
+
+          const abbr = project?.abbr || entry.project || 'N/A';
+          const taskName = entry.taskName || 'N/A';
+          const subTaskName = entry.subTaskName || 'N/A';
+
+          relateDrawing = `${abbr}_${taskName}_${subTaskName}`;
+          if (entry.item && entry.item !== 'N/A') {
+            relateDrawing += `_${entry.item}`;
+          }
         }
 
         const matchingUploadedFile = uploadedFiles.find(file =>
@@ -711,6 +746,8 @@ export default function DailyReport() {
           fileURL: entry.fileURL || matchingUploadedFile?.fileURL || '',
           storagePath: entry.storagePath || matchingUploadedFile?.storagePath || '',
           fileUploadedAt: resolvedFileUploadedAt,
+          // [T-003-EX-22] Orphan Check
+          isOrphan: !!entry.subtaskId && !subtask,
         };
       });
 
@@ -838,10 +875,8 @@ export default function DailyReport() {
       const newEntries = currentEntries.filter(entry => entry.id !== entryId);
       if (newEntries.length === 0) {
         const resetEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
-        setHasUnsavedChanges(computeHasUnsavedChanges([resetEntry]));
         return [resetEntry];
       }
-      setHasUnsavedChanges(computeHasUnsavedChanges(newEntries));
       return newEntries;
     });
   };
@@ -1323,10 +1358,12 @@ export default function DailyReport() {
                 <div className="flex flex-col">
                   <span className="text-sm font-semibold text-gray-800 mb-2">ระยะเวลาทำงานคงเหลือ</span>
                   {(() => {
-                    const totalWorkingHours = dailyReportEntries.reduce((total, entry) => {
-                      const [hours, minutes] = (entry.normalWorkingHours || '0:0').split(':').map(Number);
-                      return total + hours + minutes / 60;
-                    }, 0);
+                    const totalWorkingHours = dailyReportEntries
+                      .filter(entry => !(entry as any).isOrphan) // [T-003-EX-23] Filter out orphan entries
+                      .reduce((total, entry) => {
+                        const [hours, minutes] = (entry.normalWorkingHours || '0:0').split(':').map(Number);
+                        return total + hours + minutes / 60;
+                      }, 0);
 
                     const remainingHours = Math.max(0, 8 - totalWorkingHours);
                     const hours = Math.floor(remainingHours);
@@ -1403,7 +1440,7 @@ export default function DailyReport() {
                 <div className="flex flex-col h-[calc(100vh-300px)]">
                   <div className="flex-grow overflow-x-auto overflow-y-auto">
                     <table className="w-full border-collapse text-xs">
-                      <thead className="sticky top-0 bg-orange-500">
+                      <thead className="sticky top-0 bg-orange-500 z-20">
                         <tr className="text-white">
                           <th className="p-2 font-semibold text-left w-10">No</th>
                           <th className="p-2 font-semibold text-left w-1/3">Relate Drawing</th>
@@ -1430,19 +1467,33 @@ export default function DailyReport() {
                             file.subtaskId === entry.subtaskId &&
                             file.workDate === entry.assignDate
                           );
+
+                          // [T-003-EX-22] Orphan Styling
+                          const rowBaseClass = (entry as any).isOrphan
+                            ? 'bg-red-50'
+                            : 'bg-yellow-50';
+
+                          const textClass = (entry as any).isOrphan
+                            ? 'text-red-900 line-through'
+                            : 'text-gray-800';
+
                           return (
-                            <tr key={entry.id} className="bg-yellow-50 border-b border-yellow-200">
-                              <td className="p-2 border-r border-yellow-200 text-center text-gray-800">{index + 1}</td>
+                            <tr key={entry.id} className={`${rowBaseClass} border-b border-yellow-200`}>
+                              <td className={`p-2 border-r border-yellow-200 text-center ${textClass}`}>{index + 1}</td>
                               <td className="p-2 border-r border-yellow-200">
                                 {entry.subtaskId ? (
                                   <div className="text-gray-800">
-                                    {entry.relateDrawing}
-                                    <button
-                                      onClick={() => handleUpdateEntry(entry.id, { subtaskId: '', relateDrawing: '' })}
-                                      className="ml-2 text-red-500 hover:text-red-700"
-                                    >
-                                      ×
-                                    </button>
+                                    {/* [T-028] Display subtaskId in uppercase */}
+                                    {entry.relateDrawing} <span className="text-gray-400 text-[10px]">({entry.subtaskId.toUpperCase()})</span>
+                                    {/* Show clear button for new entries OR in edit mode [T-029] */}
+                                    {(editableRows.has(entry.id) || !entry.isExistingData) && (
+                                      <button
+                                        onClick={() => handleUpdateEntry(entry.id, { subtaskId: '', relateDrawing: '' })}
+                                        className="ml-2 text-red-500 hover:text-red-700"
+                                      >
+                                        ×
+                                      </button>
+                                    )}
                                   </div>
                                 ) : (
                                   <SubtaskAutocomplete
@@ -1525,9 +1576,11 @@ export default function DailyReport() {
                                       onBlur={() => handleProgressValidation(entry.id)}
                                       className={`w-14 p-1 border rounded-md text-center text-xs ${parseInt(entry.progress.replace('%', '')) === 100
                                         ? 'bg-green-100 border-green-400 text-green-800 font-bold'
-                                        : entry.isExistingData && !editableRows.has(entry.id)
-                                          ? 'bg-gray-100 border-gray-200 text-gray-700'
-                                          : 'border-gray-300 text-gray-900'
+                                        : entry.progressError
+                                          ? 'bg-red-50 border-red-500 text-red-900'
+                                          : entry.isExistingData && !editableRows.has(entry.id)
+                                            ? 'bg-gray-100 border-gray-200 text-gray-700'
+                                            : 'border-gray-300 text-gray-900'
                                         }`}
                                       disabled={Boolean(isReadOnly || entry.isLeaveTask || isFutureDate || (entry.isExistingData && !editableRows.has(entry.id)))}
                                     />
@@ -1661,7 +1714,16 @@ export default function DailyReport() {
           onClose={() => setIsRecheckOpen(false)}
           onConfirm={handleConfirmSubmit}
           dailyReportEntries={entriesToSubmit}
+          deletedEntries={deletedEntries} // Pass deleted entries
           workDate={workDate}
+          onEdit={() => setIsRecheckOpen(false)}
+          debug={{
+            title: "Debug Info",
+            selectedDate: workDate,
+            currentSystemDate: new Date().toISOString().split('T')[0],
+            entriesToSubmitDates: entriesToSubmit.map(e => e.assignDate),
+            timestamp: new Date().toLocaleTimeString()
+          }}
         />
         <FilePreviewModal
           isOpen={isPreviewOpen}
