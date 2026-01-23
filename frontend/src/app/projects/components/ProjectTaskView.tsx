@@ -150,7 +150,7 @@ const generateTaskId = (projectAbbr: string, activityName: string, existingRows:
     }
   }
   const runningNo = String(currentCounter).padStart(3, '0');
-  return `TTS-BIM-${projectAbbr}-${activityOrder}-${runningNo}`;
+  return `TTS-BIM-${projectAbbr.toUpperCase()}-${activityOrder}-${runningNo}`;
 };
 
 const translateStatus = (status: string, isWorkRequest: boolean = false): string => {
@@ -898,34 +898,34 @@ const ProjectsPage = () => {
       await Promise.all(updatePromises);
       let finalRows = [...rows];
       const rowsToCreate = rows.filter(r => !r.firestoreId && !r.id && r.relateDrawing && r.activity);
-      
+
       // ✅ ========== โค้ดส่วนที่แก้ไขแล้ว ========== ✅
       if (rowsToCreate.length > 0) {
         const createdRows: TaskRow[] = [];
-        
+
         // เราต้องใช้ for...of loop เพราะเราต้อง 'await' ทีละตัว
         // เพื่อให้เลข counter ที่ได้จาก server ไม่ซ้ำกัน
         for (const row of rowsToCreate) {
           try {
             // 1. โทรหา Backend เพื่อขอเลขใหม่ (Atomic)
             const newCounter = await getNextTaskCounter(selectedProject);
-            
+
             // 2. สร้าง ID โดยใช้เลขที่ปลอดภัยแล้ว
             const taskId = generateTaskId(currentProject.abbr, row.activity, rows, activities, newCounter);
-            
+
             // 3. สร้าง Task (ซึ่งจะใช้ taskId เป็น Document ID)
             await createTask(selectedProject, { ...row, id: taskId, rev: row.lastRev || '00' });
-            
+
             // 4. เก็บผลลัพธ์เพื่ออัปเดตตาราง
             createdRows.push({ ...row, id: taskId, firestoreId: taskId }); // firestoreId ก็คือ taskId
-          
+
           } catch (error) {
             console.error("Error creating task one by one:", error);
             // หยุดการสร้างทันทีถ้ามีข้อผิดพลาด
             throw new Error(`Failed to create task: ${row.relateDrawing}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
           }
         }
-      // ✅ ========== สิ้นสุดโค้ดที่แก้ไขแล้ว ========== ✅
+        // ✅ ========== สิ้นสุดโค้ดที่แก้ไขแล้ว ========== ✅
 
         finalRows = rows.map(row => {
           const created = createdRows.find(cr => cr.relateDrawing === row.relateDrawing && !row.firestoreId);
@@ -1039,10 +1039,10 @@ const ProjectsPage = () => {
         if (options.startDate && options.endDate) {
           start = new Date(options.startDate);
           end = new Date(options.endDate);
-          
+
           // ✅ 2. ลบบรรทัด 'beforeFilter' ที่ไม่ได้ใช้งาน
           // const beforeFilter = filteredRows.length; // <--- ลบบรรทัดนี้
-          
+
           filteredRows = filteredRows.filter(r => {
             const taskStart = new Date(r.startDate);
             const taskEnd = new Date(r.dueDate);

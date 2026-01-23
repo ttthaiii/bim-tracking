@@ -3,7 +3,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 
 // ✅ 1. เพิ่ม import 'onCall' และ 'CallableRequest'
-import { onCall, CallableRequest } from "firebase-functions/v2/https";
+import { onCall, CallableRequest, onRequest } from "firebase-functions/v2/https";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -27,10 +27,10 @@ export const aggregateSubtaskData = onDocumentWritten(
 
     const { taskId, subtaskId } = event.params;
     const subtaskDocRef = db.doc(`tasks/${taskId}/subtasks/${subtaskId}`);
-    
+
     const [subtaskDoc, reportsSnapshot] = await Promise.all([
-        subtaskDocRef.get(),
-        subtaskDocRef.collection("dailyReport").get()
+      subtaskDocRef.get(),
+      subtaskDocRef.collection("dailyReport").get()
     ]);
 
     if (!subtaskDoc.exists) {
@@ -42,74 +42,74 @@ export const aggregateSubtaskData = onDocumentWritten(
 
     let allWorkEntries: any[] = [];
     reportsSnapshot.forEach(doc => {
-        const reportData = doc.data();
-        const workhours = reportData.workhours; 
+      const reportData = doc.data();
+      const workhours = reportData.workhours;
 
-        if (Array.isArray(workhours)) {
-            workhours.forEach((entry: any) => {
-                if (entry.timestamp && typeof entry.timestamp.toDate === 'function') {
-                    allWorkEntries.push({ ...entry, timestamp: entry.timestamp.toDate() });
-                } else {
-                    logger.warn("Found a work entry with invalid or missing timestamp:", entry);
-                }
-            });
-        }
+      if (Array.isArray(workhours)) {
+        workhours.forEach((entry: any) => {
+          if (entry.timestamp && typeof entry.timestamp.toDate === 'function') {
+            allWorkEntries.push({ ...entry, timestamp: entry.timestamp.toDate() });
+          } else {
+            logger.warn("Found a work entry with invalid or missing timestamp:", entry);
+          }
+        });
+      }
     });
     logger.info(`Found a total of ${allWorkEntries.length} work hour entries.`);
 
     if (allWorkEntries.length === 0) {
-        logger.info("No work entries found. Resetting subtask values.");
-        await subtaskDocRef.update({ 
-            mhOD: 0, 
-            mhOT: 0, 
-            subTaskProgress: 0, 
-            startDate: null, 
-            endDate: null, 
-            lastUpdate: null, 
-            wlRemaining: getWlFromScale(subtaskData.subTaskScale) 
-        });
-        return;
+      logger.info("No work entries found. Resetting subtask values.");
+      await subtaskDocRef.update({
+        mhOD: 0,
+        mhOT: 0,
+        subTaskProgress: 0,
+        startDate: null,
+        endDate: null,
+        lastUpdate: null,
+        wlRemaining: getWlFromScale(subtaskData.subTaskScale)
+      });
+      return;
     }
 
     allWorkEntries.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
     const firstEntry = allWorkEntries[0];
     const lastEntry = allWorkEntries[allWorkEntries.length - 1];
-    
+
     const startDate = firstEntry.timestamp;
     const lastUpdate = lastEntry.timestamp;
     const subTaskProgress = lastEntry.progress || 0;
-    
+
     const finalReportEntry = allWorkEntries.slice().reverse().find(e => e.progress === 100);
     const endDate = finalReportEntry ? finalReportEntry.timestamp : null;
-    
+
     const totals = allWorkEntries.reduce((acc, entry) => {
-        acc.mhOD += entry.day || 0;
-        acc.mhOT += entry.ot || 0;
-        return acc;
+      acc.mhOD += entry.day || 0;
+      acc.mhOT += entry.ot || 0;
+      return acc;
     }, { mhOD: 0, mhOT: 0 });
-    
+
     const wlFromscale = getWlFromScale(subtaskData.subTaskScale);
     const wlRemaining = wlFromscale * (1 - (subTaskProgress / 100));
 
-    const updatePayload = { 
-        subTaskNumber: subtaskId, // <-- KEY CHANGE: Ensure subTaskNumber matches the document ID
-        startDate, 
-        endDate, 
-        lastUpdate, 
-        mhOD: totals.mhOD, 
-        mhOT: totals.mhOT, 
-        subTaskProgress, 
-        wlFromscale, 
-        wlRemaining 
+    const updatePayload = {
+      subTaskNumber: subtaskId, // <-- KEY CHANGE: Ensure subTaskNumber matches the document ID
+      startDate,
+      endDate,
+      lastUpdate,
+      mhOD: totals.mhOD,
+      mhOT: totals.mhOT,
+      subTaskProgress,
+      wlFromscale,
+      wlRemaining
     };
     logger.info("Final payload to be updated:", updatePayload);
 
     try {
-        await subtaskDocRef.update(updatePayload);
-        logger.info(`✅ Successfully updated subtask '${subtaskId}'!`);
+      await subtaskDocRef.update(updatePayload);
+      logger.info(`✅ Successfully updated subtask '${subtaskId}'!`);
     } catch (error) {
-        logger.error(`❌ Error updating subtask '${subtaskId}':`, error);
+      logger.error(`❌ Error updating subtask '${subtaskId}':`, error);
     }
   }
 );
@@ -163,7 +163,7 @@ export const aggregateTaskData = onDocumentWritten(
 
       if (subtask.startDate?.toDate) startDates.push(subtask.startDate.toDate());
       if (subtask.lastUpdate?.toDate) lastUpdates.push(subtask.lastUpdate.toDate());
-      
+
       if (subtask.subTaskProgress < 100) {
         allSubtasksAreDone = false;
       }
@@ -175,9 +175,9 @@ export const aggregateTaskData = onDocumentWritten(
     const progress = totalProgress / subtaskCount;
     const startDate = startDates.length > 0 ? new Date(Math.min(...startDates.map(d => d.getTime()))) : null;
     const lastUpdate = lastUpdates.length > 0 ? new Date(Math.max(...lastUpdates.map(d => d.getTime()))) : null;
-    
-    const endDate = allSubtasksAreDone && endDates.length > 0 
-      ? new Date(Math.max(...endDates.map(d => d.getTime()))) 
+
+    const endDate = allSubtasksAreDone && endDates.length > 0
+      ? new Date(Math.max(...endDates.map(d => d.getTime())))
       : null;
 
     const updatePayload = {
@@ -222,7 +222,7 @@ export const getNextTaskCounter = onCall(
 
         // 3. อ่านเลขปัจจุบัน (ถ้าไม่มี ให้เริ่มที่ 0)
         const currentNumber = counterDoc.data()?.currentTaskNumber || 0;
-        
+
         // 4. บวก 1
         const nextNumber = currentNumber + 1;
 
@@ -243,3 +243,102 @@ export const getNextTaskCounter = onCall(
     }
   }
 );
+
+/*
+export const recalcSubtaskProgress = onRequest(
+  {
+    region: "asia-southeast1",
+    timeoutSeconds: 540,
+    memory: "1GiB"
+  },
+  async (request, response) => {
+    logger.info("--- recalcSubtaskProgress triggered ---");
+
+    // Optional: run for specific project only
+    const targetProjectId = request.query.projectId as string;
+
+    try {
+      // 1. Get all tasks (optionally filtered by project)
+      let tasksQuery: admin.firestore.Query = db.collection("tasks");
+      if (targetProjectId) {
+        tasksQuery = tasksQuery.where("projectId", "==", targetProjectId);
+      }
+
+      const tasksSnapshot = await tasksQuery.get();
+      logger.info(`Found ${tasksSnapshot.size} tasks to process.`);
+
+      let updatedCount = 0;
+      let checkedCount = 0;
+
+      for (const taskDoc of tasksSnapshot.docs) {
+        const subtasksRef = taskDoc.ref.collection("subtasks");
+        const subtasksSnapshot = await subtasksRef.get();
+
+        for (const subtaskDoc of subtasksSnapshot.docs) {
+          checkedCount++;
+          const subtaskData = subtaskDoc.data();
+          const currentProgress = subtaskData.subTaskProgress || 0;
+
+          // Get daily reports for this subtask
+          // Note: dailyReport is a subcollection of the subtask
+          const dailyReportsSnapshot = await subtaskDoc.ref.collection("dailyReport").get();
+
+          if (dailyReportsSnapshot.empty) {
+            continue;
+          }
+
+          let allWorkEntries: any[] = [];
+          dailyReportsSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (Array.isArray(data.workhours)) {
+              allWorkEntries.push(...data.workhours);
+            }
+          });
+
+          if (allWorkEntries.length === 0) continue;
+
+          // SORTING LOGIC (Same as frontend fix)
+          allWorkEntries.sort((a, b) => {
+            // Compare assignDate string (YYYY-MM-DD)
+            const dateA = a.assignDate || '';
+            const dateB = b.assignDate || '';
+            if (dateA > dateB) return -1;
+            if (dateA < dateB) return 1;
+
+            // If dates are equal, fallback to loggedAt/timestamp
+            const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+            const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+            return timeB - timeA;
+          });
+
+          const latestLog = allWorkEntries[0];
+          const latestRealProgress = latestLog.progress || 0; // The string "80%" or number 80
+
+          // Parse to number if needed
+          let numericProgress = 0;
+          if (typeof latestRealProgress === 'string') {
+            numericProgress = parseInt(latestRealProgress.replace('%', ''), 10) || 0;
+          } else {
+            numericProgress = Number(latestRealProgress) || 0;
+          }
+
+          if (numericProgress !== currentProgress) {
+            logger.info(`[FIX] Subtask ${subtaskDoc.id} (Task ${taskDoc.id}): Progress mismatch. DB=${currentProgress}, Calc=${numericProgress}. Updating...`);
+            await subtaskDoc.ref.update({
+              subTaskProgress: numericProgress
+            });
+            updatedCount++;
+          }
+        }
+      }
+
+      logger.info(`Migration complete. Checked ${checkedCount} subtasks. Updated ${updatedCount} subtasks.`);
+      response.status(200).json({ success: true, checked: checkedCount, updated: updatedCount });
+
+    } catch (error) {
+      logger.error("Error in recalcSubtaskProgress:", error);
+      response.status(500).json({ error: "Migration failed", details: error });
+    }
+  }
+);
+*/

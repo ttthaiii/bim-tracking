@@ -313,6 +313,34 @@ export const saveDailyReportEntries = async (
         workLogData.fileUploadedAt = entry.fileUploadedAt;
       }
 
+      // --- FIX: คำนวณ Progress ล่าสุดโดยอิงจาก assignDate (ไม่ใช่วันที่กดบันทึก) ---
+      // 1. ดึงข้อมูล existing reports ของงานนี้มาก่อนเพื่อเปรียบเทียบ
+      const currentReportSnap = await getDoc(dailyReportRef);
+      const currentData = currentReportSnap.exists() ? currentReportSnap.data() : {};
+      const existingWorkhours = (currentData.workhours as any[]) || [];
+
+      // 2. รวมข้อมูลใหม่เข้าไปในรายการชั่วคราว (เพื่อหาล่าสุดจริงๆ)
+      const allWorkLogs = [...existingWorkhours, workLogData];
+
+      // 3. เรียงลำดับตาม assignDate (จากใหม่ -> เก่า)
+      // ถ้าวันเท่ากัน ให้เอา timestamp ล่าสุดขึ้นก่อน
+      allWorkLogs.sort((a, b) => {
+        // Compare assignDate string (YYYY-MM-DD)
+        const dateA = a.assignDate || '';
+        const dateB = b.assignDate || '';
+        if (dateA > dateB) return -1;
+        if (dateA < dateB) return 1;
+
+        // If dates are equal, fallback to loggedAt/timestamp
+        const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+        const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+        return timeB - timeA;
+      });
+
+      // 4. ตัวแรกสุดคือสถานะงาน "ล่าสุด" ตาม timeline ของงานจริง
+      const latestLog = allWorkLogs[0];
+      const latestRealProgress = latestLog.progress || 0; // อาจเป็นตัวเลข หรือ string แต่ตัวแปรรับ number
+
       // Atomically add the new work log to the 'workhours' array.
       batch.update(dailyReportRef, {
         workhours: arrayUnion(workLogData)
@@ -321,11 +349,11 @@ export const saveDailyReportEntries = async (
       // 3. IMPORTANT: Update the progress on the subtask document itself.
       // This ensures the new progress is the source of truth for the next day.
       batch.update(subtaskDocRef, {
-        subTaskProgress: newProgressNumber
+        subTaskProgress: latestRealProgress  // ใช้ค่าที่คำนวณใหม่แทน newProgressNumber
       });
 
       console.log(`[DEBUG] Queued update for dailyReport ${entry.employeeId}. Appending to workhours.`);
-      console.log(`[DEBUG] Queued update for subtask ${entry.subtaskId}. Setting subTaskProgress to ${newProgressNumber}.`);
+      console.log(`[DEBUG] Queued update for subtask ${entry.subtaskId}. Setting subTaskProgress to ${latestRealProgress} (was ${newProgressNumber}).`);
     }
 
     await batch.commit();

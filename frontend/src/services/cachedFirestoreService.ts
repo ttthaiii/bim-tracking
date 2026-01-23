@@ -27,10 +27,10 @@ export async function cachedQuery<T>(
   // ✅ ถ้าไม่มี Cache → ดึงข้อมูลจาก Firestore
   console.log(`🔍 Firestore Query: ${cacheKey}`);
   const data = await queryFn();
-  
+
   // ✅ บันทึกลง Cache พร้อม TTL
   setCache(cacheKey, data, ttl);
-  
+
   return data;
 }
 
@@ -40,7 +40,7 @@ export async function getCachedProjects(
   setCache: <T>(key: string, data: T, ttl?: number) => void
 ) {
   const cacheKey = 'projects';
-  
+
   return cachedQuery(
     cacheKey,
     getCache,
@@ -65,7 +65,7 @@ export async function getCachedTasks(
   setCache: <T>(key: string, data: T, ttl?: number) => void
 ) {
   const cacheKey = generateCacheKey('tasks', { projectId });
-  
+
   return cachedQuery(
     cacheKey,
     getCache,
@@ -113,7 +113,7 @@ export async function getCachedSubtasks(
     setCache,
     async () => {
       const allSubtasks: any[] = [];
-      
+
       // ✅ ใช้ Promise.all แทน for loop เพื่อความเร็ว
       await Promise.all(
         taskIds.map(async (taskId) => {
@@ -174,6 +174,7 @@ export async function getCachedSubtasks(
 
             allSubtasks.push({
               id: subtaskDoc.id,
+              taskId: taskId, // ✅ Add taskId for safer lookups
               subTaskNumber: data.subTaskNumber || '',
               taskName: data.taskName || '',
               subTaskCategory: data.subTaskCategory || '',
@@ -205,7 +206,7 @@ export async function getCachedRelateWorks(
   setCache: <T>(key: string, data: T, ttl?: number) => void
 ) {
   const cacheKey = generateCacheKey('relateWorks', { activityName });
-  
+
   return cachedQuery(
     cacheKey,
     getCache,
@@ -214,13 +215,13 @@ export async function getCachedRelateWorks(
       const relateWorksCol = collection(db, 'relateWorks');
       const q = query(relateWorksCol, where('activityName', '==', activityName));
       const snapshot = await getDocs(q);
-      
+
       if (snapshot.empty) return [];
-      
+
       const doc = snapshot.docs[0];
       const data = doc.data();
       const relatedWorks = data.relatedWorks || {};
-      
+
       return Object.values(relatedWorks)
         .map((work: any) => ({
           value: work,

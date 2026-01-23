@@ -56,6 +56,7 @@ type EditChange = {
 // ✅ โค้ดใหม่
 interface ExistingSubtask {
   id: string;
+  taskId?: string; // ✅ Add taskId matching service
   subTaskNumber: string;
   taskName: string;
   subTaskCategory: string;
@@ -128,6 +129,7 @@ export default function TaskAssignment() {
   const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [deletingSubtask, setDeletingSubtask] = useState<{
     id: string;
+    taskId?: string; // ✅ Add taskId
     subTaskNumber: string;
     taskName: string;
     subTaskCategory: string;
@@ -320,7 +322,10 @@ export default function TaskAssignment() {
 
             // คำนวณ Deadline Status เหมือนเดิม
             const subtasksWithDeadline = allSubtasks.map(subtask => {
-              const task = allTasks.find(t => t.taskName === subtask.taskName);
+              // ✅ Use taskId lookup
+              const task = subtask.taskId
+                ? allTasks.find(t => t.id === subtask.taskId)
+                : allTasks.find(t => t.taskName === subtask.taskName);
               // ... logic เดิม ...
               if (!task || !task.dueDate) {
                 return {
@@ -393,7 +398,10 @@ export default function TaskAssignment() {
 
         // ✅ 4. คำนวณ Deadline Status
         const subtasksWithDeadline = allSubtasks.map(subtask => {
-          const task = taskList.find(t => t.taskName === subtask.taskName);
+          // ✅ Use taskId lookup
+          const task = subtask.taskId
+            ? taskList.find(t => t.id === subtask.taskId)
+            : taskList.find(t => t.taskName === subtask.taskName);
 
           if (!task || !task.dueDate) {
             return {
@@ -673,7 +681,10 @@ export default function TaskAssignment() {
     // 2. Filter by Date Range (Due Date / End Date)
     if (filterDateRange.start || filterDateRange.end) {
       result = result.filter(subtask => {
-        const task = tasks.find(t => t.taskName === subtask.taskName);
+        // ✅ Use taskId if available, fallback to name
+        const task = subtask.taskId
+          ? tasks.find(t => t.id === subtask.taskId)
+          : tasks.find(t => t.taskName === subtask.taskName);
         // Priority: Subtask.endDate > Task.dueDate
         const dateToCheck = subtask.endDate || task?.dueDate;
 
@@ -704,8 +715,8 @@ export default function TaskAssignment() {
             break;
           case 'activity':
             // Activity logic is complex, grabbing from edited or task
-            const taskA = tasks.find(t => t.taskName === a.taskName);
-            const taskB = tasks.find(t => t.taskName === b.taskName);
+            const taskA = a.taskId ? tasks.find(t => t.id === a.taskId) : tasks.find(t => t.taskName === a.taskName);
+            const taskB = b.taskId ? tasks.find(t => t.id === b.taskId) : tasks.find(t => t.taskName === b.taskName);
             aValue = editedSubtasks[a.id]?.activity || taskA?.taskCategory || '';
             bValue = editedSubtasks[b.id]?.activity || taskB?.taskCategory || '';
             break;
@@ -714,8 +725,8 @@ export default function TaskAssignment() {
             bValue = b.subTaskAssignee || '';
             break;
           case 'dueDate':
-            const taskRefA = tasks.find(t => t.taskName === a.taskName);
-            const taskRefB = tasks.find(t => t.taskName === b.taskName);
+            const taskRefA = a.taskId ? tasks.find(t => t.id === a.taskId) : tasks.find(t => t.taskName === a.taskName);
+            const taskRefB = b.taskId ? tasks.find(t => t.id === b.taskId) : tasks.find(t => t.taskName === b.taskName);
             const dateA = a.endDate || taskRefA?.dueDate;
             const dateB = b.endDate || taskRefB?.dueDate;
             aValue = dateA?.seconds || 0;
@@ -1054,13 +1065,16 @@ export default function TaskAssignment() {
 
   // ✅ Function เริ่ม Edit Mode
   const handleStartEdit = (subtask: ExistingSubtask) => {
-    const task = tasks.find(t => t.taskName === subtask.taskName);
+    // ✅ Use taskId lookup
+    const task = subtask.taskId
+      ? tasks.find(t => t.id === subtask.taskId)
+      : tasks.find(t => t.taskName === subtask.taskName);
 
     setEditingSubtaskId(subtask.id);
     setEditingData({
       // ✅ ใส่ค่า activity เพื่อให้ Relate Work ใช้งานได้
       activity: task?.taskCategory || '',
-      relateDrawing: task?.id || '',
+      relateDrawing: task?.id || '', // Use found task ID
       relateDrawingName: subtask.taskName,
       relateWork: subtask.subTaskCategory,
       item: subtask.item || '',
@@ -1294,6 +1308,7 @@ export default function TaskAssignment() {
   const handlePrepareDelete = (subtask: ExistingSubtask) => {
     setDeletingSubtask({
       id: subtask.id,
+      taskId: subtask.taskId, // ✅ Store taskId
       subTaskNumber: subtask.subTaskNumber,
       taskName: subtask.taskName,
       subTaskCategory: subtask.subTaskCategory
@@ -1307,8 +1322,11 @@ export default function TaskAssignment() {
 
     setIsSaving(true);
     try {
-      // หา Task ID จาก taskName
-      const task = tasks.find(t => t.taskName === deletingSubtask.taskName);
+      // หา Task ID จาก taskId (ถ้ามี) หรือ taskName
+      const task = deletingSubtask.taskId
+        ? tasks.find(t => t.id === deletingSubtask.taskId)
+        : tasks.find(t => t.taskName === deletingSubtask.taskName);
+
       if (!task) {
         // --- ส่วนที่แก้ไข: เรียกใช้ ErrorModal ---
         setErrorMessage('ไม่พบ Task ที่เกี่ยวข้องกับ Subtask นี้');
@@ -1389,8 +1407,10 @@ export default function TaskAssignment() {
     tasksList: TaskItem[]
   ): ExistingSubtask[] => {
     return subtasks.map(subtask => {
-      // หา Task ที่ taskName ตรงกับ subtask.taskName
-      const task = tasksList.find(t => t.taskName === subtask.taskName);
+      // หา Task ที่ taskId ตรงกับ subtask.taskId (หรือ fallback ไป taskName)
+      const task = subtask.taskId
+        ? tasksList.find(t => t.id === subtask.taskId)
+        : tasksList.find(t => t.taskName === subtask.taskName);
 
       if (!task) {
         // ถ้าหาไม่เจอ Task → แสดง "-"
@@ -1657,7 +1677,10 @@ export default function TaskAssignment() {
                     };
 
                     const isEditing = editingSubtaskId === subtask.id;
-                    const task = tasks.find(t => t.taskName === subtask.taskName);
+                    // ✅ Use taskId lookup
+                    const task = subtask.taskId
+                      ? tasks.find(t => t.id === subtask.taskId)
+                      : tasks.find(t => t.taskName === subtask.taskName);
 
                     // ✅ ตรวจสอบว่าแถวนี้ถูกแก้ไขหรือไม่
                     const isEdited = !!editedSubtasks[subtask.id];

@@ -7,10 +7,10 @@ interface CreateProjectModalProps {
   onViewProjects: () => void;
 }
 
-const CreateProjectModal = ({ 
-  isOpen, 
-  onClose, 
-  onSubmit, 
+const CreateProjectModal = ({
+  isOpen,
+  onClose,
+  onSubmit,
   onViewProjects
 }: CreateProjectModalProps) => {
   const [projectData, setProjectData] = React.useState({
@@ -28,7 +28,7 @@ const CreateProjectModal = ({
   };
 
   return (
-    <div 
+    <div
       style={{
         position: 'fixed',
         inset: 0,
@@ -40,7 +40,7 @@ const CreateProjectModal = ({
         backdropFilter: 'blur(8px)',
       }}
     >
-      <div 
+      <div
         style={{
           background: 'rgba(255, 255, 255, 0.95)',
           borderRadius: '0.5rem',
@@ -52,13 +52,13 @@ const CreateProjectModal = ({
         }}
       >
         <div style={{ padding: '1.5rem' }}>
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
             marginBottom: '1rem'
           }}>
-            <h2 style={{ 
+            <h2 style={{
               fontSize: '1.25rem',
               fontWeight: 600,
               color: '#1f2937'
@@ -75,20 +75,20 @@ const CreateProjectModal = ({
                 padding: '0.5rem',
               }}
             >
-              <svg 
-                style={{ width: '1.5rem', height: '1.5rem' }} 
-                fill="none" 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                strokeWidth="2" 
-                viewBox="0 0 24 24" 
+              <svg
+                style={{ width: '1.5rem', height: '1.5rem' }}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
                 stroke="currentColor"
               >
                 <path d="M6 18L18 6M6 6l12 12"></path>
               </svg>
             </button>
           </div>
-          
+
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
               <label style={{
@@ -118,7 +118,7 @@ const CreateProjectModal = ({
                 required
               />
             </div>
-            
+
             <div>
               <label style={{
                 display: 'block',
@@ -132,7 +132,7 @@ const CreateProjectModal = ({
               <input
                 type="text"
                 value={projectData.code}
-                onChange={(e) => setProjectData(prev => ({ ...prev, code: e.target.value }))}
+                onChange={(e) => setProjectData(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
                 style={{
                   width: '100%',
                   padding: '0.75rem 1rem',
@@ -147,7 +147,7 @@ const CreateProjectModal = ({
                 required
               />
             </div>
-            
+
             <div>
               <label style={{
                 display: 'block',
@@ -176,10 +176,10 @@ const CreateProjectModal = ({
                 required
               />
             </div>
-            
+
             {/* ✅ ส่วนที่เพิ่มใหม่ - ปุ่มดูโครงการทั้งหมด */}
-            <div style={{ 
-              display: 'flex', 
+            <div style={{
+              display: 'flex',
               flexDirection: 'column',
               gap: '0.75rem',
               marginTop: '1.5rem'
@@ -213,27 +213,27 @@ const CreateProjectModal = ({
                   e.currentTarget.style.borderColor = '#e5e7eb';
                 }}
               >
-                <svg 
-                  width="16" 
-                  height="16" 
-                  fill="none" 
-                  viewBox="0 0 24 24" 
+                <svg
+                  width="16"
+                  height="16"
+                  fill="none"
+                  viewBox="0 0 24 24"
                   stroke="currentColor"
                 >
-                  <path 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round" 
-                    strokeWidth={2} 
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" 
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                   />
                 </svg>
                 ดูโครงการทั้งหมด
               </button>
 
               {/* ปุ่ม Cancel & Save */}
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'flex-end', 
+              <div style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
                 gap: '0.75rem'
               }}>
                 <button
