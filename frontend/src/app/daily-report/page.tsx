@@ -56,10 +56,10 @@ const formatDateForDisplay = (dateString: string): string => {
   }).format(date).replace(/ /g, '/');
 };
 
-const NON_WORK_KEYWORDS = ['ลางาน', 'ลาป่วย', 'ลากิจ', 'ลาพักร้อน', 'ประชุม', 'meeting'];
+const NON_WORK_KEYWORDS = ['ลางาน', 'ลาป่วย', 'ลากิจ', 'ลาพักร้อน', 'ประชุม', 'meeting', 'training', 'seminar', 'อบรม', 'สัมมนา'];
 
 // T-003-EX-19 Strict Leave keywords
-const LEAVE_KEYWORDS = ['ลางาน'];
+const LEAVE_KEYWORDS = ['ลางาน', 'ลาป่วย', 'ลากิจ', 'ลาพักร้อน'];
 
 const includesLeaveKeyword = (value?: string | null): boolean => {
   if (!value) return false;
@@ -600,7 +600,7 @@ export default function DailyReport() {
     const isPlaceholderData = (entries: DailyReportEntry[]) => {
       if (entries.length !== 1) return false;
       const entry = entries[0];
-      return !entry.subtaskId && !entry.note && !entry.normalWorkingHours && entry.normalWorkingHours !== '0:0';
+      return !entry.subtaskId && !entry.note && (entry.normalWorkingHours === '0:0' || !entry.normalWorkingHours);
     };
 
     // ถ้ามีข้อมูลใน cache ใช้ข้อมูลจาก cache (แต่เช็คก่อนว่าเป็นแค่ placeholder หรือไม่)
@@ -896,7 +896,7 @@ export default function DailyReport() {
 
   // Helper to validate progress range
   const getProgressBounds = (subtaskId: string) => {
-    if (!subtaskId) return { min: 0, max: 100 };
+    if (!subtaskId) return { min: 1, max: 100 }; // Default min to 1 instead of 0
 
     // Filter useful entries (ignore current date & deleted)
     const validEntries = allDailyEntries.filter(e =>
@@ -909,7 +909,10 @@ export default function DailyReport() {
     const prevEntries = validEntries.filter(e => e.assignDate < workDate);
     prevEntries.sort((a, b) => b.assignDate.localeCompare(a.assignDate)); // Descending (newest first)
     const prevEntry = prevEntries[0];
-    const min = prevEntry ? (parseInt(prevEntry.progress.replace('%', ''), 10) || 0) : 0;
+
+    // [Updated Logic]: Min progress must be at least 1, and >= previous progress
+    const prevProgress = prevEntry ? (parseInt(prevEntry.progress.replace('%', ''), 10) || 0) : 0;
+    const min = Math.max(1, prevProgress);
 
     // Find earliest entry AFTER today (Max Limit)
     const nextEntries = validEntries.filter(e => e.assignDate > workDate);
@@ -1052,13 +1055,22 @@ export default function DailyReport() {
     const selectedDate = workDate;
     const today = formatDateToYYYYMMDD(new Date());
 
-    if (selectedDate > today) {
-      setErrorMessage('ไม่สามารถบันทึกข้อมูลล่วงหน้าได้');
-      setShowErrorModal(true);
-      return;
-    }
-
     const validEntries = dailyReportEntries.filter(entry => entry.subtaskId);
+
+    if (selectedDate > today) {
+      // Allow future dates ONLY for "Leave" tasks
+      const allAreLeaveTasks = validEntries.every(entry =>
+        includesLeaveKeyword(entry.taskName) ||
+        includesLeaveKeyword(entry.subTaskName) ||
+        includesLeaveKeyword(entry.item)
+      );
+
+      if (!allAreLeaveTasks || validEntries.length === 0) {
+        setErrorMessage('สามารถบันทึกข้อมูลล่วงหน้าได้เฉพาะงาน "ลางาน" เท่านั้น');
+        setShowErrorModal(true);
+        return;
+      }
+    }
 
     if (validEntries.length === 0) {
       setErrorMessage('กรุณาเลือก Task อย่างน้อย 1 รายการก่อนบันทึก');
@@ -1690,7 +1702,7 @@ export default function DailyReport() {
                       type="button"
                       onClick={handleSubmit}
                       className="bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold py-2 px-6 rounded-md hover:from-blue-700 hover:to-purple-700"
-                      disabled={isReadOnly || isFutureDate}
+                      disabled={isReadOnly}
                     >
                       Submit
                     </button>
