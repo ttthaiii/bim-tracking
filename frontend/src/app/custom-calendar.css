@@ -167,3 +167,15 @@
 .custom-calendar .react-calendar__tile:disabled:hover {
     background-color: white !important;
 }
+
+/* [T-038] Holiday and Sunday Highlights */
+.sunday-highlight {
+  background-color: #fee2e2 !important; /* red-100 */
+  color: #7f1d1d !important; /* red-900 */
+}
+
+.holiday-highlight {
+  background-color: #e9d5ff !important; /* purple-200 */
+  color: #581c87 !important; /* purple-900 */
+  font-weight: bold;
+}

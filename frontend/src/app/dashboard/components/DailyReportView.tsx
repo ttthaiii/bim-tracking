@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { getAllDailyReportEntries, DailyReportSummary } from '@/services/dashboardService';
+import { getPublicHolidays, PublicHoliday } from '@/services/holidayService';
 import { getUsers, UserRecord } from '@/services/firebase';
 import { useAuth } from '@/context/AuthContext';
+import { MultiSelect, MultiSelectOption } from '@/components/ui/MultiSelect';
 
 const PAGE_SIZE = 50;
 
@@ -10,20 +12,40 @@ export default function DailyReportView() {
     const [entries, setEntries] = useState<DailyReportSummary[]>([]);
     const [loading, setLoading] = useState(false);
     const [users, setUsers] = useState<UserRecord[]>([]);
+    const [holidays, setHolidays] = useState<PublicHoliday[]>([]);
 
     // Filters - Default to current month
     const [selectedAssignee, setSelectedAssignee] = useState('');
     const [hasSetDefault, setHasSetDefault] = useState(false);
 
     const [startDate, setStartDate] = useState(() => {
+        // [T-047] Default to Current Week (Mon - Sun)
         const now = new Date();
-        return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+        const day = now.getDay(); // 0 (Sun) - 6 (Sat)
+        // Calculate diff to Monday: 
+        // If today is Sunday(0), diff = -6. 
+        // If Monday(1), diff = 0.
+        const diffToMon = day === 0 ? -6 : 1 - day;
+
+        const monday = new Date(now);
+        monday.setDate(now.getDate() + diffToMon);
+        return monday.toISOString().split('T')[0];
     });
+
     const [endDate, setEndDate] = useState(() => {
+        // [T-047] Default to Current Week (End must be Sunday)
         const now = new Date();
-        return new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        const day = now.getDay();
+        const diffToMon = day === 0 ? -6 : 1 - day;
+
+        const monday = new Date(now);
+        monday.setDate(now.getDate() + diffToMon);
+
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        return sunday.toISOString().split('T')[0];
     });
-    const [selectedStatus, setSelectedStatus] = useState('All');
+    const [selectedStatus, setSelectedStatus] = useState<string[]>(['All']);
 
     // Set default assignee to current user once loaded
     useEffect(() => {
@@ -42,20 +64,24 @@ export default function DailyReportView() {
     const scrollContainerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const loadUsers = async () => {
+        const loadUsersAndHolidays = async () => {
             try {
-                const userList = await getUsers();
+                const [userList, holidayList] = await Promise.all([
+                    getUsers(),
+                    getPublicHolidays() // Fetch all holidays (or filter by year if needed)
+                ]);
                 setUsers(userList);
+                setHolidays(holidayList);
             } catch (error) {
-                console.error('Error loading users:', error);
+                console.error('Error loading initial data:', error);
             }
         };
-        loadUsers();
+        loadUsersAndHolidays();
     }, []);
 
     useEffect(() => {
         fetchData();
-    }, [selectedAssignee, startDate, endDate]);
+    }, [selectedAssignee, startDate, endDate, users, holidays]);
 
     // Reset pagination when filters change
     useEffect(() => {
@@ -81,60 +107,70 @@ export default function DailyReportView() {
                 };
             });
 
-            // Fill Missing Dates Logic (Only if Assignee is selected)
-            if (selectedAssignee && start && end) {
-                const allDates: DailyReportSummary[] = [];
-                const currentDate = new Date(start);
-                // Ensure time is 00:00:00
-                currentDate.setHours(0, 0, 0, 0);
-                const loopEnd = new Date(end);
-                loopEnd.setHours(0, 0, 0, 0);
+            // Fill Missing Dates Logic - [T-045] Support All Assignees
+            if (start && end && users.length > 0) {
+                const assigneesToProcess = selectedAssignee
+                    ? [selectedAssignee]
+                    : users.map(u => u.employeeId);
 
-                const empUser = users.find(u => u.employeeId === selectedAssignee);
-                const empName = empUser?.fullName || selectedAssignee;
+                const finalFilledData: DailyReportSummary[] = [];
 
-                while (currentDate <= loopEnd) {
-                    // Fix: Use local time for date string to avoid timezone shift (which caused duplicate keys)
-                    const now = new Date();
-                    now.setHours(0, 0, 0, 0);
+                // Helper to fill data for a single user
+                assigneesToProcess.forEach(userId => {
+                    const empUser = users.find(u => u.employeeId === userId);
+                    const empName = empUser?.fullName || userId;
 
-                    // Re-calculate local time string to prevent timezone issues
-                    // We must match the date string format used in 'enrichedData' keys or id generation
-                    const y = currentDate.getFullYear();
-                    const m = String(currentDate.getMonth() + 1).padStart(2, '0');
-                    const d = String(currentDate.getDate()).padStart(2, '0');
-                    const dateStr = `${y}-${m}-${d}`;
+                    const userExistingEntries = enrichedData.filter(e => e.employeeId === userId);
+                    const userFilledEntries: DailyReportSummary[] = [];
 
-                    const existingEntry = enrichedData.find(e => {
-                        const eDate = new Date(e.date);
-                        eDate.setHours(0, 0, 0, 0);
-                        return eDate.getTime() === currentDate.getTime();
-                    });
+                    const currentDate = new Date(start);
+                    currentDate.setHours(0, 0, 0, 0);
+                    const loopEnd = new Date(end);
+                    loopEnd.setHours(0, 0, 0, 0);
 
-                    if (existingEntry) {
-                        allDates.push(existingEntry);
-                    } else {
-                        // Determine generic status for missing day
-                        const dayOfWeek = currentDate.getDay();
-                        const isHoliday = dayOfWeek === 0; // Sunday
-                        // [T-022-EX-1] Fix: Check Future Date Logic Client-Side
-                        const isFuture = currentDate > now;
+                    // To avoid infinite loops or issues, use a clone of currentDate
+                    const iterDate = new Date(currentDate);
 
-                        allDates.push({
-                            id: `${selectedAssignee}-${dateStr}`,
-                            employeeId: selectedAssignee,
-                            fullName: empName,
-                            date: new Date(currentDate),
-                            totalWorkingHours: 0,
-                            totalOT: 0,
-                            status: isFuture ? 'Future' : (isHoliday ? 'Holiday' : 'Missing')
-                        } as any); // Cast as any because 'Future' might not be fully typed in local state interfaces yet
+                    while (iterDate <= loopEnd) {
+                        const now = new Date();
+                        now.setHours(0, 0, 0, 0);
+
+                        const y = iterDate.getFullYear();
+                        const m = String(iterDate.getMonth() + 1).padStart(2, '0');
+                        const d = String(iterDate.getDate()).padStart(2, '0');
+                        const dateStr = `${y}-${m}-${d}`;
+
+                        const existingEntry = userExistingEntries.find(e => {
+                            const eDate = new Date(e.date);
+                            eDate.setHours(0, 0, 0, 0);
+                            return eDate.getTime() === iterDate.getTime();
+                        });
+
+                        if (existingEntry) {
+                            userFilledEntries.push(existingEntry);
+                        } else {
+                            const dayOfWeek = iterDate.getDay();
+                            // Check if dateStr matches any holiday
+                            const holidayMatch = holidays.find(h => h.date === dateStr);
+                            const isHoliday = dayOfWeek === 0 || !!holidayMatch;
+                            const isFuture = iterDate > now;
+
+                            userFilledEntries.push({
+                                id: `${userId}-${dateStr}`,
+                                employeeId: userId,
+                                fullName: empName,
+                                date: new Date(iterDate),
+                                totalWorkingHours: 0,
+                                totalOT: 0,
+                                status: isFuture ? 'Future' : (isHoliday ? 'Holiday' : 'Missing')
+                            } as any);
+                        }
+                        iterDate.setDate(iterDate.getDate() + 1);
                     }
-                    // Next day
-                    currentDate.setDate(currentDate.getDate() + 1);
-                }
+                    finalFilledData.push(...userFilledEntries);
+                });
 
-                enrichedData = allDates;
+                enrichedData = finalFilledData;
             }
 
             setEntries(enrichedData);
@@ -147,8 +183,9 @@ export default function DailyReportView() {
 
     const processedEntries = useMemo(() => {
         let result = entries.filter(entry => {
-            if (selectedStatus === 'All') return true;
-            return entry.status === selectedStatus;
+            if (selectedStatus.includes('All')) return true;
+            // [T-044] Multi-select Logic
+            return selectedStatus.includes(entry.status);
         });
 
         result.sort((a, b) => {
@@ -240,20 +277,20 @@ export default function DailyReportView() {
 
                     <div className="flex-1 min-w-[150px]">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                        <select
-                            className="w-full border rounded-md p-2"
+                        <MultiSelect
+                            options={[
+                                { value: 'All', label: 'All Status' },
+                                { value: 'Normal', label: 'Normal (ปกติ)' },
+                                { value: 'Abnormal', label: 'Abnormal (ผิดปกติ)' },
+                                { value: 'Holiday', label: 'Holiday (วันหยุด)' },
+                                { value: 'Missing', label: 'Missing (ขาดส่ง)' },
+                                { value: 'Future', label: 'Future (ยังไม่ถึงกำหนด)' },
+                                { value: 'Leave', label: 'Leave (ลางาน)' },
+                            ]}
                             value={selectedStatus}
-                            onChange={(e) => setSelectedStatus(e.target.value)}
-                        >
-                            <option value="All">All Status</option>
-                            <option value="All">All Status</option>
-                            <option value="Normal">Normal (ปกติ)</option>
-                            <option value="Abnormal">Abnormal (ผิดปกติ)</option>
-                            <option value="Holiday">Holiday (วันหยุด)</option>
-                            <option value="Missing">Missing (ขาดส่ง)</option>
-                            <option value="Future">Future (ยังไม่ถึงกำหนด)</option>
-                            <option value="Leave">Leave (ลางาน)</option>
-                        </select>
+                            onChange={setSelectedStatus}
+                            className="w-full"
+                        />
                     </div>
                 </div>
             </div>

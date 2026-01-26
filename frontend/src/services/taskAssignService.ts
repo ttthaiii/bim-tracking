@@ -156,22 +156,37 @@ export const fetchAvailableSubtasksForEmployee = async (
 
     const allSubtasks: Subtask[] = [];
     const subtaskIds = new Set<string>();
-    const taskStatusCache = new Map<string, string | null>();
+    // [T-031] Cache task data (status + category) to avoid re-fetching
+    const taskDataCache = new Map<string, { status: string; category?: string } | null>();
+
+    const getTaskData = async (subtaskDoc: QueryDocumentSnapshot<DocumentData>) => {
+      const taskRef = subtaskDoc.ref.parent?.parent;
+      if (!taskRef) return null;
+
+      const cacheKey = taskRef.path;
+      if (!taskDataCache.has(cacheKey)) {
+        const parentSnap = await getDoc(taskRef);
+        if (parentSnap.exists()) {
+          const pData = parentSnap.data();
+          taskDataCache.set(cacheKey, {
+            status: pData.taskStatus ?? '',
+            category: pData.taskCategory ?? '' // [T-031] Fetch Activity Type
+          });
+        } else {
+          taskDataCache.set(cacheKey, null);
+        }
+      }
+      return taskDataCache.get(cacheKey);
+    };
 
     const shouldIncludeSubtask = async (subtaskDoc: QueryDocumentSnapshot<DocumentData>) => {
       const data = subtaskDoc.data() as Subtask;
       if ((data.subtaskStatus ?? (data as any).subTaskStatus ?? '').toUpperCase() === 'DELETED') {
         return false;
       }
-      const taskRef = subtaskDoc.ref.parent?.parent;
-      if (!taskRef) return true;
-      const cacheKey = taskRef.path;
-      if (!taskStatusCache.has(cacheKey)) {
-        const parentSnap = await getDoc(taskRef);
-        const status = parentSnap.exists() ? (parentSnap.data()?.taskStatus ?? null) : null;
-        taskStatusCache.set(cacheKey, status);
-      }
-      const status = taskStatusCache.get(cacheKey);
+
+      const taskData = await getTaskData(subtaskDoc);
+      const status = taskData?.status;
       return (status ?? '').toUpperCase() !== 'DELETED';
     };
 
@@ -188,13 +203,21 @@ export const fetchAvailableSubtasksForEmployee = async (
       );
 
       // 3. Add valid docs to result
-      validationResults.forEach(({ doc, isValid }) => {
+      for (const { doc, isValid } of validationResults) {
         if (isValid) {
           const data = doc.data() as Subtask;
-          allSubtasks.push({ ...data, id: doc.id, path: doc.ref.path });
+          // [T-031] Inject taskCategory from cache
+          const taskData = await getTaskData(doc);
+
+          allSubtasks.push({
+            ...data,
+            id: doc.id,
+            path: doc.ref.path,
+            taskCategory: taskData?.category || ''
+          });
           subtaskIds.add(doc.id);
         }
-      });
+      }
     };
 
     const subtasksGroupRef = collectionGroup(db, 'subtasks');

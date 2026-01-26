@@ -31,6 +31,8 @@ import { Timestamp } from 'firebase/firestore';
 import FilePreviewModal from '@/components/modals/FilePreviewModal';
 import { EmployeeAutocomplete } from '@/components/EmployeeAutocomplete';
 import { useEmployeeOptions } from '@/hooks/useEmployeeOptions';
+import { AddHolidayModal } from '@/components/modals/AddHolidayModal';
+import { addPublicHoliday, addPublicHolidaysBulk, getPublicHolidays, PublicHoliday } from '@/services/holidayService';
 
 type ValuePiece = Date | null;
 type Value = ValuePiece | [ValuePiece, ValuePiece];
@@ -58,7 +60,22 @@ const formatDateForDisplay = (dateString: string): string => {
 
 const NON_WORK_KEYWORDS = ['ลางาน', 'ลาป่วย', 'ลากิจ', 'ลาพักร้อน', 'ประชุม', 'meeting', 'training', 'seminar', 'อบรม', 'สัมมนา'];
 
-// T-003-EX-19 Strict Leave keywords
+
+
+// [T-031] Strict Activity Types
+const LEAVE_ACTIVITY_NAME = 'ลางาน';
+const MEETING_ACTIVITY_NAME = 'Project Meeting';
+const INTERNAL_MEETING_ACTIVITY_NAME = 'Internal Meeting'; // [T-032]
+
+const isActivityLeaveOrMeeting = (activity?: string): boolean => {
+  if (!activity) return false;
+  return activity === LEAVE_ACTIVITY_NAME ||
+    activity === MEETING_ACTIVITY_NAME ||
+    activity === INTERNAL_MEETING_ACTIVITY_NAME;
+};
+
+// Keep specific keyword check for Fallback or specific subtask names if needed, 
+// but primarily we rely on Activity now.
 const LEAVE_KEYWORDS = ['ลางาน', 'ลาป่วย', 'ลากิจ', 'ลาพักร้อน'];
 
 const includesLeaveKeyword = (value?: string | null): boolean => {
@@ -301,6 +318,10 @@ export default function DailyReport() {
   const [previewFile, setPreviewFile] = useState<{ name: string; url: string } | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
+  // [T-038] Public Holidays
+  const [publicHolidays, setPublicHolidays] = useState<PublicHoliday[]>([]);
+  const [showAddHolidayModal, setShowAddHolidayModal] = useState(false);
+
   const computeHasUnsavedChanges = useCallback(
     (entries: DailyReportEntry[] = []) => {
       const originalData = allDailyEntries.filter(entry => entry.assignDate === workDate);
@@ -404,6 +425,172 @@ export default function DailyReport() {
       url: file.fileURL,
     });
     setIsPreviewOpen(true);
+  };
+
+  // [T-038] Fetch Public Holidays
+  const fetchHolidays = useCallback(async () => {
+    try {
+      const year = new Date().getFullYear(); // MVP: Fetch current year logic or all
+      const holidays = await getPublicHolidays();
+      setPublicHolidays(holidays);
+    } catch (e) {
+      console.error("Failed to fetch holidays", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHolidays();
+  }, [fetchHolidays]);
+
+  const handleAddHoliday = async (holidays: { date: string, label: string }[]) => {
+    try {
+      if (!appUser?.employeeId) return;
+      await addPublicHolidaysBulk(holidays, appUser.employeeId);
+      setSuccessMessage(`บันทึกวันหยุดจำนวน ${holidays.length} รายการเรียบร้อยแล้ว`);
+      setShowSuccessModal(true);
+      fetchHolidays(); // Refresh
+    } catch (e) {
+      console.error(e);
+      setErrorMessage('เกิดข้อผิดพลาดในการบันทึกวันหยุด');
+      setShowErrorModal(true);
+    }
+  };
+
+  // Cache dates that have data for efficient lookup
+  const datesWithData = useMemo(() => {
+    return new Set(allDailyEntries.map(e => e.assignDate));
+  }, [allDailyEntries]);
+
+  // [T-042] Compute daily stats for tooltips
+  // [T-043] Fix Aggregation: Use Snapshot Logic (Latest Entry per Subtask per Day)
+  // [T-042] Compute daily stats for tooltips
+  // [T-043] Fix Aggregation: Use Snapshot Logic (Latest Entry per Subtask per Day)
+  const dailyStatsMap = useMemo(() => {
+    // [T-043-E1] Separate 'leave' accumulator
+    const stats: Record<string, { normal: number; ot: number; leave: number; holiday?: string }> = {};
+
+    // 1. Snapshot Deduplication
+    const latestEntriesMap: Record<string, DailyReportEntry> = {};
+
+    allDailyEntries.forEach(entry => {
+      if (!entry.assignDate || !entry.subtaskId) return;
+
+      const key = `${entry.assignDate}_${entry.subtaskId}`;
+      const existing = latestEntriesMap[key];
+
+      if (!existing) {
+        latestEntriesMap[key] = entry;
+      } else {
+        const existingTime = existing.timestamp?.toMillis() || 0;
+        const entryTime = entry.timestamp?.toMillis() || 0;
+        if (entryTime > existingTime) {
+          latestEntriesMap[key] = entry;
+        }
+      }
+    });
+
+    // 2. Process Valid Snapshot Entries
+    Object.values(latestEntriesMap).forEach(entry => {
+      if (entry.status === 'deleted') return;
+
+      const date = entry.assignDate;
+
+      if (!stats[date]) {
+        stats[date] = { normal: 0, ot: 0, leave: 0 };
+      }
+
+      const normal = parseTimeString(entry.normalWorkingHours);
+      const ot = parseTimeString(entry.otWorkingHours);
+      const totalHours = normal.hours + (normal.minutes / 60) + ot.hours + (ot.minutes / 60);
+
+      // [T-043-E1] Strict Leave Check
+      const subtask = availableSubtasks.find(s => s.id === entry.subtaskId);
+      const isStrictLeave =
+        (subtask?.taskCategory === LEAVE_ACTIVITY_NAME) ||
+        (entry.taskCategory === LEAVE_ACTIVITY_NAME) ||
+        includesLeaveKeyword(entry.taskName) ||
+        includesLeaveKeyword(entry.subTaskName);
+
+      if (isStrictLeave) {
+        stats[date].leave += totalHours;
+      } else {
+        // Work or Meeting goes here
+        stats[date].normal += normal.hours + (normal.minutes / 60);
+        stats[date].ot += ot.hours + (ot.minutes / 60);
+      }
+    });
+
+    // 3. Process Holidays (Overlay)
+    publicHolidays.forEach(h => {
+      const date = h.date;
+      if (!stats[date]) {
+        stats[date] = { normal: 0, ot: 0, leave: 0 };
+      }
+      stats[date].holiday = h.label;
+    });
+
+    return stats;
+  }, [allDailyEntries, availableSubtasks, publicHolidays]);
+
+  // [T-042] Render Tooltip Overlay
+  const getTileContent = ({ date, view }: { date: Date; view: string }) => {
+    if (view !== 'month') return null;
+    const dateStr = formatDateToYYYYMMDD(date);
+    const stat = dailyStatsMap[dateStr];
+
+    if (!stat) return null;
+
+    const parts = [];
+    if (stat.holiday) {
+      parts.push(`วันหยุด: ${stat.holiday}`);
+    }
+
+    if (stat.leave > 0) {
+      parts.push(`ลางาน (${Number(stat.leave.toFixed(2))} ชม.)`);
+    }
+
+    if (stat.normal > 0 || stat.ot > 0) {
+      const n = Number(stat.normal.toFixed(2));
+      const o = Number(stat.ot.toFixed(2));
+      parts.push(`งานปกติ: ${n} ชม.${o > 0 ? `\nOT: ${o} ชม.` : ''}`);
+    }
+
+    if (parts.length === 0) return null;
+
+    return (
+      <div
+        className="absolute inset-0 w-full h-full"
+        title={parts.join('\n')}
+      />
+    );
+  };
+
+  const getTileClassName = ({ date, view }: { date: Date; view: string }) => {
+    if (view !== 'month') return '';
+
+    const dateStr = formatDateToYYYYMMDD(date);
+    const isSunday = date.getDay() === 0;
+    const isHoliday = publicHolidays.some(h => h.date === dateStr);
+    const hasData = datesWithData.has(dateStr);
+
+    // Check if date is in the past (before today)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tileDate = new Date(dateStr); // Use string to avoid TZ issues logic check
+    const isPast = tileDate < today;
+
+    const classes = [];
+    if (isSunday) classes.push('sunday-highlight');
+    if (isHoliday) classes.push('holiday-highlight');
+
+    // Markers logic
+    if (hasData) {
+      classes.push('has-edit-marker'); // Yellow Dot
+    } else if (isPast && !isSunday && !isHoliday) {
+      classes.push('has-missing-data-marker'); // Red Dot
+    }
+
+    return classes.join(' ');
   };
 
   useEffect(() => {
@@ -550,10 +737,18 @@ export default function DailyReport() {
   useEffect(() => {
     if (isFutureDate) {
       // T-003-EX-19: วันในอนาคต STRICTLY แสดงเฉพาะงาน "ลา" เท่านั้น (ไม่รวมประชุม/Meeting)
+      // [T-031] Use Activity Type "ลางาน" strictly.
       const leaveTasks = availableSubtasks.filter(
-        subtask => includesLeaveKeyword(subtask.taskName) ||
-          includesLeaveKeyword(subtask.subTaskName) ||
-          includesLeaveKeyword(subtask.item)
+        subtask => {
+          if (subtask.taskCategory === LEAVE_ACTIVITY_NAME) return true;
+          // Fallback if no taskCategory
+          if (!subtask.taskCategory) {
+            return includesLeaveKeyword(subtask.taskName) ||
+              includesLeaveKeyword(subtask.subTaskName) ||
+              includesLeaveKeyword(subtask.item);
+          }
+          return false;
+        }
       );
       setFilteredSubtasks(leaveTasks);
     } else {
@@ -687,9 +882,17 @@ export default function DailyReport() {
       .map((entry: DailyReportEntry) => {
         // ตรวจสอบว่าเป็นงานลาหรือไม่ จาก subtask ที่เกี่ยวข้อง
         const subtask = availableSubtasks.find(sub => sub.id === entry.subtaskId);
-        const isLeaveTask = subtask
-          ? includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
-          : includesNonWorkKeyword(entry.taskName) || includesNonWorkKeyword(entry.subTaskName) || includesNonWorkKeyword(entry.item);
+
+        // [T-031] Prioritize Activity Check
+        const activityToCheck = subtask?.taskCategory || entry.taskCategory;
+        let isLeaveTask = isActivityLeaveOrMeeting(activityToCheck);
+
+        // Fallback for legacy data without Activity
+        if (!activityToCheck && !isLeaveTask) {
+          isLeaveTask = subtask
+            ? includesNonWorkKeyword(subtask.taskName) || includesNonWorkKeyword(subtask.subTaskName) || includesNonWorkKeyword(subtask.item)
+            : includesNonWorkKeyword(entry.taskName) || includesNonWorkKeyword(entry.subTaskName) || includesNonWorkKeyword(entry.item);
+        }
 
         // สร้าง relateDrawing สำหรับข้อมูลเก่า
         let relateDrawing = entry.relateDrawing;
@@ -996,9 +1199,14 @@ export default function DailyReport() {
         null;
     }
 
+    // [T-031] Strict Activity Detection
+    // Use Activity (Task Category) as primary source of truth
     const isLeave = selectedSubtask
-      ? includesNonWorkKeyword(selectedSubtask.taskName) || includesNonWorkKeyword(selectedSubtask.subTaskName) || includesNonWorkKeyword(selectedSubtask.item)
+      ? isActivityLeaveOrMeeting(selectedSubtask.taskCategory) ||
+      // Fallback: Check keywords if Activity is missing/empty (for legacy data)
+      (!selectedSubtask.taskCategory && (includesNonWorkKeyword(selectedSubtask.taskName) || includesNonWorkKeyword(selectedSubtask.subTaskName) || includesNonWorkKeyword(selectedSubtask.item)))
       : false;
+
     // Note: initialProgress here is for newly selected subtask, not for existing entry validation.
     const newSubtaskInitialProgress = selectedSubtask?.subTaskProgress || 0;
 
@@ -1018,6 +1226,7 @@ export default function DailyReport() {
       subtaskPath: selectedSubtask.path || '',
       subTaskName: selectedSubtask.subTaskName || 'N/A',
       subTaskCategory: selectedSubtask.subTaskCategory || '',
+      taskCategory: selectedSubtask.taskCategory || '', // [T-031] Save Activity Type
       progress: isLeave ? '0%' : `${newSubtaskInitialProgress}%`,
       note: selectedSubtask.remark || '',
       internalRev: selectedSubtask.internalRev || '',
@@ -1028,8 +1237,9 @@ export default function DailyReport() {
       relateDrawing: relateDrawing,
       status: 'pending',
       isLeaveTask: isLeave,
-      otWorkingHours: isLeave ? '0:0' : '0:0',
+      // [T-030] Store initial progress for validation
       initialProgress: isLeave ? 0 : newSubtaskInitialProgress,
+      otWorkingHours: isLeave ? '0:0' : '0:0',
       progressError: '',
     } : {
       subtaskId: '', subtaskPath: '', progress: '0%', note: '', item: '', status: 'pending', relateDrawing: '', isLeaveTask: false, initialProgress: 0, progressError: '',
@@ -1107,6 +1317,25 @@ export default function DailyReport() {
       entriesCount: entriesForRecheck.length,
       sampleDates: entriesForRecheck.map(e => e.assignDate)
     });
+
+    // [T-030] Validation: Progress MUST increase (Current > Initial)
+    // Exception: Leave Tasks / Meeting Tasks (isLeaveTask = true)
+    for (const entry of entriesForRecheck) {
+      if (entry.status === 'deleted') continue;
+      if (entry.isLeaveTask) continue; // Leave/Meeting exceptions
+
+      const currentProgress = parseInt(entry.progress.replace('%', ''), 10) || 0;
+      const initialProgress = entry.initialProgress || 0;
+
+      // Strict Rule: Progress must be GREATER than initial.
+      if (currentProgress <= initialProgress && currentProgress < 100) {
+        // Special Exception: If it was already 100% and stays 100% (e.g. adding hours/files to completed task), allow it.
+        if (initialProgress === 100 && currentProgress === 100) continue;
+
+        setError(`กรุณาระบุความคืบหน้า (Progress) ให้มากกว่าเดิม (${initialProgress}%) สำหรับงาน: ${entry.taskName || 'Unspecified'}`);
+        return; // Block submission
+      }
+    }
 
     setEntriesToSubmit(entriesForRecheck);
     setIsRecheckOpen(true);
@@ -1311,35 +1540,6 @@ export default function DailyReport() {
     }
   };
 
-  const tileClassName = ({ date, view }: { date: Date; view: string }) => {
-    if (view === 'month') {
-      const classes = [];
-      const tileDate = formatDateToYYYYMMDD(date);
-      const today = formatDateToYYYYMMDD(new Date());
-
-      // ✅ ลบ console.log ออก
-      const isSunday = date.getDay() === 0;
-
-      if (tileDate < today) {
-        const entriesForDate = allDailyEntries.filter(entry => entry.assignDate === tileDate);
-
-        if (entriesForDate.length === 0 && !isSunday) {
-          classes.push('has-missing-data-marker');
-        } else {
-          const uniqueTimestamps = new Set(
-            entriesForDate.map(e => Math.floor((e.timestamp?.toMillis() || 0) / 1000))
-          );
-          if (uniqueTimestamps.size > 1) {
-            classes.push('has-edit-marker');
-          }
-        }
-      }
-
-      return classes.length > 0 ? classes.join(' ') : '';
-    }
-    return '';
-  };
-
   return (
     <>
       <LoadingOverlay isLoading={loading} />
@@ -1355,23 +1555,56 @@ export default function DailyReport() {
                   value={date || new Date()}
                   className="custom-calendar"
                   locale="en-GB"
-                  tileClassName={tileClassName}
+                  tileClassName={getTileClassName}
+                  tileContent={getTileContent}
                   key={`calendar-${employeeId}`}
                 />
               </div>
+
+              {/* [T-038] Add Holiday Button */}
+              {
+                isSupervisor && (
+                  <button
+                    onClick={() => setShowAddHolidayModal(true)}
+                    style={{
+                      marginTop: '16px',
+                      width: '100%',
+                      padding: '8px',
+                      background: '#f3f4f6',
+                      border: '1px dashed #d1d5db',
+                      borderRadius: '6px',
+                      color: '#4b5563',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <span>➕ เพิ่มวันหยุดประจำปี</span>
+                  </button>
+                )
+              }
+
+              {/* Legend */}
               <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
                 <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-blue-500 mr-2"></div><span>วันที่เลือก</span></div>
                 <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
                 <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>วันที่ยังไม่มีการลงข้อมูล</span></div>
                 <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-400 mr-2"></span><span>วันที่มีการแก้ไข</span></div>
+                {/* [T-038] Legend for Holiday/Sunday */}
+                <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-red-100 border border-red-200 mr-2"></div><span>วันอาทิตย์</span></div>
+                <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-purple-200 border border-purple-300 mr-2"></div><span>วันหยุดประจำปี</span></div>
               </div>
-              {/* เพิ่มส่วนแสดงระยะเวลาทำงานคงเหลือ */}
+
+              {/* Remaining Hours */}
               <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200">
                 <div className="flex flex-col">
                   <span className="text-sm font-semibold text-gray-800 mb-2">ระยะเวลาทำงานคงเหลือ</span>
                   {(() => {
                     const totalWorkingHours = dailyReportEntries
-                      .filter(entry => !(entry as any).isOrphan) // [T-003-EX-23] Filter out orphan entries
+                      .filter(entry => !(entry as any).isOrphan)
                       .reduce((total, entry) => {
                         const [hours, minutes] = (entry.normalWorkingHours || '0:0').split(':').map(Number);
                         return total + hours + minutes / 60;
@@ -1380,17 +1613,15 @@ export default function DailyReport() {
                     const remainingHours = Math.max(0, 8 - totalWorkingHours);
                     const hours = Math.floor(remainingHours);
                     const minutes = Math.round((remainingHours - hours) * 60);
-
-                    // Format to HH:mm
                     const formattedTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
                     return <span className="text-2xl font-bold text-blue-600 text-center">{formattedTime}</span>;
                   })()}
                 </div>
               </div>
-            </div>
+            </div >
 
             {/* Form Section */}
-            <div className="flex-1">
+            < div className="flex-1" >
               <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 min-h-[80vh]">
                 {/* Header Info */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-end">
@@ -1434,7 +1665,6 @@ export default function DailyReport() {
                 </div>
 
                 {/* Status Messages */}
-                {/* Note: Loading is now handled by LoadingOverlay at the top */}
                 {error && (
                   <div className="mb-4 p-4 text-red-700 bg-red-100 rounded-lg flex items-center justify-between">
                     <span>{error}</span>
@@ -1480,7 +1710,6 @@ export default function DailyReport() {
                             file.workDate === entry.assignDate
                           );
 
-                          // [T-003-EX-22] Orphan Styling
                           const rowBaseClass = (entry as any).isOrphan
                             ? 'bg-red-50'
                             : 'bg-yellow-50';
@@ -1495,9 +1724,7 @@ export default function DailyReport() {
                               <td className="p-2 border-r border-yellow-200">
                                 {entry.subtaskId ? (
                                   <div className="text-gray-800">
-                                    {/* [T-028] Display subtaskId in uppercase */}
                                     {entry.relateDrawing} <span className="text-gray-400 text-[10px]">({entry.subtaskId.toUpperCase()})</span>
-                                    {/* Show clear button for new entries OR in edit mode [T-029] */}
                                     {(editableRows.has(entry.id) || !entry.isExistingData) && (
                                       <button
                                         onClick={() => handleUpdateEntry(entry.id, { subtaskId: '', relateDrawing: '' })}
@@ -1514,9 +1741,9 @@ export default function DailyReport() {
                                     options={filteredSubtasks}
                                     allProjects={allProjects}
                                     selectedSubtaskIds={new Set(dailyReportEntries
-                                      .filter(e => e.id !== entry.id && e.subtaskPath) // ไม่รวม entry ปัจจุบัน
+                                      .filter(e => e.id !== entry.id && e.subtaskPath)
                                       .map(e => e.subtaskPath || '')
-                                      .filter(path => path !== ''))} // รวบรวม subtaskPath ที่ถูกเลือกแล้ว และไม่เป็น empty string
+                                      .filter(path => path !== ''))}
                                     onChange={handleRelateDrawingChange}
                                     onFocus={() => handleRowFocus(entry.id, index)}
                                     isDisabled={isReadOnly && !isFutureDate}
@@ -1524,7 +1751,6 @@ export default function DailyReport() {
                                 )}
                               </td>
 
-                              {/* เวลาทำงาน / Working Hours */}
                               <td className="p-2 border-r border-yellow-200">
                                 <div className="flex items-center gap-1 w-full max-w-[220px]">
                                   <Select
@@ -1553,7 +1779,6 @@ export default function DailyReport() {
                                 </div>
                               </td>
 
-                              {/* เวลาโอที / Overtime */}
                               <td className="p-2 border-r border-yellow-200">
                                 <div className="flex items-center gap-1 w-full max-w-[220px]">
                                   <Select
@@ -1638,7 +1863,6 @@ export default function DailyReport() {
                                 <div className="flex items-center justify-center gap-2">
                                   {!isReadOnly && (
                                     <>
-                                      {/* แสดงปุ่ม Edit เฉพาะเมื่อเป็นข้อมูลเก่า (มี logTimestamp) */}
                                       {entry.isExistingData && (
                                         <button
                                           onClick={() => toggleRowEdit(entry.id)}
@@ -1709,44 +1933,43 @@ export default function DailyReport() {
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </div >
+          </div >
         </div >
-
-        {/* Modals */}
-        < HistoryModal
-          isOpen={showHistoryModal}
-          onClose={() => setShowHistoryModal(false)
-          }
-          groupedLogs={historyLogsGrouped}
-          allProjects={allProjects}
-        />
-        <RecheckPopup
-          isOpen={isRecheckOpen}
-          onClose={() => setIsRecheckOpen(false)}
-          onConfirm={handleConfirmSubmit}
-          dailyReportEntries={entriesToSubmit}
-          deletedEntries={deletedEntries} // Pass deleted entries
-          workDate={workDate}
-          onEdit={() => setIsRecheckOpen(false)}
-          debug={{
-            title: "Debug Info",
-            selectedDate: workDate,
-            currentSystemDate: new Date().toISOString().split('T')[0],
-            entriesToSubmitDates: entriesToSubmit.map(e => e.assignDate),
-            timestamp: new Date().toLocaleTimeString()
-          }}
-        />
-        <FilePreviewModal
-          isOpen={isPreviewOpen}
-          onClose={() => {
-            setIsPreviewOpen(false);
-            setPreviewFile(null);
-          }}
-          file={previewFile}
-        />
-
       </PageLayout >
+
+      {/* Modals */}
+      < HistoryModal
+        isOpen={showHistoryModal}
+        onClose={() => setShowHistoryModal(false)
+        }
+        groupedLogs={historyLogsGrouped}
+        allProjects={allProjects}
+      />
+      <RecheckPopup
+        isOpen={isRecheckOpen}
+        onClose={() => setIsRecheckOpen(false)}
+        onConfirm={handleConfirmSubmit}
+        dailyReportEntries={entriesToSubmit}
+        deletedEntries={deletedEntries}
+        workDate={workDate}
+        onEdit={() => setIsRecheckOpen(false)}
+        debug={{
+          title: "Debug Info",
+          selectedDate: workDate,
+          currentSystemDate: new Date().toISOString().split('T')[0],
+          entriesToSubmitDates: entriesToSubmit.map(e => e.assignDate),
+          timestamp: new Date().toLocaleTimeString()
+        }}
+      />
+      <FilePreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => {
+          setIsPreviewOpen(false);
+          setPreviewFile(null);
+        }}
+        file={previewFile}
+      />
       <SuccessModal
         isOpen={showSuccessModal}
         message={successMessage}
@@ -1757,6 +1980,15 @@ export default function DailyReport() {
         message={errorMessage}
         onClose={() => setShowErrorModal(false)}
       />
+
+      {/* [T-038] Add Holiday Modal */}
+      <AddHolidayModal
+        isOpen={showAddHolidayModal}
+        onClose={() => setShowAddHolidayModal(false)}
+        onSubmit={handleAddHoliday}
+        initialDate={workDate}
+      />
     </>
   );
 }
+

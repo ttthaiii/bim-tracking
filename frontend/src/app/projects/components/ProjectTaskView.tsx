@@ -32,6 +32,7 @@ import ViewDeletedModal from '@/components/modals/ViewDeletedModal';
 import { uploadTaskEditAttachment } from "@/services/uploadService";
 import FilePreviewModal from "@/components/modals/FilePreviewModal";
 import { useAuth } from "@/context/AuthContext";
+import { getTaskStatusCategory, TaskStatusCategory, STATUS_CATEGORIES } from "@/services/dashboardService";
 
 interface TaskRow {
   firestoreId?: string;
@@ -182,7 +183,10 @@ const translateStatus = (status: string, isWorkRequest: boolean = false): string
 const ProjectsPage = () => {
   const { appUser } = useAuth();
   const [selectedProject, setSelectedProject] = useState("all");
-  const [selectedStatus, setSelectedStatus] = useState("");
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]); // [T-035] Multi-Select
+  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false); // [T-035] Dropdown State 
+  const [searchTerm, setSearchTerm] = useState(""); // [T-034] Search Term
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null); // [T-037] Sorting
   const [rows, setRows] = useState<TaskRow[]>(initialRows);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isProjectListOpen, setIsProjectListOpen] = useState(false);
@@ -216,7 +220,7 @@ const ProjectsPage = () => {
   const [allTasksCache, setAllTasksCache] = useState<(Task & { id: string })[]>([]);
   const [cacheLoaded, setCacheLoaded] = useState(false);
   const [filterActivity, setFilterActivity] = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
+  // const [filterStatus, setFilterStatus] = useState(""); // [T-036] Removed
   const [highlightedRow, setHighlightedRow] = useState<number | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showDeletedModal, setShowDeletedModal] = useState(false);
@@ -413,8 +417,68 @@ const ProjectsPage = () => {
     if (filterActivity) {
       filteredTasks = filteredTasks.filter(t => t.taskCategory === filterActivity);
     }
-    if (filterStatus) {
-      filteredTasks = filteredTasks.filter(t => t.currentStep === filterStatus);
+
+    // [T-034] Consolidated Status Filter Logic (Top Filter OR Header Filter)
+    // If usage is likely "Either/Or", we can prioritize them or AND them.
+    // User requested "Top Filter is broken". Let's make it work.
+    // Logic: If Top Filter is set, apply it. If Header Filter is set, apply it. (AND Logic if both?)
+    // Usually standard is: Global Filter (Top) AND Column Filter (Header).
+
+    const applyStatusFilter = (tasks: (Task & { id: string })[], statuses: string[]) => {
+      if (statuses.length === 0) return tasks;
+
+      return tasks.filter(t => {
+        // [T-035] Refined Filter Logic
+        // Check exact match for Work Request statuses
+        if (statuses.includes(t.currentStep || '')) return true;
+        // Check Category match for RFA
+        const category = getTaskStatusCategory(t);
+        if (statuses.includes(category)) return true;
+
+        return false;
+      });
+    };
+
+    // Top Multi-Select Filter
+    if (selectedStatuses.length > 0) {
+      filteredTasks = applyStatusFilter(filteredTasks, selectedStatuses);
+    }
+
+    // [T-034] Search Logic
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      filteredTasks = filteredTasks.filter(t =>
+        (t.taskName || "").toLowerCase().includes(lowerTerm) ||
+        (t.taskNumber || "").toLowerCase().includes(lowerTerm)
+      );
+    }
+
+    // [T-037] Sorting Logic
+    if (sortConfig) {
+      filteredTasks.sort((a, b) => {
+        let aValue: any = '';
+        let bValue: any = '';
+
+        switch (sortConfig.key) {
+          case 'id': aValue = a.id || ''; bValue = b.id || ''; break;
+          case 'relateDrawing': aValue = a.taskName || ''; bValue = b.taskName || ''; break;
+          case 'planStartDate': aValue = a.planStartDate ? (a.planStartDate.seconds * 1000) : 0; bValue = b.planStartDate ? (b.planStartDate.seconds * 1000) : 0; break;
+          case 'dueDate': aValue = a.dueDate ? (a.dueDate.seconds * 1000) : 0; bValue = b.dueDate ? (b.dueDate.seconds * 1000) : 0; break;
+          case 'statusDwg':
+            const getStatusSortValue = (t: any) => {
+              const isWR = ['PENDING_BIM', 'IN_PROGRESS', 'PENDING_ACCEPTANCE', 'REVISION_REQUESTED', 'COMPLETED'].includes(t.currentStep);
+              return isWR ? (t.currentStep || '') : getTaskStatusCategory(t);
+            };
+            aValue = getStatusSortValue(a);
+            bValue = getStatusSortValue(b);
+            break;
+          default: break;
+        }
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
     }
 
     const taskRows = filteredTasks.map(task => convertTaskToRow(task));
@@ -426,7 +490,7 @@ const ProjectsPage = () => {
     setEditAttachments({});
     setEditAttachmentErrors({});
     setEditChangesMap({});
-  }, [cacheLoaded, allTasksCache, selectedProject, filterActivity, filterStatus]);
+  }, [cacheLoaded, allTasksCache, selectedProject, filterActivity, selectedStatuses, searchTerm, sortConfig]);
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -1100,7 +1164,22 @@ const ProjectsPage = () => {
     }
   };
 
-  const statuses = ["กำลังดำเนินการ", "เสร็จสิ้น", "รอดำเนินการ"];
+
+
+  // [T-037] Sort Helpers
+  const handleSort = (key: string) => {
+    setSortConfig(current => {
+      if (current?.key === key) {
+        return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  const getSortIndicator = (key: string) => {
+    if (sortConfig?.key !== key) return <span style={{ color: '#ffffff80', fontSize: '10px' }}>⇅</span>;
+    return sortConfig.direction === 'asc' ? '▲' : '▼';
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: "#f0f2f5" }}>
@@ -1118,10 +1197,145 @@ const ProjectsPage = () => {
             <option value="all">ทุกโครงการ</option>
             {projects.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
           </select>
-          <select value={selectedStatus} onChange={e => setSelectedStatus(e.target.value)} style={{ padding: "8px 12px", width: "150px", border: "1px solid #ddd", borderRadius: "4px", fontSize: "14px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
-            <option value="">สถานะ</option>
-            {statuses.map(status => (<option key={status} value={status}>{status}</option>))}
-          </select>
+
+          {/* [T-034] Search Input */}
+          <div style={{ position: "relative" }}>
+            <input
+              type="text"
+              placeholder="🔍 ค้นหาชื่อแบบ..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                padding: "8px 12px 8px 30px", // space for icon if we had one inside, or just padding
+                width: "200px",
+                border: "1px solid #e5e7eb",
+                borderRadius: "6px",
+                fontSize: "14px",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+              }}
+            />
+            <span style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", fontSize: "12px", color: "#9ca3af" }}>🔍</span>
+          </div>
+
+          {/* [T-035] Reset Filter Button */}
+          {(selectedStatuses.length > 0 || searchTerm) && (
+            <button
+              onClick={() => {
+                setSelectedStatuses([]);
+                setSearchTerm("");
+                // setFilterStatus(""); // [T-036] Removed
+              }}
+              style={{
+                padding: "8px 12px",
+                background: "#fee2e2",
+                border: "1px solid #fecaca",
+                borderRadius: "6px",
+                fontSize: "12px",
+                color: "#dc2626",
+                cursor: "pointer",
+                fontWeight: 500,
+                display: "flex",
+                alignItems: "center",
+                gap: "4px"
+              }}
+            >
+              🔄 Reset Filter
+            </button>
+          )}
+
+          {/* [T-035] Multi-Select Custom Dropdown */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+              style={{
+                padding: "8px 12px",
+                border: "1px solid #ddd",
+                borderRadius: "4px",
+                fontSize: "14px",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                background: "#fff",
+                cursor: "pointer",
+                minWidth: "180px",
+                textAlign: "left",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center"
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "150px" }}>
+                {selectedStatuses.length === 0 ? "สถานะ (ทั้งหมด)" : `เลือกแล้ว (${selectedStatuses.length})`}
+              </span>
+              <span style={{ fontSize: "10px", color: "#666" }}>▼</span>
+            </button>
+
+            {isStatusDropdownOpen && (
+              <div style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                marginTop: "4px",
+                background: "#fff",
+                border: "1px solid #e5e7eb",
+                borderRadius: "6px",
+                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+                width: "240px",
+                zIndex: 50,
+                maxHeight: "300px",
+                overflowY: "auto"
+              }}>
+                <div style={{ padding: "8px", borderBottom: "1px solid #f3f4f6", fontSize: "12px", fontWeight: 600, color: "#9ca3af" }}>
+                  Work Request
+                </div>
+                {['PENDING_BIM', 'IN_PROGRESS', 'PENDING_ACCEPTANCE', 'REVISION_REQUESTED', 'COMPLETED'].map(status => {
+                  const labelMap: any = { 'PENDING_BIM': 'รอ BIM รับงาน', 'IN_PROGRESS': 'กำลังดำเนินการ', 'PENDING_ACCEPTANCE': 'รอตรวจรับ', 'REVISION_REQUESTED': 'ขอแก้ไข', 'COMPLETED': 'เสร็จสิ้น' };
+                  const isSelected = selectedStatuses.includes(status);
+                  return (
+                    <div
+                      key={status}
+                      onClick={() => {
+                        setSelectedStatuses(prev =>
+                          prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+                        );
+                      }}
+                      style={{ padding: "8px 12px", fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", background: isSelected ? "#eff6ff" : "transparent" }}
+                    >
+                      <input type="checkbox" checked={isSelected} readOnly style={{ cursor: "pointer" }} />
+                      <span>{labelMap[status]}</span>
+                    </div>
+                  );
+                })}
+
+                <div style={{ padding: "8px", borderBottom: "1px solid #f3f4f6", borderTop: "1px solid #f3f4f6", fontSize: "12px", fontWeight: 600, color: "#9ca3af" }}>
+                  เอกสาร RFA (Dashboard)
+                </div>
+                {STATUS_CATEGORIES.map(cat => {
+                  const isSelected = selectedStatuses.includes(cat);
+                  return (
+                    <div
+                      key={cat}
+                      onClick={() => {
+                        setSelectedStatuses(prev =>
+                          prev.includes(cat) ? prev.filter(s => s !== cat) : [...prev, cat]
+                        );
+                      }}
+                      style={{ padding: "8px 12px", fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", background: isSelected ? "#eff6ff" : "transparent" }}
+                    >
+                      <input type="checkbox" checked={isSelected} readOnly style={{ cursor: "pointer" }} />
+                      <span>{cat}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Backdrop to close dropdown */}
+            {isStatusDropdownOpen && (
+              <div
+                style={{ position: "fixed", inset: 0, zIndex: 40 }}
+                onClick={() => setIsStatusDropdownOpen(false)}
+              />
+            )}
+          </div>
         </div>
         <div style={{ background: "#fff", padding: "24px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.1), 0 1px 2px -1px rgba(0,0,0,0.1)", border: "1px solid #e5e7eb" }}>
           <div style={{ marginBottom: "16px", borderBottom: "1px solid #e5e7eb", paddingBottom: "16px" }}>
@@ -1137,8 +1351,12 @@ const ProjectsPage = () => {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead style={{ position: "sticky", top: 0, zIndex: 10, boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
                   <tr style={{ background: "#ff4d00" }}>
-                    <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>TASK ID</th>
-                    <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>RELATE DRAWING</th>
+                    <th onClick={() => handleSort('id')} style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px", cursor: "pointer" }}>
+                      TASK ID {getSortIndicator('id')}
+                    </th>
+                    <th onClick={() => handleSort('relateDrawing')} style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px", cursor: "pointer" }}>
+                      RELATE DRAWING {getSortIndicator('relateDrawing')}
+                    </th>
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "140px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                         <span>ACTIVITY</span>
@@ -1148,40 +1366,14 @@ const ProjectsPage = () => {
                         </select>
                       </div>
                     </th>
-                    <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>PLAN START DATE</th>
-                    <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "110px" }}>DUE DATE</th>
-                    <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "180px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                        <span>STATUS DWG.</span>
-                        <select
-                          value={filterStatus}
-                          onChange={e => setFilterStatus(e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          style={{ width: "20px", padding: "0", fontSize: "10px", border: "1px solid #fff", borderRadius: "3px", background: "#fff", color: "#000", cursor: "pointer" }}
-                        >
-                          <option value="">ทั้งหมด</option>
-
-                          {/* ✅ สถานะ Work Request */}
-                          <optgroup label="Work Request">
-                            <option value="PENDING_BIM">รอ BIM รับงาน</option>
-                            <option value="IN_PROGRESS">กำลังดำเนินการ</option>
-                            <option value="PENDING_ACCEPTANCE">รอตรวจรับ</option>
-                            <option value="REVISION_REQUESTED">ขอแก้ไข</option>
-                            <option value="COMPLETED">เสร็จสิ้น</option>
-                          </optgroup>
-
-                          {/* ✅ สถานะเอกสาร RFA */}
-                          <optgroup label="เอกสาร RFA">
-                            <option value="PENDING_REVIEW">รอตรวจสอบ</option>
-                            <option value="PENDING_CM_APPROVAL">ส่ง CM</option>
-                            <option value="REVISION_REQUIRED">แก้ไข</option>
-                            <option value="APPROVED">อนุมัติ</option>
-                            <option value="APPROVED_WITH_COMMENTS">อนุมัติตามคอมเมนต์ (ไม่แก้ไข)</option>
-                            <option value="APPROVED_REVISION_REQUIRED">อนุมัติตามคอมเมนต์ (ต้องแก้ไข)</option>
-                            <option value="REJECTED">ไม่อนุมัติ</option>
-                          </optgroup>
-                        </select>
-                      </div>
+                    <th onClick={() => handleSort('planStartDate')} style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px", cursor: "pointer" }}>
+                      PLAN START DATE {getSortIndicator('planStartDate')}
+                    </th>
+                    <th onClick={() => handleSort('dueDate')} style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "110px", cursor: "pointer" }}>
+                      DUE DATE {getSortIndicator('dueDate')}
+                    </th>
+                    <th onClick={() => handleSort('statusDwg')} style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px", cursor: "pointer" }}>
+                      STATUS DWG. {getSortIndicator('statusDwg')}
                     </th>
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "70px" }}>LINK FILE</th>
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>DOC. NO.</th>

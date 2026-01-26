@@ -70,6 +70,7 @@ export interface Subtask {
   subTaskProgress: number;
   subTaskScale: string;
   taskName: string;
+  taskCategory?: string; // [T-031] Activity Type from Parent Task
   wlFromscale: number;
   wlRemaining: number;
   subtaskStatus?: string;
@@ -108,6 +109,7 @@ export interface DailyReportEntry {
   subTaskScale?: string;
   project?: string; // This will hold the resolved Project ID
   taskName?: string;
+  taskCategory?: string; // [T-031] Activity Type from Parent Task
   remark?: string;
   item?: string;
   fileName?: string;
