@@ -16,18 +16,19 @@ import SuccessModal from '@/components/ui/SuccessModal';
 import ErrorModal from '@/components/modals/ErrorModal';
 import RelateWorkSelect from './components/RelateWorkSelect';
 import AssigneeSelect from './components/AssigneeSelect';
-import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
-import { getCachedProjects, getCachedTasks, getCachedSubtasks } from '@/services/cachedFirestoreService';
+import { useCache } from '@/context/CacheContext';
 import { calculateDeadlineStatus } from '@/utils/deadlineCalculator';
 import { uploadTaskEditAttachment } from '@/services/uploadService';
 import LoadingOverlay from '@/components/LoadingOverlay';
 import { checkTaskHasDailyReports } from '@/services/taskService'; // [T-021] Import Deletion Guard
+import { getCachedSubtasks } from '@/services/cachedFirestoreService'; // [T-005-E6] Fix ReferenceError
 
 interface TaskItem {
   id: string;
   taskName: string;
   taskCategory: string;
   taskStatus?: string; // ✅ ต้องมี field นี้
+  status?: string; // ✅ Add status field for compatibility
   dueDate?: any;
 }
 
@@ -86,8 +87,17 @@ interface ExistingSubtask {
 
 export default function TaskAssignment() {
   const { appUser } = useAuth();
-  const { getCache, setCache, invalidateCache } = useFirestoreCache();
-  const [projects, setProjects] = useState<any[]>([]);
+  const {
+    projects,
+    fetchProjects,
+    tasks: tasksCache,
+    fetchTasksForProject,
+    getCache,
+    setCache,
+    invalidateCache
+  } = useCache();
+
+  // const [projects, setProjects] = useState<any[]>([]); // Derived from cache
   const [selectedProject, setSelectedProject] = useState('all_assign');
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -220,22 +230,21 @@ export default function TaskAssignment() {
     handleCancelEdit();
   };
 
-  // ✅ โค้ดใหม่ - เรียบง่าย ไม่โหลดทุก Project
+  // ✅ Fetch Projects via Cache
   useEffect(() => {
     const loadProjects = async () => {
+      if (projects.length > 0) return;
       setLoading(true);
       try {
-        const projectList = await getCachedProjects(getCache, setCache);
-        setProjects(projectList);
+        await fetchProjects();
       } catch (error) {
         console.error('Error loading projects:', error);
       } finally {
         setLoading(false);
       }
     };
-
     loadProjects();
-  }, []); // ⬅️ Empty deps = ทำงานครั้งเดียวตอน mount
+  }, [fetchProjects, projects.length]);
 
   useEffect(() => {
     const fetchProjectData = async () => {
@@ -263,126 +272,91 @@ export default function TaskAssignment() {
 
       try {
         // ✅ 4. โค้ดส่วนที่แก้ไขสำหรับการดึงข้อมูล "All Assign" หรือ "Project" ปกติ
+        // ✅ 4. โค้ดส่วนที่แก้ไขสำหรับการดึงข้อมูล "All Assign" หรือ "Project" ปกติ
         if (selectedProject === 'all_assign') {
           if (!appUser) return; // ✅ รอให้ User Login เสร็จก่อน
 
           try {
             console.log('🌍 Fetching ALL ASSIGNED tasks for user:', appUser?.fullName);
 
-            // 1. ดึง Project ทั้งหมดมาก่อน
-            const allProjects = await getCachedProjects(getCache, setCache);
+            // ✅ Use Optimized Service with Collection Group Query
+            const { fetchAssignedSubtasks } = await import('@/services/taskAssignService');
 
-            const allTasks: TaskItem[] = [];
-            let allSubtasks: ExistingSubtask[] = [];
+            // Name matching logic
+            const fullName = appUser.fullName || '';
+            const username = appUser.username || '';
 
-            // 2. Loop ดึงข้อมูลของทุก Project (Parallel Requests)
-            const promises = allProjects.map(async (project) => {
-              // A. ดึง Tasks ของ Project นี้
-              const tasksCol = collection(db, 'tasks');
-              const q = query(tasksCol, where('projectId', '==', project.id));
-              const tasksSnapshot = await getDocs(q);
+            console.log(`👤 [T-045] Current User Identity: FullName="${fullName}", Username="${username}"`);
 
-              const projectTasks = tasksSnapshot.docs
-                .filter(doc => doc.data().taskStatus !== 'DELETED')
-                .map(doc => ({
-                  id: doc.id,
-                  taskName: doc.data().taskName || '',
-                  taskCategory: doc.data().taskCategory || '',
-                  dueDate: doc.data().dueDate || null
-                }));
+            // Priority 1: Full Name
+            let subtasks = await fetchAssignedSubtasks(fullName);
 
-              if (projectTasks.length === 0) return;
-
-              // B. ดึง Subtasks ของ Tasks เหล่านี้
-              const taskIds = projectTasks.map(t => t.id);
-              const subtasks = await getCachedSubtasks(project.id, taskIds, getCache, setCache);
-
-              // C. Filter เฉพาะที่ Assignee ตรงกับ User ปัจจุบัน
-              // ใช้ทั้ง fullName และ username เผื่อกรณีข้อมูลไม่ตรงกัน
-              const mySubtasks = subtasks.filter(s =>
-                s.subTaskAssignee === appUser?.fullName ||
-                s.subTaskAssignee === appUser?.username
-              );
-
-              if (mySubtasks.length > 0) {
-                allTasks.push(...projectTasks);
-
-                // เพิ่มข้อมูล Project Name ให้กับ Subtask เพื่อแสดงผล (ถ้าจำเป็น)
-                const subtasksWithProject = mySubtasks.map(s => ({
-                  ...s,
-                  project: project.name // เพิ่ม field นี้ไว้เผื่อใช้แสดงผล
-                }));
-                allSubtasks.push(...subtasksWithProject);
+            // Priority 2: Username (if different and priority 1 returned nothing)
+            if (subtasks.length === 0 && username && username !== fullName) {
+              console.log(`⚠️ [T-045] No tasks found for FullName. Trying Username: "${username}"...`);
+              const subtasksByUsername = await fetchAssignedSubtasks(username);
+              if (subtasksByUsername.length > 0) {
+                console.log(`✅ [T-045] Found tasks using Username!`);
+                subtasks = subtasksByUsername;
               }
-            });
+            }
 
-            await Promise.all(promises);
+            if (subtasks.length === 0) {
+              console.log("ℹ️ No assigned tasks found for user.");
+            }
 
-            setTasks(allTasks);
-
-            // คำนวณ Deadline Status เหมือนเดิม
-            const subtasksWithDeadline = allSubtasks.map(subtask => {
-              // ✅ Use taskId lookup
-              const task = subtask.taskId
-                ? allTasks.find(t => t.id === subtask.taskId)
-                : allTasks.find(t => t.taskName === subtask.taskName);
-              // ... logic เดิม ...
-              if (!task || !task.dueDate) {
-                return {
-                  ...subtask,
-                  deadlineStatus: { text: '-', bgColor: '', isOverdue: false }
-                };
-              }
-              const deadlineStatus = calculateDeadlineStatus(
-                subtask.subTaskProgress,
-                task.dueDate,
-                subtask.endDate
-              );
-              return { ...subtask, deadlineStatus };
-            });
-
-            setExistingSubtasks(subtasksWithDeadline);
+            // We still need to map to ExistingSubtask format fully if needed
+            // But the service returns "flat" objects.
+            setExistingSubtasks(subtasks as ExistingSubtask[]);
 
             // T-005-EX-1: Set Empty Row (Hide New Input) for All Assign mode
             setRows([]);
 
           } catch (error) {
-            console.error('❌ Error fetching all assigned tasks:', error);
-            setErrorMessage('เกิดข้อผิดพลาดในการดึงข้อมูล All Assign');
+            console.error('Error fetching all assigned tasks:', error);
+            setErrorMessage('เกิดข้อผิดพลาดในการดึงงานทั้งหมด');
             setShowErrorModal(true);
           } finally {
-            setLoading(false); // T-020: Stop loading
+            setLoading(false);
           }
-          return; // จบการทำงานสำหรับ case 'all_assign'
+          return; // Add return to prevent executing single project logic
         }
         // ✅ 1. โหลด Tasks (where ตัวเดียว - ไม่ต้อง Index)
         const tasksCol = collection(db, 'tasks');
         const q = query(tasksCol, where('projectId', '==', selectedProject));
         const tasksSnapshot = await getDocs(q);
 
-        // ✅ 2. กรองใน JavaScript
+        // ✅ 2. กรองใน JavaScript (Strict Filtering for DELETED)
         const taskList = tasksSnapshot.docs
           .filter(doc => {
             const data = doc.data();
-            const status = data.taskStatus;
+            const rawTaskStatus = data.taskStatus;
+            const rawStatus = data.status;
 
-            // กรอง DELETED ออก (แต่เก็บ Tasks ที่ไม่มี taskStatus)
-            if (status === 'DELETED') {
-              console.log('🗑️ Filtered out DELETED task:', doc.id);
+            // Normalize values
+            const taskStatus = (rawTaskStatus || '').toString().trim().toUpperCase();
+            const status = (rawStatus || '').toString().trim().toUpperCase();
+
+            // [T-005-E11-1] Debug Log for Deletion Check
+            const isDeleted = taskStatus === 'DELETED' || status === 'DELETED';
+
+            if (isDeleted) {
+              console.warn(`[T-005-E11-1] 🗑️ Filtered out DELETED task: ${doc.id} (${data.taskName}) | taskStatus: ${rawTaskStatus} | status: ${rawStatus}`);
               return false;
             }
 
+            // Optional: Log active tasks for verification
+            // console.log(`✅ Keeping Task: ${doc.id} | Status: ${taskStatus}`);
             return true;
           })
           .map(doc => {
             const data = doc.data();
-
-            console.log('✅ Task loaded:', doc.id, 'Status:', data.taskStatus || '(no status)');
-
             return {
               id: doc.id,
               taskName: data.taskName || '',
               taskCategory: data.taskCategory || '',
+              taskStatus: data.taskStatus, // ✅ Populate field
+              status: data.status,         // ✅ Populate field
               dueDate: data.dueDate || null
             };
           });
@@ -831,6 +805,11 @@ export default function TaskAssignment() {
 
       setSuccessMessage('ลบ Task สำเร็จ!');
       setShowSuccessModal(true);
+
+      // [T-053] Invalidate Project Tasks Cache
+      if (selectedProject) {
+        invalidateCache(`tasks_${selectedProject}`);
+      }
       // ------------------------------------
 
     } catch (error) {
@@ -950,6 +929,11 @@ export default function TaskAssignment() {
       setSuccessNewCount(newItemsCount);
       setSuccessUpdateCount(updateItemsCount);
       setShowSuccessModal(true);
+
+      // [T-053] Invalidate Project Tasks Cache to update Subtask Counts in Project Planning
+      if (selectedProject) {
+        invalidateCache(`tasks_${selectedProject}`);
+      }
 
       const taskIds = tasks.map(t => t.id);
       const updatedSubtasks = await getCachedSubtasks(
@@ -1521,12 +1505,12 @@ export default function TaskAssignment() {
                       Subtask ID {sortConfig?.key === 'subTaskNumber' && (sortConfig.direction === 'asc' ? '🔼' : '🔽')}
                     </th>
                     <th
-                      className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase cursor-pointer hover:bg-orange-700"
+                      className="w-[15%] px-2 py-3 text-left text-xs font-semibold text-white uppercase cursor-pointer hover:bg-orange-700"
                       onClick={() => handleSort('activity')}
                     >
                       Activity {sortConfig?.key === 'activity' && (sortConfig.direction === 'asc' ? '🔼' : '🔽')}
                     </th>
-                    <th className="w-[14%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Drawing</th>
+                    <th className="w-[20%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Drawing</th>
                     <th className="w-[12%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Relate Work</th>
                     <th className="w-[8%] px-2 py-3 text-left text-xs font-semibold text-white uppercase">Item</th>
                     <th className="w-[5%] px-2 py-3 text-center text-xs font-semibold text-white uppercase">Internal Rev.</th>
@@ -1572,7 +1556,12 @@ export default function TaskAssignment() {
                       <td className="px-2 py-2">
                         <Select
                           options={tasks
-                            .filter(t => !row.activity || t.taskCategory === row.activity)
+                            .filter(t => {
+                              const rawTaskStatus = t.taskStatus || '';
+                              const rawStatus = t.status || '';
+                              const isDeleted = rawTaskStatus.toString().trim().toUpperCase() === 'DELETED' || rawStatus.toString().trim().toUpperCase() === 'DELETED';
+                              return !isDeleted && (!row.activity || t.taskCategory === row.activity);
+                            })
                             .map(t => ({
                               value: t.id,
                               label: t.taskName
@@ -1645,25 +1634,7 @@ export default function TaskAssignment() {
                         <span className="text-gray-400 text-xs">-</span>
                       </td>
                       <td className="px-2 py-2 text-center">
-                        <button
-                          onClick={() => deleteRow(row.id)}
-                          className="p-1 text-gray-600 hover:text-red-600 transition-colors"
-                          title="ลบแถวนี้"
-                        >
-                          <svg
-                            className="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
+                        {/* [T-005-E2] Removed Delete Button for New Row as requested */}
                       </td>
                     </tr>
                   ))}

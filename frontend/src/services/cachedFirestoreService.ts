@@ -74,16 +74,20 @@ export async function getCachedTasks(
       const tasksCol = collection(db, 'tasks');
       const q = query(
         tasksCol,
-        where('projectId', '==', projectId),
-        where('taskStatus', '!=', 'DELETED')  // ⬅️ เพิ่มบรรทัดนี้
+        where('projectId', '==', projectId)
+        // [T-048-E2] FIXED: Remove query filter to include Legacy Data (missing taskStatus)
+        // where('taskStatus', '!=', 'DELETED')
       );
       const snapshot = await getDocs(q);
-      console.log('Tasks loaded from Firestore:', snapshot.size); // ⬅️ เพิ่ม log
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        taskName: doc.data().taskName || '',
-        taskCategory: doc.data().taskCategory || ''
-      }));
+      console.log('Tasks loaded from Firestore:', snapshot.size);
+      return snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }))
+        // [T-048-E2] Filter in memory to allow undefined/missing status (Legacy)
+        // Only explicitly exclude if status is strictly 'DELETED'
+        .filter((task: any) => task.taskStatus !== 'DELETED');
     },
     10 * 60 * 1000 // ⬅️ TTL = 10 นาที (Tasks เปลี่ยนบ้าง)
   );

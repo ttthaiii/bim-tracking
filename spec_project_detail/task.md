@@ -93,6 +93,12 @@
             2. **Action**: Separate `leaveHours` using strict check.
             3. **Status**: Fixed
 - [x] [T-002] Dashboard Implementation (F-002)
+    - **Error Logs**:
+        - **[T-002-E1-1]**: Deleted Tasks Visible in Dashboard
+            1. **Issue**: Tasks deleted in Project Planning still show up in Dashboard stats and tables.
+            2. **Root Cause**: `dashboardService.ts` fetches all tasks/projects without checking `status === 'deleted'`.
+            3. **Action**: Add filter `status !== 'deleted'` to all dashboard queries (`getProjectCount`, `getActiveTaskCount`, `getDashboardStats`, `getRecentActivities`).
+            4. **Status**: Fixed
 - [x] [T-016] Daily Report Dashboard Breakdown (F-009)
     - Implement Dashboard Tab and Filters
     - Implement Data Aggregation Service
@@ -270,6 +276,59 @@
             1. **Requirement**: Show summary of deleted items in Submit popup. Ensure strictly awaited deletion before UI update to prevent state lag.
             2. **Action**: Update `RecheckPopup.tsx` to show deleted items. Refine `handleConfirmSubmit` in `page.tsx`.
             3. **Status**: Fixed
+        - **[T-003-E30-1]**: Upload Modal Overflow (UI Defect)
+            1. **Issue**: Upload Popup content expands beyond screen height without scrollbar; buttons float/unclickable.
+            2. **Root Cause**: Modal container lacks `flex-col` layout and `overflow-y-auto` on the content area, causing children to overflow the `max-h` constraint.
+            3. **Action**: Apply `flex flex-col`, `overflow-hidden` to container, and `overflow-y-auto` to the table wrapper.
+            4. **Status**: Fixed
+        - **[T-003-E30-2]**: Calendar Abnormal Status (Feature)
+            1. **Requirement**: Show "Orange Dot" for days with < 8 hours of work (Normal + OT), similar to Dashboard "Abnormal" status.
+            2. **Proposed Logic**: Use `dailyStatsMap` to sum hours. If < 8 and not Leave/Holiday -> `has-abnormal-marker`.
+            3. **Status**: Fixed
+        - **[T-003-E30-3]**: Refine Abnormal Marker Color (UI)
+            1. **Requirement**: Change Abnormal Marker from Orange to Dark Blue (to distinguish from Red/Missing).
+            2. **Action**: Update CSS `.has-abnormal-marker`.
+            3. **Status**: Fixed
+        - **[T-003-E30-4]**: Missing Data Tooltip (UI)
+            1. **Requirement**: Show "ไม่มีการลงข้อมูล" tooltip for days with Red Dot (Missing Data).
+            2. **Action**: Update `getTileContent` in `DailyReportPage.tsx`.
+            3. **Status**: Fixed
+        - **[T-003-E30-5]**: Update Calendar Legend (UI)
+            1. **Requirement**: Add "Abnormal" (Dark Blue Dot) to the calendar legend.
+            2. **Action**: Update Legend section in `DailyReportPage.tsx`.
+            3. **Status**: Fixed
+        - **[T-003-E30-6]**: Refine Calendar Markers (Green/Yellow Logic) (Feature)
+            1. **Requirement**: 
+                - >= 8 hours -> Green Dot.
+                - < 8 hours -> Yellow Dot.
+                - Missing -> Red Dot.
+            2. **Action**: Update `custom-calendar.css` and `DailyReportPage.tsx`.
+            3. **Status**: Fixed
+        - **[T-003-E30-7]**: Fix Missing Data Marker (Red Dot) (Defect)
+            1. **Issue**: Red Dot not showing for past dates without data.
+            2. **Root Cause**: Likely Timezone/Date comparison issue in `isPast` logic.
+            3. **Action**: Fix `isPast` comparison to use strict string comparison (YYYY-MM-DD).
+            4. **Status**: Fixed
+            - **Error Logs**:
+                - **[T-003-E30-7-E1-1]**: Red Dot Marker Not Showing (Regression)
+                    1. **Issue**: "Missing" data dates shows tooltip but no Red Dot.
+                    2. **Root Cause**: Investigating CSS specificity or class application order. Logic `isPast` confirms True (Tooltip works).
+                    3. **Action**: Verify CSS content/display properties and ensure no override by `react-calendar` default styles.
+                    4. **Status**: Fixed
+        - **[T-003-E30-8]**: Add Leave Marker (Brown Dot) (Feature)
+            1. **Requirement**: Leave >= 8 hours -> Brown Dot.
+            2. **Action**: Add `.has-leave-marker` CSS and update logic in `DailyReportPage.tsx`.
+            3. **Status**: Fixed
+            - **Error Logs**:
+                - **[T-003-E30-11-1]**: Holiday Highlight Missing (Regression)
+                    1. **Issue**: Purple background for Holidays not showing.
+                    2. **Root Cause**: CSS Specificity issue. `holiday-highlight` likely overridden by other background styles or default tile background.
+                    3. **Action**: Add `!important` to specificity or ensure it loads last.
+                    4. **Status**: Fixed
+        - **[T-003-E30-12]**: Refine Legend Layout (UI)
+            1. **Requirement**: Group "Highlights" vs "Dots" and use 2-column layout to reduce height.
+            2. **Action**: Update Legend section in `DailyReportPage.tsx` with grid layout and section headers (or visual grouping).
+            3. **Status**: Fixed
 
 ## 4. Project Management Page (`/projects`)
 - [x] [T-004] Project Management System (F-004)
@@ -278,9 +337,67 @@
             1. **Root Cause**: `confirmSave` closes modal immediately and lacks `isSaving` guard.
             2. **Action**: Implement `isSaving` state and disable buttons.
             3. **Status**: Fixed
+        - **[T-004-E2]**: Add Subtask Count Column (Feature)
+            1. **Requirement**: Insert "Subtask Count" column after "DOC NO." in Projects Planning table.
+            2. **Status**: Fixed
+        - **[T-003-E5]**: Inconsistent Time Units
+            1. **Issue**: "Working Hours" uses "0 ชม." while "Overtime" uses "0 hrs" or "0 mins".
+            2. **Status**: Fixed
+        - **[T-004-E3]**: Performance - Projects Page Refetching
+            1. **Issue**: Data reloads on every page navigation due to unmounting.
+            2. **Status**: Fixed
+        - **[T-004-E4]**: Build Error - CacheContext
+            1. **Issue**: Missing 'use client' directive in CacheContext.tsx causing Next.js build error.
+            2. **Status**: Fixed
+        - **[T-004-E5]**: Runtime Error - ProjectTaskView
+            1. **Issue**: ReferenceError 'activities' is not defined. State variable likely removed during refactoring.
+            2. **Status**: Fixed
+        - **[T-004-E6]**: Runtime Error - CacheContext Infinite Loop
+            1. **Issue**: "Maximum update depth exceeded" in CacheContext due to cyclic state updates during fetchTasksForProject.
+            2. **Status**: Fixed
+        - **[T-004-E7]**: Logic Error - Missing Task Name & Details
+            1. **Issue**: Task Name and other columns not displaying because `getCachedTasks` returned incomplete data.
+            2. **Status**: Fixed
+        - **[T-004-E8]**: Logic Error - Ghost Data & Missing Loader
+            1. **Issue**: Switching to an empty project shows stale data. Missing visual feedback (Spinner) during switch.
+            2. **Status**: Fixed
+        - **[T-004-E8-2]**: Logic Error - Ghost Data Persistence
+            1. **Issue**: Table still fails to refresh/clear when switching to empty project. Suspect `cacheLoaded` guard blocking updates for non-All views.
+            2. **Status**: Fixed
+        - **[T-004-E8-3]**: Logic Error - Ghost Data Persistence (Attempt 3)
+            1. **Issue**: Table retains "All Projects" data when switching to an empty project. Suggests `setRows` is not triggered or input data is stale.
+            2. **Status**: Fixed
+        - **[T-004-E9]**: UI/UX Error - Missing Loading Feedback
+            1. **Issue**: Loading Spinner (Blur Screen) does not appear when switching projects, causing user confusion and "Ghost Data" perception.
+            2. **Status**: Fixed
 
 ## 5. Task Management Page (`/tasks`)
 - [x] [T-005] Task Management System (F-005)
+    - **Error Logs**:
+        - **[T-005-E6]**: Runtime Error - tasks/page.tsx
+            1. **Issue**: ReferenceError 'getCachedSubtasks' is not defined. Missing import.
+            2. **Status**: Fixed
+        - **[T-005-E7]**: Runtime Error - RelateWorkSelect & GlobalDataContext
+            1. **Issue**: `useFirestoreCache` context is missing a provider in the component tree.
+            2. **Status**: Fixed
+        - **[T-005-E8]**: Hydration Error - tasks/page.tsx
+            1. **Issue**: Invalid HTML nesting `<td>` cannot be a child of `<td>`. Likely due to malformed JSX in the New Subtask row.
+            2. **Status**: Fixed
+        - **[T-005-E3]**: Performance - Redundant Fetch & Slow "All Assign"
+            1. **Issue**: "All Assign" loops through every project, causing slowness. Redundant fetch calls found.
+            2. **Status**: Fixed
+        - **[T-005-E4]**: Build Error - taskAssignService
+            1. **Issue**: Parsing error (Expression expected) in taskAssignService.ts due to malformed code insertion.
+            2. **Status**: Fixed
+        - **[T-005-E5]**: Build Error - tasks/page.tsx
+            1. **Issue**: Syntax error "Expected ',' got 'finally'" due to premature closing of `try` block before the `catch` block.
+            2. **Status**: Fixed
+        - **[T-005-E1]**: Column Overlap (Activity/Relate Drawing)
+            1. **Issue**: "Activity" and "Relate Drawing" columns are too close/overlapping in Subtask table.
+            2. **Status**: Fixed
+        - **[T-005-E2]**: Unwanted UI Elements in New Subtask Row
+            1. **Issue**: "New Subtask" row has a trash icon and inconsistent blue highlighting.
+            2. **Status**: Fixed
 - [x] [T-011] Implement "All Assign" Filter (F-008)
 - [x] [T-012] Set "All Assign" as Default (F-008)
 - [x] [T-013] Add Due Date Column (F-009)
@@ -291,6 +408,15 @@
 - [x] [T-014] Implement Table Sorting (F-009)
 - [x] [T-015] Implement Task Filters (F-009)
     - **Error Logs**:
+        - **[T-005-E8]**: UI Error - Missing Loading State
+            1. **Issue**: No visual feedback when fetching subtasks.
+            2. **Status**: Fixed
+        - **[T-005-E9]**: Logic Error - Progress Synchronization
+            1. **Issue**: Task Assignment progress does not reflect latest Daily Report changes (Sync latency). Deleting a report does not revert progress.
+            2. **Status**: Fixed
+        - **[T-005-E10]**: Logic Error - Deleted Tasks in Dropdown
+            1. **Issue**: "Relate Drawing" / "Activity" dropdowns in Task Assignment show deleted tasks from Projects Planning.
+            2. **Status**: Fixed
         - **[T-011-E1-1]**: Syntax Error (Unexpected EOF)
             1. **Root Cause**: Incomplete file write.
             2. **Status**: Fixed

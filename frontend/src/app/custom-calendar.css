@@ -18,7 +18,8 @@
 /* Navigation Bar */
 
 .custom-calendar .react-calendar__navigation {
-  background-color: #f97316 !important; /* Orange background */
+  background-color: #f97316 !important;
+  /* Orange background */
   color: white;
   height: 48px;
   margin-bottom: 0;
@@ -39,7 +40,8 @@
 }
 
 .custom-calendar .react-calendar__navigation button:hover {
-  background-color: #fb923c !important; /* Lighter orange for hover */
+  background-color: #fb923c !important;
+  /* Lighter orange for hover */
 }
 
 .custom-calendar .react-calendar__navigation button:disabled {
@@ -52,8 +54,10 @@
   text-align: center;
   font-weight: 600;
   font-size: 0.8rem;
-  color: #111827; /* gray-900 - Darker text */
-  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+  color: #111827;
+  /* gray-900 - Darker text */
+  border-bottom: 1px solid #e5e7eb;
+  /* gray-200 */
   padding: 0.75rem 0 0.5rem 0;
 }
 
@@ -74,7 +78,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative; /* Added for marker positioning */
+  position: relative;
+  /* Added for marker positioning */
   height: 54px !important;
   width: 100% !important;
   margin: 0 !important;
@@ -82,12 +87,14 @@
   background: none;
   border: none;
   border-radius: 0.75rem !important;
-  color: #374151; /* gray-700 */
+  color: #374151;
+  /* gray-700 */
   transition: background-color 0.2s;
 }
 
 .custom-calendar .react-calendar__tile:hover {
-  background-color: #f3f4f6; /* gray-100 */
+  background-color: #f3f4f6;
+  /* gray-100 */
 }
 
 .custom-calendar .react-calendar__viewContainer,
@@ -105,77 +112,127 @@
 
 /* Today's Date */
 .custom-calendar .react-calendar__tile--now {
-  background: #fed7aa !important; /* orange-200 */
-  color: #9a3412 !important; /* orange-800 */
+  background: #fed7aa !important;
+  /* orange-200 */
+  color: #9a3412 !important;
+  /* orange-800 */
   font-weight: bold;
 }
+
 .custom-calendar .react-calendar__tile--now:hover {
-  background: #fdba74 !important; /* orange-300 */
+  background: #fdba74 !important;
+  /* orange-300 */
 }
 
 
 /* Selected Date */
 .custom-calendar .react-calendar__tile--active,
 .custom-calendar .react-calendar__tile--active:hover {
-  background: #a5b4fc !important; /* indigo-300 */
-  color: #1e1b4b !important; /* indigo-950 */
+  background: #a5b4fc !important;
+  /* indigo-300 */
+  color: #1e1b4b !important;
+  /* indigo-950 */
   font-weight: bold;
 }
 
-/* Marker for a date with EDITED data */
-.has-edit-marker::after {
+/* Marker for COMPLETE Work (>= 8 hours) */
+.has-complete-marker::after {
   content: '';
   position: absolute;
-  bottom: 4px; /* Position the dot at the bottom */
+  bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background-color: #facc15; /* yellow-400 */
-  box-shadow: 0 0 2px rgba(0,0,0,0.2);
+  background-color: #22c55e;
+  /* green-500 */
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
 }
 
-/* Marker for a date with MISSING data */
-.has-missing-data-marker::after {
+/* Marker for INCOMPLETE Work (< 8 hours) */
+.has-incomplete-marker::after {
   content: '';
   position: absolute;
-  bottom: 4px; /* Position the dot at the bottom */
+  bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background-color: #ef4444; /* red-500 */
-  box-shadow: 0 0 2px rgba(0,0,0,0.2);
+  background-color: #eab308;
+  /* yellow-500 */
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Marker for LEAVE (>= 8 hours) */
+.has-leave-marker::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #a16207;
+  /* yellow-800/brown */
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
 }
 
 /* Past date that can be edited */
 .tile-can-edit-past {
-  background-color: #f3f4f6 !important; /* gray-100 */
-  color: #4b5563 !important; /* gray-600 */
+  background-color: #f3f4f6 !important;
+  /* gray-100 */
+  color: #4b5563 !important;
+  /* gray-600 */
 }
 
 /* Disabled dates */
 .custom-calendar .react-calendar__tile:disabled {
-    background-color: white !important;
-    color: #d1d5db !important; /* gray-300 */
-    cursor: not-allowed;
-    text-decoration: line-through;
+  background-color: white !important;
+  color: #d1d5db !important;
+  /* gray-300 */
+  cursor: not-allowed;
+  text-decoration: line-through;
 }
 
 .custom-calendar .react-calendar__tile:disabled:hover {
-    background-color: white !important;
+  background-color: white !important;
 }
 
 /* [T-038] Holiday and Sunday Highlights */
 .sunday-highlight {
-  background-color: #fee2e2 !important; /* red-100 */
-  color: #7f1d1d !important; /* red-900 */
+  background-color: #fee2e2 !important;
+  /* red-100 */
+  color: #7f1d1d !important;
+  /* red-900 */
 }
 
-.holiday-highlight {
-  background-color: #e9d5ff !important; /* purple-200 */
-  color: #581c87 !important; /* purple-900 */
-  font-weight: bold;
+
+/* Marker for MISSING data (Reinforce specificity) */
+.custom-calendar .react-calendar__tile.has-missing-data-marker {
+  position: relative !important;
+}
+
+.custom-calendar .react-calendar__tile.has-missing-data-marker::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #ef4444;
+  /* red-500 */
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
+  display: block !important;
+  z-index: 10;
+}
+
+/* [T-003-E30-11] Fix Holiday Highlight Specificity */
+.custom-calendar .react-calendar__tile.holiday-highlight {
+  background-color: #e9d5ff !important;
+  color: #581c87 !important;
 }

@@ -47,8 +47,8 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
     completedTasks.forEach(task => {
       const uploadedAtISO = task.fileUploadedAt
         ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
-            ? (task.fileUploadedAt as any).toDate().toISOString()
-            : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
+          ? (task.fileUploadedAt as any).toDate().toISOString()
+          : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
         : null;
       initialStatus[task.id] = {
         file: null,
@@ -81,33 +81,33 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
         const existing = prev[task.id];
         merged[task.id] = existing
           ? {
-              ...existing,
-              existingFileName: existing.existingFileName || task.fileName || null,
-              existingFileURL: existing.existingFileURL || task.fileURL || null,
-              existingStoragePath: existing.existingStoragePath || task.storagePath || null,
-              existingFileUploadedAt: existing.existingFileUploadedAt || (task.fileUploadedAt
-                ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
-                    ? (task.fileUploadedAt as any).toDate().toISOString()
-                    : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
-                : null),
-              uploaded: existing.uploaded || Boolean(task.fileURL),
-              skipped: existing.skipped || Boolean(task.fileURL && !existing.file),
-            }
+            ...existing,
+            existingFileName: existing.existingFileName || task.fileName || null,
+            existingFileURL: existing.existingFileURL || task.fileURL || null,
+            existingStoragePath: existing.existingStoragePath || task.storagePath || null,
+            existingFileUploadedAt: existing.existingFileUploadedAt || (task.fileUploadedAt
+              ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+                ? (task.fileUploadedAt as any).toDate().toISOString()
+                : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
+              : null),
+            uploaded: existing.uploaded || Boolean(task.fileURL),
+            skipped: existing.skipped || Boolean(task.fileURL && !existing.file),
+          }
           : {
-              file: null,
-              uploading: false,
-              uploaded: Boolean(task.fileURL),
-              skipped: Boolean(task.fileURL),
-              error: null,
-              existingFileName: task.fileName || null,
-              existingFileURL: task.fileURL || null,
-              existingStoragePath: task.storagePath || null,
-              existingFileUploadedAt: task.fileUploadedAt
-                ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
-                    ? (task.fileUploadedAt as any).toDate().toISOString()
-                    : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
-                : null,
-            };
+            file: null,
+            uploading: false,
+            uploaded: Boolean(task.fileURL),
+            skipped: Boolean(task.fileURL),
+            error: null,
+            existingFileName: task.fileName || null,
+            existingFileURL: task.fileURL || null,
+            existingStoragePath: task.storagePath || null,
+            existingFileUploadedAt: task.fileUploadedAt
+              ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+                ? (task.fileUploadedAt as any).toDate().toISOString()
+                : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
+              : null,
+          };
       });
       return merged;
     });
@@ -143,10 +143,10 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
         existingStoragePath: prev[task.id]?.existingStoragePath || task.storagePath || null,
         existingFileUploadedAt: prev[task.id]?.existingFileUploadedAt
           || (task.fileUploadedAt
-                ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
-                    ? (task.fileUploadedAt as any).toDate().toISOString()
-                    : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
-                : null),
+            ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
+              ? (task.fileUploadedAt as any).toDate().toISOString()
+              : (task.fileUploadedAt as unknown as Date).toISOString?.() || null)
+            : null),
       }
     }));
   };
@@ -190,20 +190,20 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
         task.assignDate,
         task.subtaskPath || ''
       );
-      
+
       setUploadStatus(prev => ({
         ...prev,
         [task.id]: {
-        ...prev[task.id],
-        uploading: false,
-        uploaded: true,
-        skipped: false,
-        error: null,
-        existingFileName: status.file?.name || prev[task.id]?.existingFileName || null,
-        existingFileURL: cdnURL,
-        existingStoragePath: storagePath,
-        existingFileUploadedAt: fileUploadedAt.toDate().toISOString(),
-        file: null,
+          ...prev[task.id],
+          uploading: false,
+          uploaded: true,
+          skipped: false,
+          error: null,
+          existingFileName: status.file?.name || prev[task.id]?.existingFileName || null,
+          existingFileURL: cdnURL,
+          existingStoragePath: storagePath,
+          existingFileUploadedAt: fileUploadedAt.toDate().toISOString(),
+          file: null,
         }
       }));
     } catch (error) {
@@ -221,8 +221,8 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
 
   const handleUploadAll = async () => {
     setIsAllUploading(true);
-    
-    const tasksWithFiles = completedTasks.filter(task => 
+
+    const tasksWithFiles = completedTasks.filter(task =>
       uploadStatus[task.id]?.file && !uploadStatus[task.id]?.skipped
     );
 
@@ -267,8 +267,8 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
         storagePath: status.existingStoragePath || task.storagePath || '',
         fileUploadedAt: status.existingFileUploadedAt || (task.fileUploadedAt
           ? (typeof (task.fileUploadedAt as any)?.toDate === 'function'
-              ? (task.fileUploadedAt as any).toDate().toISOString()
-              : (task.fileUploadedAt as unknown as Date).toISOString?.() || undefined)
+            ? (task.fileUploadedAt as any).toDate().toISOString()
+            : (task.fileUploadedAt as unknown as Date).toISOString?.() || undefined)
           : undefined),
       };
     });
@@ -281,8 +281,8 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl p-8 shadow-2xl border border-green-100" style={{ minWidth: '70vw', maxHeight: '90vh' }}>
-        <div className="flex justify-between items-center mb-6">
+      <div className="bg-white rounded-2xl p-8 shadow-2xl border border-green-100 flex flex-col" style={{ minWidth: '70vw', maxHeight: '90vh' }}>
+        <div className="flex justify-between items-center mb-6 shrink-0">
           <h2 className="text-2xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-green-600 to-green-800">
             Upload Files for Completed Tasks
           </h2>
@@ -294,9 +294,12 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
           </button>
         </div>
 
-        <div className="overflow-x-auto mb-6">
-          <table className="w-full border-collapse rounded-xl overflow-hidden shadow-lg">
-            <thead>
+        <div className="overflow-y-auto overflow-x-auto mb-6 flex-1 min-h-0 border-collapse rounded-xl shadow-lg relative">
+          {/* Added relative to contain sticky header if needed, but table structure handles it mostly. 
+                Crucial change: flex-1 min-h-0 allows this div to shrink/grow within parent, creating scrollbar. 
+            */}
+          <table className="w-full border-collapse">
+            <thead className="sticky top-0 z-10">
               <tr className="bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg">
                 <th className="border border-green-300 p-4 w-16 text-lg font-semibold first:rounded-tl-xl">No</th>
                 <th className="border border-green-300 p-4 w-1/3 text-lg font-semibold">Relate Drawing</th>
@@ -310,7 +313,7 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
               {completedTasks.map((task, index) => {
                 const status = uploadStatus[task.id];
                 return (
-                  <tr key={task.id} className="hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 transition-all duration-200">
+                  <tr key={task.id} className="hover:bg-gradient-to-r hover:from-green-50 hover:to-emerald-50 transition-all duration-200 bg-white">
                     <td className="border border-green-200 p-4 text-center text-lg text-gray-900">
                       {index + 1}
                     </td>
@@ -381,11 +384,10 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
                         <button
                           onClick={() => handleSingleUpload(task)}
                           disabled={status?.uploading || (!status?.file && status?.uploaded)}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                            status?.uploading || (!status?.file && status?.uploaded)
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${status?.uploading || (!status?.file && status?.uploaded)
                               ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                               : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white shadow-md hover:shadow-lg transform hover:scale-105'
-                          }`}
+                            }`}
                         >
                           {status?.uploading ? 'กำลังอัปโหลด...' : status?.uploaded && !status?.file ? 'อัปโหลดแล้ว' : 'อัปโหลด'}
                         </button>
@@ -393,11 +395,10 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
                           <button
                             onClick={() => handleSkipToExisting(task)}
                             disabled={status?.uploading}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                              status?.uploading
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${status?.uploading
                                 ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                 : 'bg-white border border-green-400 text-green-600 hover:bg-green-50 shadow-sm'
-                            }`}
+                              }`}
                           >
                             ใช้ไฟล์เดิม
                           </button>
@@ -411,21 +412,20 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
           </table>
         </div>
 
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center shrink-0">
           <div className="text-sm text-gray-600">
             {completedTasks.length} งานที่เสร็จสมบูรณ์ (Progress 100%)
           </div>
-          
+
           <div className="flex space-x-4">
             {hasFilesToUpload && (
               <button
                 onClick={handleUploadAll}
                 disabled={isAllUploading}
-                className={`px-6 py-3 rounded-xl text-lg font-medium shadow-lg transition-all duration-200 transform hover:scale-105 ${
-                  isAllUploading
+                className={`px-6 py-3 rounded-xl text-lg font-medium shadow-lg transition-all duration-200 transform hover:scale-105 ${isAllUploading
                     ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                     : 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white hover:shadow-xl'
-                }`}
+                  }`}
               >
                 {isAllUploading ? (
                   <div className="flex items-center">
@@ -437,15 +437,14 @@ export const UploadPopup: React.FC<UploadPopupProps> = ({
                 )}
               </button>
             )}
-            
+
             <button
               onClick={() => onComplete(buildSelectedFileMap())}
               disabled={hasFilesToUpload}
-              className={`px-8 py-3 rounded-xl text-lg font-medium shadow-lg transition-all duration-200 transform hover:scale-105 ${
-                hasFilesToUpload
+              className={`px-8 py-3 rounded-xl text-lg font-medium shadow-lg transition-all duration-200 transform hover:scale-105 ${hasFilesToUpload
                   ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                   : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white hover:shadow-xl'
-              }`}
+                }`}
             >
               เสร็จสิ้น
             </button>

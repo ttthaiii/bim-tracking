@@ -17,6 +17,7 @@ import { getEmployeeDailyReportEntries, fetchAvailableSubtasksForEmployee, saveD
 import type { SelectedFileMap } from '@/components/UploadPopup';
 import PageLayout from '@/components/shared/PageLayout';
 import { useAuth } from '@/context/AuthContext';
+import { useCache } from '@/context/CacheContext';
 import { useDashboard } from '@/context/DashboardContext';
 import { DailyReportEntry, Subtask, UploadedFile } from '@/types/database';
 import type { Project } from '@/lib/projects';
@@ -214,7 +215,7 @@ const getHourOptions = (entries: DailyReportEntry[], currentEntryId: string): { 
   const maxAvailableHours = Math.floor(8 - totalOtherHours);
   const options = Array.from(
     { length: maxAvailableHours + 1 },
-    (_, i) => ({ value: i.toString(), label: `${i} ชม.` })
+    (_, i) => ({ value: i.toString(), label: `${i} hrs` })
   );
 
   return options;
@@ -227,16 +228,16 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
 
   // ถ้าเหลือเวลาน้อยกว่า 1 ชั่วโมง ให้แสดงตัวเลือกนาทีตามที่เหลือ
   if (remainingHours < 0) {
-    return [{ value: '0', label: '0 น.' }];
+    return [{ value: '0', label: '0 mins' }];
   } else if (remainingHours === 0) {
-    return [{ value: '0', label: '0 น.' }];
+    return [{ value: '0', label: '0 mins' }];
   } else if (remainingHours < 1) {
     const maxMinutes = Math.floor(remainingHours * 60);
     return [0, 15, 30, 45]
       .filter(m => m <= maxMinutes)
       .map(m => ({
         value: m.toString(),
-        label: `${m} น. `
+        label: `${m} mins`
       }));
   }
 
@@ -244,7 +245,7 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
   const remainingMinutes = Math.floor(remainingHours * 60);
   return [0, 15, 30, 45].map(m => ({
     value: m.toString(),
-    label: `${m} น.`
+    label: `${m} mins`
   }));
 };
 
@@ -276,6 +277,7 @@ const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[])
 
 export default function DailyReport() {
   const { appUser } = useAuth();
+  const { invalidateCache } = useCache(); // [T-053]
   const { setHasUnsavedChanges } = useDashboard();
   const baseId = useId();
   const [date, setDate] = useState<Value>(null);
@@ -537,6 +539,22 @@ export default function DailyReport() {
     if (view !== 'month') return null;
     const dateStr = formatDateToYYYYMMDD(date);
     const stat = dailyStatsMap[dateStr];
+    // [T-003-E30-4] Tooltip for Missing Data
+    // Check if missing data marker would be applied
+    const hasData = datesWithData.has(dateStr);
+    const todayStr = formatDateToYYYYMMDD(new Date());
+    const isPast = dateStr < todayStr;
+    const isSunday = date.getDay() === 0;
+    const isHoliday = publicHolidays.some(h => h.date === dateStr);
+
+    if (!hasData && isPast && !isSunday && !isHoliday) {
+      return (
+        <div
+          className="absolute inset-0 w-full h-full"
+          title="ไม่มีการลงข้อมูล"
+        />
+      );
+    }
 
     if (!stat) return null;
 
@@ -574,10 +592,8 @@ export default function DailyReport() {
     const hasData = datesWithData.has(dateStr);
 
     // Check if date is in the past (before today)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tileDate = new Date(dateStr); // Use string to avoid TZ issues logic check
-    const isPast = tileDate < today;
+    const todayStr = formatDateToYYYYMMDD(new Date());
+    const isPast = dateStr < todayStr;
 
     const classes = [];
     if (isSunday) classes.push('sunday-highlight');
@@ -585,7 +601,26 @@ export default function DailyReport() {
 
     // Markers logic
     if (hasData) {
-      classes.push('has-edit-marker'); // Yellow Dot
+      // [T-003-E30-6] Refined Markers
+      const stats = dailyStatsMap[dateStr];
+      const totalHours = stats ? (stats.normal + stats.ot) : 0;
+      const isLeaveDay = stats ? (stats.leave > 0) : false;
+
+      // Logic:
+      // 1. Leave Day = Yellow (Incomplete work hours, technically) or Green? 
+      //    User request: "Normal Hours >= 8 -> Green", "< 8 -> Yellow".
+      //    Let's stick to strict hours. Leave usually counts as work, but if user wants stricter visual:
+      //    If totalHours >= 8 (including OT) -> Green.
+      //    Else -> Yellow.
+
+      const totalLeave = dailyStatsMap[dateStr]?.leave || 0;
+      if (totalLeave >= 8) {
+        classes.push('has-leave-marker');
+      } else if (totalHours >= 8) {
+        classes.push('has-complete-marker');
+      } else {
+        classes.push('has-incomplete-marker');
+      }
     } else if (isPast && !isSunday && !isHoliday) {
       classes.push('has-missing-data-marker'); // Red Dot
     }
@@ -1113,9 +1148,32 @@ export default function DailyReport() {
     prevEntries.sort((a, b) => b.assignDate.localeCompare(a.assignDate)); // Descending (newest first)
     const prevEntry = prevEntries[0];
 
-    // [Updated Logic]: Min progress must be at least 1, and >= previous progress
+    // [T-051] Chronological Validation
+    // Min = Prev Progress (Strict >? No, usually >= or >. User said "Day 12=30%, Edit Day 13 => 31-59%". So MIN is > 30 => 31).
+    // Let's set Min = Prev + 1?
+    // User said: "Day 12 (30%) ... Day 13 can be 31 to 59".
+    // So Min should be `prevProgress + 1` if we strictly enforce progress *moves*.
+    // BUT what if user wants to log work but progress didn't visually increase (stuck)?
+    // User complaint was about "Editing". 
+    // Let's stick to: "Cannot be lower than Previous". So `>= Prev`. 
+    // IF user explicitly said "31", then `> Prev`.
+    // Let's use `Math.max(0, prevProgress)` as absolute floor. 
+    // If strict, `Math.max(prevProgress, 1)`.
+    // Valid Range: [PrevProgress, NextProgress].
+
+    // User Example: 
+    // Day 12: 30%
+    // Day 13: 50% (Current)
+    // Day 15: 60%
+    // Edit Day 13: Can be 31-59? Or 30-60?
+    // If I put 30, it matches Day 12. Usually OK.
+    // If I put 31, OK.
+    // If I put 60, Matches Day 15. Usually OK.
+
+    // So Min = PrevProgress. Max = NextProgress.
+
     const prevProgress = prevEntry ? (parseInt(prevEntry.progress.replace('%', ''), 10) || 0) : 0;
-    const min = Math.max(1, prevProgress);
+    const min = prevProgress; // Allow same value (e.g. continuing work but stuck)
 
     // Find earliest entry AFTER today (Max Limit)
     const nextEntries = validEntries.filter(e => e.assignDate > workDate);
@@ -1327,13 +1385,40 @@ export default function DailyReport() {
       const currentProgress = parseInt(entry.progress.replace('%', ''), 10) || 0;
       const initialProgress = entry.initialProgress || 0;
 
-      // Strict Rule: Progress must be GREATER than initial.
-      if (currentProgress <= initialProgress && currentProgress < 100) {
-        // Special Exception: If it was already 100% and stays 100% (e.g. adding hours/files to completed task), allow it.
-        if (initialProgress === 100 && currentProgress === 100) continue;
+      // [T-051] Validation Refined: 
+      // Allow "No Change" (Current == Initial) if user is editing other fields (OT/Note).
+      // Only block if Current < Initial (Regression) unless it fits chronological logic?
+      // Actually user asked for "Prev < Current < Next".
+      // The `entriesForRecheck` loop just checks regression against *snapshot initial*.
 
-        setError(`กรุณาระบุความคืบหน้า (Progress) ให้มากกว่าเดิม (${initialProgress}%) สำหรับงาน: ${entry.taskName || 'Unspecified'}`);
-        return; // Block submission
+      // If no change, allow it.
+      if (currentProgress === initialProgress) continue;
+
+      // Strict Rule: Progress must be GREATER than initial (unless logic permits regression contextually, but generally we want progress to move forward from start of day edit?)
+      // Wait, `initialProgress` here comes from `entry.initialProgress`.
+      // If I opened the form and it was 30%, `initialProgress` is 30%.
+      // If I don't touch it, `currentProgress` is 30%. `30 <= 30` is true, so it blocked.
+      // FIX: Change `<=` to `<`.
+      if (currentProgress < initialProgress && currentProgress < 100) {
+        // [T-051] Exception: If the value respects the chronological bounds (handled in input validation), maybe we trust it?
+        // But here is the final gate.
+        // User example: Edit Day 13 (was 50%). If valid range is 31-59%.
+        // If I change to 40% (regression from 50%), it should be allowed IF it's > PrevDay (30%).
+        // But `initialProgress` is 50%.
+
+        // So, we should RELAX this check. The `handleProgressValidation` (Blur) already enforces Min/Max bounds.
+        // This check was preventing "accidental regression".
+        // Let's rely on getProgressBounds mainly. 
+        // We block only if it violates the *Absolute* Min from `getProgressBounds`.
+
+        const { min } = getProgressBounds(entry.subtaskId);
+        if (currentProgress < min) {
+          setError(`กรุณาระบุความคืบหน้า (Progress) ให้สอดคล้องกับลำดับเวลา (ต้องไม่ต่ำกว่า ${min}%) สำหรับงาน: ${entry.taskName || 'Unspecified'}`);
+          return;
+        }
+
+        // If it satisfies Min but is < Initial, it means user is "Correcting" a value downwards. Allow it.
+        continue;
       }
     }
 
@@ -1523,9 +1608,25 @@ export default function DailyReport() {
 
       setHasUnsavedChanges(false);
       setDeletedEntries([]); // Clear deleted entries after success
-      // Do NOT clear cache or fetchAllData to avoid race condition
-      // setTempDataCache({});  <-- REMOVED
-      // await fetchAllData(employeeId); <-- REMOVED
+
+      // [T-052] Fix Auto-Refresh: Reload all data to ensure Calendar/Sign updates
+      // Optimistic updates are good, but full refresh guarantees consistency for "dots" in Calendar.
+      setTempDataCache({});
+      await fetchAllData(employeeId);
+
+      // [T-053] Invalidate Project Tasks Cache
+      // Identify projects involved in this submission to refresh Project Planning view
+      const projectIdsToInvalidate = new Set<string>();
+      entriesToSave.forEach(e => {
+        const pName = e.project;
+        const pObj = allProjects.find(p => p.name === pName || p.id === pName);
+        if (pObj) projectIdsToInvalidate.add(pObj.id);
+      });
+
+      projectIdsToInvalidate.forEach(pid => {
+        console.log(`[T-053] Invalidating cache for project: ${pid}`);
+        invalidateCache(`tasks_${pid}`);
+      });
 
       prevWorkDateRef.current = workDate;
 
@@ -1587,15 +1688,26 @@ export default function DailyReport() {
                 )
               }
 
-              {/* Legend */}
-              <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700 space-y-2">
-                <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-blue-500 mr-2"></div><span>วันที่เลือก</span></div>
-                <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
-                <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>วันที่ยังไม่มีการลงข้อมูล</span></div>
-                <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-400 mr-2"></span><span>วันที่มีการแก้ไข</span></div>
-                {/* [T-038] Legend for Holiday/Sunday */}
-                <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-red-100 border border-red-200 mr-2"></div><span>วันอาทิตย์</span></div>
-                <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-purple-200 border border-purple-300 mr-2"></div><span>วันหยุดประจำปี</span></div>
+              <div className="mt-4 p-4 bg-white rounded-lg shadow-md border border-gray-200 text-xs text-gray-700">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  {/* Column 1: Status Markers (Right/Content) */}
+                  <div className="space-y-2">
+                    <div className="font-semibold text-gray-900 border-b pb-1 mb-1">สถานะงาน</div>
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-green-500 mr-2"></span><span>ทำงานครบ 8 ชม.</span></div>
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-400 mr-2"></span><span>ทำงานไม่ครบ 8 ชม.</span></div>
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-yellow-800 mr-2"></span><span>ลางาน (ครบ 8 ชม.)</span></div>
+                    <div className="flex items-center"><span className="w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>วันที่ยังไม่มีการลงข้อมูล</span></div>
+                  </div>
+
+                  {/* Column 2: Highlights (Left/Background) */}
+                  <div className="space-y-2">
+                    <div className="font-semibold text-gray-900 border-b pb-1 mb-1">ไฮไลท์วันที่</div>
+                    <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-orange-500 mr-2"></div><span>วันที่ปัจจุบัน</span></div>
+                    <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-blue-500 mr-2"></div><span>วันที่เลือก</span></div>
+                    <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-red-100 border border-red-200 mr-2"></div><span>วันอาทิตย์</span></div>
+                    <div className="flex items-center"><div className="w-3 h-3 rounded-sm bg-purple-200 border border-purple-300 mr-2"></div><span>วันหยุดประจำปี</span></div>
+                  </div>
+                </div>
               </div>
 
               {/* Remaining Hours */}

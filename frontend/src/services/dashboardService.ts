@@ -89,9 +89,16 @@ export interface RecentActivity {
 }
 
 export async function getProjectCount() {
+  /* [T-002-E1-1] Filter deleted projects */
   const projectsRef = collection(db, 'projects');
   const snapshot = await getDocs(projectsRef);
-  return snapshot.size;
+
+  const activeProjects = snapshot.docs.filter(doc => {
+    const data = doc.data();
+    return (data.status || '').toLowerCase() !== 'deleted';
+  });
+
+  return activeProjects.length;
 }
 
 export async function getActiveTaskCount() {
@@ -102,7 +109,11 @@ export async function getActiveTaskCount() {
 
     const activeTasks = snapshot.docs.filter(doc => {
       const task = doc.data();
-      return task.progress < 1 && task.startDate != null;
+      // [T-002-E1-1] Filter deleted tasks
+      const isDeleted = (task.status || '').toLowerCase() === 'deleted' ||
+        (task.taskStatus || '').toLowerCase() === 'deleted';
+
+      return !isDeleted && task.progress < 1 && task.startDate != null;
     });
 
     return activeTasks.length;
@@ -139,6 +150,12 @@ export async function getDashboardStats(projectId?: string): Promise<DashboardSt
     let completedTasks = 0;
     snapshot.forEach(doc => {
       const task = doc.data() as Task;
+
+      // [T-002-E1-1] Filter deleted tasks
+      const isDeleted = (task.status || '').toLowerCase() === 'deleted' ||
+        (task.taskStatus || '').toLowerCase() === 'deleted';
+      if (isDeleted) return;
+
       const status = getTaskStatusCategory(task);
       if (documentStatus[status] !== undefined) {
         documentStatus[status]++;
@@ -148,7 +165,8 @@ export async function getDashboardStats(projectId?: string): Promise<DashboardSt
       }
     });
 
-    const totalTasks = snapshot.size;
+    // [T-002-E1-1] Calculate total tasks excluding deleted ones
+    const totalTasks = Object.values(documentStatus).reduce((a, b) => a + b, 0);
     const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
 
     return {
@@ -188,27 +206,31 @@ export async function getRecentActivities(limit?: number): Promise<RecentActivit
     });
 
     let activities = snapshot.docs
+      .filter(doc => {
+        const task = doc.data() as Task;
+        return (task.status || '').toLowerCase() !== 'deleted' &&
+          (task.taskStatus || '').toLowerCase() !== 'deleted';
+      })
       .map(doc => {
         const task = doc.data() as Task;
-
-        // 2. แก้ไข object ที่ return ให้เรียกใช้ property ได้โดยตรง
         return {
           id: doc.id,
-          date: parseDate(task.lastUpdate), // เอา (task as any) ออก
-          dueDate: parseDate(task.dueDate), // แก้ให้ตรงกับ property ที่มีอยู่
+          date: parseDate(task.lastUpdate),
+          dueDate: parseDate(task.dueDate),
           projectId: task.projectId,
           projectName: projectsMap.get(task.projectId) || 'Unknown Project',
           activityType: 'Document Updated',
           documentNumber: task.documentNumber || '',
           status: getTaskStatusCategory(task),
           currentStep: task.currentStep,
-          subtaskCount: task.subtaskCount,   // เอา (task as any) ออก
-          totalMH: task.totalMH,             // เอา (task as any) ออก
+          subtaskCount: task.subtaskCount,
+          totalMH: task.totalMH,
           description: getActivityDescription(task),
           revNo: task.rev || ''
         };
       })
       .sort((a, b) => b.date.getTime() - a.date.getTime());
+
     if (limit) {
       activities = activities.slice(0, limit);
     }
@@ -284,7 +306,12 @@ export async function getTaskDetails(projectId?: string): Promise<TaskDetails[]>
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
-    })) as TaskDetails[];
+    }))
+      .filter((t: any) => {
+        // [T-002-E1-1] Filter deleted tasks
+        return (t.status || '').toLowerCase() !== 'deleted' &&
+          (t.taskStatus || '').toLowerCase() !== 'deleted';
+      }) as TaskDetails[];
   } catch (error) {
     console.error('Error fetching task details:', error);
     return [];

@@ -40,10 +40,52 @@
         - **UI**: Custom Dropdown with Checkbox/Toggle.
         - **Logic**: Array-based filtering (`array.includes`).
 
-- [ ] [T-045] Fix Missing Data for All Assignees
-    - **Goal**: "Missing" status should appear even when viewing all users.
+- [ ] [T-048] Fix Project Status Filter (Work Request)
+    - **Concept/Goal**: Correctly filter Work Request tasks by resolving language mismatch and improve filter UX.
     - **Implementation Details**:
-        - **Logic**: Iterate all Users -> Generate Dates -> Check for Gaps.
+        - **Logic**: Map Thai labels ("รอ BIM รับงาน") to DB status ("PENDING_BIM") in `applyStatusFilter`.
+        - **UI**: Add "Select All" option to Status Dropdown.
+    - **Confirmed Behavior**:
+        - Selecting "รอ BIM รับงาน" shows items with status `PENDING_BIM`.
+        - "Select All" toggles all statuses.
+        - Work Requests with missing `currentStep` default to `PENDING_BIM` (Fix logic).
+        - **[E2 Fix] Legacy Tasks**: Tasks without `taskStatus` field are now visible (Client-side DELETED check).
+
+- [ ] [T-049] Refine Delete Logic (Active Subtasks)
+    - **Concept/Goal**: Safe deletion. Only allow deleting tasks with NO active subtasks.
+    - **Implementation Details**:
+        - **Logic**: Check `subtasks` status. If all deleted, allow parent delete.
+        - **Reference**: Confirm ID-based referencing for stability.
+    - **Confirmed Behavior**:
+        - Button hidden if active subtasks exist.
+        - Button visible if count is 0 OR all subtasks deleted.
+
+- [ ] [T-050] Relocate New Task Row to Top (Project Planning)
+    - **Concept/Goal**: Consistency with Task Assignment UI. Input row at the top.
+    - **Implementation Details**:
+        - **Logic**: Reorder `rows` array (`[initial, ...tasks]`).
+        - **UI**: Added "NEW" badge to ID column.
+    - **Confirmed Behavior**:
+        - Empty row appears at top.
+        - Shows "NEW" in blue text.
+
+- [ ] [T-051] Chronological Progress Validation
+    - **Goal**: Allow inserting/editing progress between dates correctly.
+    - **Logic**: `PrevDate.Progress < Current.Progress <= NextDate.Progress`.
+    - **Exception**: Allow "No Change" (Current == Old).
+    - **Confirmed Behavior**: System allows 31-59% if Day 12=30% and Day 15=60%.
+
+- [ ] [T-052] Fix Daily Report Auto-Refresh
+    - **Goal**: Calendar and Data refresh immediately after submit.
+    - **Implementation**: Call fetch/refresh trigger in `onSuccess`.
+
+- [x] [T-053] Immediate Cache Updates
+    - **Goal**: Prevent stale data after mutations (Create/Update).
+    - **Implementation**: Enabled `invalidateCache` in context. Added manual invalidation triggers in Project Planning (Save/Delete), Task Assignment (Save), and Daily Report (Submit). Data now refreshes instantly.
+
+- [x] [T-045] Fix Missing Data for All Assignees
+    - **Goal**: "Missing" status should appear even when viewing all users. (Corrected: Fix empty data in All Assign filter)
+    - **Implementation**: Added logic to search by `fullName` first, then fallback to `username`. **Optimized Query**: Removed `!= DELETED` filter from Firestore to utilize existing indexes (preventing "Missing Index" error) and moved deletion filtering to Client-side JavaScript.
         - **Perf**: Memoize generated rows.
 - [ ] **[T-020] Task Table Loading State**
     - **Concept/Goal**: Visual feedback during async operations.
@@ -328,3 +370,17 @@
     - **Implementation Details**:
         - **Logic**: Calculate Mon-Sun based on Today.
         - **State**: Init `startDate`/`endDate` with calculated values.
+
+- [x] **[T-005-E9] Progress Synchronization Logic**
+    - **Goal**: Ensure Task Assignment progress reflects latest Daily Report changes, including deletions.
+    - **Implementation Details**:
+        - **Logic**: `taskAssignService.ts` - `calculateTrueProgress` deduplicates logs by date and filters out deleted entries before updating Subtask.
+    - **Confirmed Behavior**:
+        - Deleting a Daily Report reverts Subtask progress to previous valid state.
+        - Progress never "stucks" on a deleted value.
+
+- [ ] **[T-005-E11-1] Deleted Tasks Visible in Relate Drawing**
+    - **Goal**: Prevent deleted tasks from appearing in dropdowns.
+    - **Implementation Details**:
+        - **Logic**: `tasks/page.tsx` - Strict filtering of `taskStatus === 'DELETED'`.
+    - **Confirmed Behavior**: Deleted tasks do not appear in Relate Drawing options.

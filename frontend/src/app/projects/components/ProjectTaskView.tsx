@@ -32,6 +32,7 @@ import ViewDeletedModal from '@/components/modals/ViewDeletedModal';
 import { uploadTaskEditAttachment } from "@/services/uploadService";
 import FilePreviewModal from "@/components/modals/FilePreviewModal";
 import { useAuth } from "@/context/AuthContext";
+import { useCache } from "@/context/CacheContext";
 import { getTaskStatusCategory, TaskStatusCategory, STATUS_CATEGORIES } from "@/services/dashboardService";
 
 interface TaskRow {
@@ -46,6 +47,7 @@ interface TaskRow {
   docNo: string;
   link?: string;
   progress?: number;
+  subtaskCount?: number; // [T-004-E2]
   correct: boolean;
 }
 
@@ -78,6 +80,7 @@ const initialRows: TaskRow[] = [
     docNo: "",
     link: "",
     progress: 0,
+    subtaskCount: 0,
     correct: false,
   },
 ];
@@ -138,6 +141,7 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
     docNo: taskData.documentNumber || "",
     link: taskData.link || "",
     progress: taskData.progress || 0,
+    subtaskCount: taskData.subtaskCount || 0, // [T-004-E2]
     correct: false,
   };
 };
@@ -182,7 +186,6 @@ const translateStatus = (status: string, isWorkRequest: boolean = false): string
 
 const ProjectsPage = () => {
   const { appUser } = useAuth();
-  const [selectedProject, setSelectedProject] = useState("all");
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]); // [T-035] Multi-Select
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false); // [T-035] Dropdown State 
   const [searchTerm, setSearchTerm] = useState(""); // [T-034] Search Term
@@ -191,11 +194,21 @@ const ProjectsPage = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isProjectListOpen, setIsProjectListOpen] = useState(false);
   const [touchedRows, setTouchedRows] = useState<Set<number>>(new Set());
-  const [projects, setProjects] = useState<(Project & { id: string })[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activities, setActivities] = useState<any[]>([]);
+  // ✅ Use Cache Context
+  const {
+    projects,
+    fetchProjects,
+    // [T-053] Use Cache Context for immediate updates
+    tasks: tasksCache, // FIX: Destructure as tasksCache to match existing logic
+    fetchTasksForProject: refreshTasks
+  } = useCache();
+
+  // Local state for UI
+  const [loading, setLoading] = useState(false);
+  const [tasksLoading, setTasksLoading] = useState(false); // Add tasks loading state
+  const [selectedProject, setSelectedProject] = useState<string>("all");
+  const [activities, setActivities] = useState<any[]>([]); // Restored missing state
   const [activitiesLoading, setActivitiesLoading] = useState(true);
-  const [tasksLoading, setTasksLoading] = useState(false);
   const [editingRows, setEditingRows] = useState<Set<number>>(new Set());
   const [editedRows, setEditedRows] = useState<Set<number>>(new Set());
   const [originalRows, setOriginalRows] = useState<Map<number, TaskRow>>(new Map());
@@ -217,7 +230,6 @@ const ProjectsPage = () => {
   };
   const [showExportModal, setShowExportModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ idx: number; row: TaskRow } | null>(null);
-  const [allTasksCache, setAllTasksCache] = useState<(Task & { id: string })[]>([]);
   const [cacheLoaded, setCacheLoaded] = useState(false);
   const [filterActivity, setFilterActivity] = useState("");
   // const [filterStatus, setFilterStatus] = useState(""); // [T-036] Removed
@@ -390,22 +402,71 @@ const ProjectsPage = () => {
     loadActivities();
   }, []);
 
+  // ✅ Fetch Projects via Cache
   useEffect(() => {
-    const loadAllTasks = async () => {
-      if (cacheLoaded || projects.length === 0) return;
+    const loadProjects = async () => {
+      if (projects.length > 0) return; // Already loaded from cache
+
+      setLoading(true);
       try {
-        setTasksLoading(true);
-        const allTasks = await getTasksForProject();
-        setAllTasksCache(allTasks);
-        setCacheLoaded(true);
+        await fetchProjects();
       } catch (error) {
-        console.error('Error loading tasks:', error);
+        console.error("Error loading projects:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadProjects();
+  }, [fetchProjects, projects.length]);
+
+  // ✅ Fetch Tasks via Cache when project selected
+  useEffect(() => {
+    const loadTasks = async () => {
+      setTasksLoading(true); // [T-004-E9] Always show loader start
+
+      try {
+        if (selectedProject === "all") {
+          if (projects.length > 0 && !cacheLoaded) {
+            await Promise.all(projects.map(p => refreshTasks(p.id)));
+            setCacheLoaded(true);
+          }
+        } else {
+          // Even if cached, we await slightly or just ensure fetch request completes (if invalid)
+          // But since we want to show spinner even for cached switch (user request), let's ensure it stays true for a tick
+          if (!tasksCache[selectedProject]) {
+            await refreshTasks(selectedProject);
+          } else {
+            // Optional: Short delay if user insists on seeing spinner for cached data context switch
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+      } catch (error) {
+        console.error("Error loading tasks:", error);
       } finally {
         setTasksLoading(false);
       }
     };
-    loadAllTasks();
-  }, [projects, cacheLoaded]);
+    if (projects.length > 0) {
+      loadTasks();
+    }
+  }, [selectedProject, projects, refreshTasks, cacheLoaded]);
+
+  // [T-004-E8-3] Force clear rows when project changes to prevent ghost data
+  useEffect(() => {
+    setRows(initialRows);
+  }, [selectedProject]);
+
+  // Combined Tasks for "All" view or Specific Project
+  const currentTasks = useMemo(() => {
+    if (selectedProject !== "all") {
+      return tasksCache[selectedProject] || [];
+    }
+    return Object.values(tasksCache).flat();
+  }, [selectedProject, tasksCache]);
+
+  // Replace allTasksCache usage with currentTasks
+  const allTasksCache = currentTasks;
+
 
   useEffect(() => {
     if (!cacheLoaded || allTasksCache.length === 0) return;
@@ -430,10 +491,21 @@ const ProjectsPage = () => {
       return tasks.filter(t => {
         // [T-035] Refined Filter Logic
         // Check exact match for Work Request statuses
-        if (statuses.includes(t.currentStep || '')) return true;
+        let currentStep = t.currentStep || '';
+
+        // [T-048-E1] Fallback: If Work Request has NO step, assume it is PENDING_BIM (New)
+        if (!currentStep && t.taskCategory === 'Work Request') {
+          currentStep = 'PENDING_BIM';
+        }
+
+        const matchStep = statuses.includes(currentStep);
+
         // Check Category match for RFA
         const category = getTaskStatusCategory(t);
-        if (statuses.includes(category)) return true;
+        const matchCategory = statuses.includes(category);
+
+        if (matchStep) return true;
+        if (matchCategory) return true;
 
         return false;
       });
@@ -482,7 +554,7 @@ const ProjectsPage = () => {
     }
 
     const taskRows = filteredTasks.map(task => convertTaskToRow(task));
-    setRows([...taskRows, ...initialRows]);
+    setRows([...initialRows, ...taskRows]); // [T-050] Move NEW row to top
     setEditingRows(new Set());
     setEditedRows(new Set());
     setOriginalRows(new Map());
@@ -493,22 +565,8 @@ const ProjectsPage = () => {
   }, [cacheLoaded, allTasksCache, selectedProject, filterActivity, selectedStatuses, searchTerm, sortConfig]);
 
   useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        setLoading(true);
-        const projectsData = await getProjectDetails();
-        setProjects(projectsData);
-      } catch (error) {
-        console.error('Error loading projects:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadProjects();
-  }, []);
-
-  useEffect(() => {
-    if (!cacheLoaded || allTasksCache.length === 0) return;
+    // [T-004-E8-2] Allow updates for specific projects even if global cache isn't fully loaded
+    if (selectedProject === 'all' && !cacheLoaded) return;
 
     let tasksToCheck = allTasksCache;
     if (selectedProject !== "all") {
@@ -553,8 +611,7 @@ const ProjectsPage = () => {
     try {
       await createProject(projectData);
       setIsCreateModalOpen(false);
-      const projectsData = await getProjectDetails();
-      setProjects(projectsData);
+      await fetchProjects(true); // [Refactor] Refresh cache instead of local state
 
       // --- ส่วนที่แก้ไข: เรียกใช้ SuccessModal ---
       setSuccessMessage('สร้างโปรเจกต์สำเร็จ');
@@ -574,8 +631,7 @@ const ProjectsPage = () => {
   const handleUpdateLeader = async (projectId: string, newLeader: string) => {
     try {
       await updateProjectLeader(projectId, newLeader);
-      const projectsData = await getProjectDetails();
-      setProjects(projectsData);
+      await fetchProjects(true); // [Refactor] Refresh cache
 
       // --- ส่วนที่แก้ไข ---
       setSuccessMessage('อัพเดท Leader สำเร็จ');
@@ -776,6 +832,10 @@ const ProjectsPage = () => {
       const { idx, row } = deleteTarget;
       if (row.firestoreId) {
         await deleteTask(row.firestoreId);
+        // [T-053] Immediately refresh cache
+        if (selectedProject && selectedProject !== 'all') {
+          await refreshTasks(selectedProject, true);
+        }
       }
       setRows(prevRows => prevRows.filter((_, i) => i !== idx));
       setTouchedRows(prev => {
@@ -998,6 +1058,12 @@ const ProjectsPage = () => {
         setRows(finalRows);
       }
       setSuccessMessage(`บันทึกสำเร็จ ${saveModalData.updated.length} รายการแก้ไข และ ${rowsToCreate.length} รายการใหม่`);
+
+      // [T-053] Immediately refresh cache
+      if (selectedProject && selectedProject !== 'all') {
+        await refreshTasks(selectedProject, true);
+      }
+
       setShowSuccessModal(true);
       setShowSaveModal(false); // ✅ Close modal on success
       setEditingRows(new Set());
@@ -1153,8 +1219,11 @@ const ProjectsPage = () => {
 
   const handleRestoreComplete = async () => {
     try {
-      const allTasks = await getTasksForProject();
-      setAllTasksCache(allTasks);
+      if (selectedProject !== "all") {
+        await refreshTasks(selectedProject, true);
+      } else {
+        await Promise.all(projects.map(p => refreshTasks(p.id, true)));
+      }
       setSuccessMessage('รีโหลดข้อมูลที่ถูกลบเรียบร้อยแล้ว');
       setShowSuccessModal(true);
     } catch (error) {
@@ -1283,11 +1352,40 @@ const ProjectsPage = () => {
                 maxHeight: "300px",
                 overflowY: "auto"
               }}>
+                {/* [T-048] Select All Option */}
+                <div
+                  onClick={() => {
+                    if (selectedStatuses.length === 0) {
+                      // Select All
+                      const allStatuses = [
+                        ...['PENDING_BIM', 'IN_PROGRESS', 'PENDING_ACCEPTANCE', 'REVISION_REQUESTED', 'COMPLETED'],
+                        ...STATUS_CATEGORIES
+                      ];
+                      setSelectedStatuses(allStatuses);
+                    } else {
+                      // Deselect All
+                      setSelectedStatuses([]);
+                    }
+                  }}
+                  style={{ padding: "8px 12px", fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid #f3f4f6", fontWeight: 600, color: "#4b5563" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={
+                      selectedStatuses.length === (['PENDING_BIM', 'IN_PROGRESS', 'PENDING_ACCEPTANCE', 'REVISION_REQUESTED', 'COMPLETED'].length + STATUS_CATEGORIES.length)
+                    }
+                    readOnly
+                    style={{ cursor: "pointer" }}
+                  />
+                  <span>เลือกทั้งหมด</span>
+                </div>
+
                 <div style={{ padding: "8px", borderBottom: "1px solid #f3f4f6", fontSize: "12px", fontWeight: 600, color: "#9ca3af" }}>
                   Work Request
                 </div>
                 {['PENDING_BIM', 'IN_PROGRESS', 'PENDING_ACCEPTANCE', 'REVISION_REQUESTED', 'COMPLETED'].map(status => {
                   const labelMap: any = { 'PENDING_BIM': 'รอ BIM รับงาน', 'IN_PROGRESS': 'กำลังดำเนินการ', 'PENDING_ACCEPTANCE': 'รอตรวจรับ', 'REVISION_REQUESTED': 'ขอแก้ไข', 'COMPLETED': 'เสร็จสิ้น' };
+                  // [T-048] Fix: Check if specific status is selected (using English Key)
                   const isSelected = selectedStatuses.includes(status);
                   return (
                     <div
@@ -1377,6 +1475,8 @@ const ProjectsPage = () => {
                     </th>
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "70px" }}>LINK FILE</th>
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "120px" }}>DOC. NO.</th>
+                    {/* [T-004-E2] Subtask Count Column */}
+                    <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "70px" }}>SUBTASKS</th>
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "left", color: "white", whiteSpace: "nowrap", minWidth: "80px" }}>LAST REV.</th>
                     <th style={{ padding: "6px 8px", fontSize: 11, textAlign: "center", color: "white", whiteSpace: "nowrap", minWidth: "90px" }}>CORRECT</th>
                     <th style={{ padding: "8px 12px", width: 40, color: "white" }}></th>
@@ -1412,7 +1512,9 @@ const ProjectsPage = () => {
                           transition: "background-color 0.15s ease-out",
                           cursor: isProjectLocked ? "default" : "pointer"
                         }} onMouseEnter={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = "#e0f2fe"; } }} onMouseLeave={(e) => { if (!isProjectLocked && highlightedRow !== idx && !isEditing) { e.currentTarget.style.backgroundColor = isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff"; } }}>
-                          <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>{row.id}</td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", minWidth: "150px" }}>
+                            {isNewRow ? <span style={{ color: "#2563eb", fontWeight: "bold" }}>NEW</span> : row.id}
+                          </td>
                           <td style={{ padding: "4px 6px", fontSize: 10, minWidth: "250px" }}>
                             <input type="text" value={row.relateDrawing} onClick={() => handleRowFocus(idx)} onChange={e => handleRowChange(idx, "relateDrawing", e.target.value)} disabled={!isEditable} style={{ width: "100%", padding: "4px 6px", border: "1px solid #e5e7eb", borderRadius: "4px", fontSize: 10, color: "#374151", backgroundColor: !isEditable ? (isWorkRequest ? "#fef9c3" : idx % 2 === 0 ? "#f9fafb" : "#fff") : "#fff", cursor: !isEditable ? "not-allowed" : "text" }} />
                           </td>
@@ -1455,6 +1557,11 @@ const ProjectsPage = () => {
                             </div>
                           </td>
                           <td style={{ padding: "4px 6px", fontSize: 10 }}>{row.docNo}</td>
+                          <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
+                            <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                              {row.subtaskCount || 0}
+                            </span>
+                          </td>
                           <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb", fontWeight: 500 }}>
                             {row.lastRev || "00"}
                           </td>
@@ -1519,7 +1626,11 @@ const ProjectsPage = () => {
                               if (isProjectLocked) {
                                 return <span style={{ color: "#9ca3af" }} title="เลือกรายการโครงการก่อน">🔒</span>;
                               }
-                              if (isLastEmptyRow || hasStatus || hasProgress) {
+                              // [T-049] Refined Delete Logic:
+                              // Only hide if it has ACTIVE subtasks.
+                              // We assume row.subtaskCount tracks existence of subtasks.
+                              // Ignore hasStatus/hasProgress to allow deleting Work Requests.
+                              if (isLastEmptyRow || (row.subtaskCount && row.subtaskCount > 0)) {
                                 return <span style={{ color: "#9ca3af" }}>-</span>;
                               }
                               return (<button onClick={() => handleDelete(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px", color: "#ef4444", borderRadius: "3px", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }} title="ลบ"><svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg></button>);

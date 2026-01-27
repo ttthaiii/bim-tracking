@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Select, { SelectOption } from '@/components/ui/Select';
-import { useFirestoreCache } from '@/contexts/FirestoreCacheContext';
+import { useCache } from '@/context/CacheContext';
 import { getCachedRelateWorks } from '@/services/cachedFirestoreService';
 
 interface RelateWorkSelectProps {
@@ -18,7 +18,7 @@ export default function RelateWorkSelect({
   disabled = false,
   className = ''
 }: RelateWorkSelectProps) {
-  const { getCache, setCache } = useFirestoreCache();
+  const { getCache, setCache } = useCache();
   const [relateWorks, setRelateWorks] = useState<SelectOption[]>([]);
   const [loading, setLoading] = useState(false);
 

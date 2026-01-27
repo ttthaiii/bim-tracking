@@ -1,8 +1,11 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { getCachedProjects, getCachedTasks, getCachedSubtasks } from '@/services/cachedFirestoreService';
-import { useFirestoreCache } from './FirestoreCacheContext';
+import { db } from '@/lib/firebase';
+import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
+import { useAuth } from '@/context/AuthContext';
+import { useCache } from '@/context/CacheContext';
+import { getCachedProjects, getCachedTasks, getCachedSubtasks, generateCacheKey } from '@/services/cachedFirestoreService';
 
 interface GlobalData {
   projects: any[];
@@ -17,11 +20,11 @@ const GlobalDataContext = createContext<GlobalData>({
   tasks: {},
   subtasks: {},
   loading: true,
-  refreshData: async () => {},
+  refreshData: async () => { },
 });
 
 export function GlobalDataProvider({ children }: { children: ReactNode }) {
-  const { getCache, setCache } = useFirestoreCache();
+  const { getCache, setCache } = useCache();
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<any[]>([]);
   const [tasks, setTasks] = useState<Record<string, any[]>>({});

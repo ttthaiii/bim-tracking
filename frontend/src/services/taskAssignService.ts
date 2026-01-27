@@ -15,6 +15,70 @@ import { db } from '../lib/firebase';
 import { DailyReportEntry, Subtask, UploadedFile } from '../types/database';
 import { getEmployeeByID } from './employeeService';
 
+// ✅ [T-005-E3] Optimized Query for "All Assign"
+export const fetchAssignedSubtasks = async (assigneeName: string): Promise<any[]> => {
+  try {
+    console.log(`🔍 [T-045] Fetching subtasks for assignee: "${assigneeName}" via Collection Group Index`);
+
+    if (!assigneeName) {
+      console.warn('⚠️ [T-045] Assignee name is empty. Query will likely return nothing.');
+      return [];
+    }
+
+    // Create Collection Group Query
+    // [T-045] Optimized: Removed '!=' filter to use existing single-field index on 'subTaskAssignee'
+    const subtasksQuery = query(
+      collectionGroup(db, 'subtasks'),
+      where('subTaskAssignee', '==', assigneeName)
+      // where('subTaskStatus', '!=', 'DELETED') // ❌ Removed to fix "Missing Index" error match
+    );
+
+    const snapshot = await getDocs(subtasksQuery);
+    console.log(`✅ [T-045] Found ${snapshot.size} assigned subtasks for "${assigneeName}".`);
+
+    const subtasks = snapshot.docs
+      .filter(doc => doc.data().subTaskStatus !== 'DELETED') // ✅ Filter in JS instead
+      .map(doc => {
+        const data = doc.data();
+        const taskId = doc.ref.parent.parent?.id || ''; // tasks/{taskId}/subtasks/{subtaskId}
+
+        return {
+          id: doc.id,
+          taskId: taskId,
+          subTaskNumber: data.subTaskNumber || '',
+          taskName: data.taskName || '',
+          subTaskCategory: data.subTaskCategory || '',
+          item: data.item || '',
+          internalRev: data.internalRev || '',
+          subTaskScale: data.subTaskScale || '',
+          subTaskAssignee: data.subTaskAssignee || '',
+          subTaskProgress: data.subTaskProgress || 0,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          subTaskFiles: data.subTaskFiles || null,
+          // Additional fields if needed
+          activity: data.activity || data.subTaskCategory || '', // Fallback
+          relateDrawing: taskId, // approximate
+          relateDrawingName: data.taskName || '',
+          relateWork: data.subTaskCategory || '',
+          workScale: data.subTaskScale || 'S',
+          assignee: data.subTaskAssignee,
+          progress: data.subTaskProgress || 0
+        };
+      });
+
+    return subtasks;
+
+  } catch (error: any) {
+    console.error("❌ [T-045] Error fetching assigned subtasks:", error);
+    if (error?.message?.includes('index')) {
+      console.error("🚨 [T-045] Missing Index! Please create an index for 'subtasks' collection group on 'subTaskAssignee'. Check Firebase Console.");
+    }
+    // Return empty to prevent crash, but log is visible.
+    return [];
+  }
+};
+
 // Fetches all daily report entries for a given employee from the correct sub-collection location.
 export const getEmployeeDailyReportEntries = async (
   employeeId: string
@@ -244,6 +308,62 @@ const parseHours = (timeString: string): number => {
 };
 
 
+// Helper to determine true progress from workhours list with Deduplication
+const calculateTrueProgress = (workhours: any[]): number => {
+  if (!workhours || workhours.length === 0) return 0;
+
+  // 1. Group by Date (YYYY-MM-DD) to Deduplicate (Keep Trend of Latest Timestamp)
+  const latestByDate = new Map<string, any>();
+
+  workhours.forEach(log => {
+    // Resolve Date String safely
+    let dateStr = log.assignDate;
+    if (!dateStr) {
+      if (log.loggedAt?.toDate) dateStr = log.loggedAt.toDate().toISOString().split('T')[0];
+      else if (log.timestamp?.toDate) dateStr = log.timestamp.toDate().toISOString().split('T')[0];
+      else if (log.loggedAt instanceof Date) dateStr = log.loggedAt.toISOString().split('T')[0];
+      else if (log.timestamp instanceof Date) dateStr = log.timestamp.toISOString().split('T')[0];
+    }
+
+    if (!dateStr) return; // Skip invalid dates
+
+    const current = latestByDate.get(dateStr);
+
+    // Compare Timestamps
+    const getMillis = (t: any) => {
+      if (t?.toMillis) return t.toMillis();
+      if (t instanceof Date) return t.getTime();
+      if (typeof t === 'string') return new Date(t).getTime();
+      return 0;
+    };
+
+    const logTime = getMillis(log.timestamp) || getMillis(log.loggedAt) || 0;
+    const currentTime = current ? (getMillis(current.timestamp) || getMillis(current.loggedAt) || 0) : -1;
+
+    // If new log is newer or same time (last writer wins), update map
+    if (logTime >= currentTime) {
+      latestByDate.set(dateStr, { ...log, assignDate: dateStr });
+    }
+  });
+
+  // 2. Convert to Array and Filter out Deleted
+  const validLogs = Array.from(latestByDate.values())
+    .filter(log => log.status !== 'deleted');
+
+  if (validLogs.length === 0) return 0;
+
+  // 3. Sort by Date Descending to find "Current" Progress
+  validLogs.sort((a, b) => {
+    // String Compare YYYY-MM-DD
+    if (a.assignDate > b.assignDate) return -1;
+    if (a.assignDate < b.assignDate) return 1;
+    return 0;
+  });
+
+  // 4. Return progress of the latest valid log
+  return parseInt(String(validLogs[0].progress).replace('%', ''), 10) || 0;
+};
+
 export const saveDailyReportEntries = async (
   employeeId: string,
   entries: DailyReportEntry[]
@@ -258,25 +378,19 @@ export const saveDailyReportEntries = async (
       return;
     }
 
+    // cache cache (reduce reads if multiple entries for same subtask)
+    const readCache: Record<string, any[]> = {};
+
     for (const entry of validEntries) {
-      // [T-028] Normalize subtaskId to uppercase before saving
       const normalizedSubtaskId = entry.subtaskId?.toUpperCase();
-
-      // Path to the subtask document, e.g., /projects/XYZ/tasks/ABC/subtasks/123
       const subtaskDocPath = entry.subtaskPath!;
-
-      // Path to the dailyReport document for this employee within the subtask
       const dailyReportRef = doc(db, subtaskDocPath, 'dailyReport', entry.employeeId);
-
-      // Ref to the subtask document itself to update its main progress
       const subtaskDocRef = doc(db, subtaskDocPath);
 
-      // 1. Define the core data for the dailyReport document.
-      // This should only contain metadata about the task and employee, not logs.
+      // 1. Update Metadata
       const dailyReportMainData = {
         employeeId: entry.employeeId,
         subtaskId: normalizedSubtaskId,
-        // Fields below are for easier querying/display if needed
         taskName: entry.taskName || '',
         subTaskName: entry.subTaskName || '',
         item: entry.item || '',
@@ -285,106 +399,92 @@ export const saveDailyReportEntries = async (
         subTaskScale: entry.subTaskScale || '',
         project: entry.project || '',
       };
-
-      // Set/merge this metadata into the employee's dailyReport document.
       batch.set(dailyReportRef, dailyReportMainData, { merge: true });
 
-      // 2. Prepare the new work log entry.
-      const newProgressNumber = parseInt(entry.progress.replace('%', ''), 10) || 0;
-      // สร้าง Date object จาก assignDate (วันที่เลือกจากปฏิทิน)
+      // 2. Prepare Work Log
+      const newProgressNumber = parseInt(String(entry.progress).replace('%', ''), 10) || 0;
       const [year, month, day] = entry.assignDate.split('-').map(Number);
       const selectedDate = new Date(year, month - 1, day);
-      selectedDate.setHours(12, 0, 0, 0); // ตั้งเวลาเป็นเที่ยงวัน
+      selectedDate.setHours(12, 0, 0, 0);
 
-      // สร้าง timestamp ปัจจุบัน
       const now = new Date();
-
-      console.log('[DEBUG] Saving work log with dates:', {
-        assignDate: entry.assignDate,
-        selectedDate: selectedDate.toISOString(),
-        currentTime: now.toISOString()
-      });
 
       const workLogData: any = {
         day: parseHours(entry.normalWorkingHours),
         ot: parseHours(entry.otWorkingHours),
         progress: newProgressNumber,
         note: entry.note || '',
-        timestamp: now,              // เวลาที่กดบันทึก (เวลาปัจจุบัน) - ใช้จัดเรียงข้อมูลล่าสุด
-        loggedAt: selectedDate,      // วันที่ที่เลือกจากปฏิทิน (Date + เวลา 12:00)
+        timestamp: now,
+        loggedAt: selectedDate,
         assignDate: entry.assignDate,
-        status: entry.status || 'pending' // Save status (e.g., 'deleted')  // วันที่ที่เลือกจากปฏิทิน (YYYY-MM-DD)
+        status: entry.status || 'pending'
       };
 
-      if (entry.fileName) {
-        workLogData.fileName = entry.fileName;
-      }
-      if (entry.fileURL) {
-        workLogData.fileURL = entry.fileURL;
-      }
-      if (entry.storagePath) {
-        workLogData.storagePath = entry.storagePath;
-      }
-      if (normalizedSubtaskId) {
-        // [T-028] Use normalized subtaskId
-        workLogData.subtaskId = normalizedSubtaskId;
-      }
-      if (entry.subtaskPath) {
-        workLogData.subtaskPath = entry.subtaskPath;
-      }
-      if (entry.fileUploadedAt) {
-        workLogData.fileUploadedAt = entry.fileUploadedAt;
+      if (entry.fileName) workLogData.fileName = entry.fileName;
+      if (entry.fileURL) workLogData.fileURL = entry.fileURL;
+      if (entry.storagePath) workLogData.storagePath = entry.storagePath;
+      if (normalizedSubtaskId) workLogData.subtaskId = normalizedSubtaskId;
+      if (entry.subtaskPath) workLogData.subtaskPath = entry.subtaskPath;
+      if (entry.fileUploadedAt) workLogData.fileUploadedAt = entry.fileUploadedAt;
+
+      // 3. Calculate True Progress using existing Data
+      // Optimally we read once per docRef but loop is fine for small batch
+      let existingWorkhours: any[] = [];
+
+      if (readCache[dailyReportRef.path]) {
+        existingWorkhours = readCache[dailyReportRef.path];
+      } else {
+        const currentReportSnap = await getDoc(dailyReportRef);
+        const currentData = currentReportSnap.exists() ? currentReportSnap.data() : {};
+        existingWorkhours = (currentData.workhours as any[]) || [];
+        readCache[dailyReportRef.path] = existingWorkhours;
       }
 
-      // --- FIX: คำนวณ Progress ล่าสุดโดยอิงจาก assignDate (ไม่ใช่วันที่กดบันทึก) ---
-      // 1. ดึงข้อมูล existing reports ของงานนี้มาก่อนเพื่อเปรียบเทียบ
-      const currentReportSnap = await getDoc(dailyReportRef);
-      const currentData = currentReportSnap.exists() ? currentReportSnap.data() : {};
-      const existingWorkhours = (currentData.workhours as any[]) || [];
-
-      // 2. รวมข้อมูลใหม่เข้าไปในรายการชั่วคราว (เพื่อหาล่าสุดจริงๆ)
+      // Append new log (Simulating the state after batch commit)
       const allWorkLogs = [...existingWorkhours, workLogData];
 
-      // 3. เรียงลำดับตาม assignDate (จากใหม่ -> เก่า)
-      // ถ้าวันเท่ากัน ให้เอา timestamp ล่าสุดขึ้นก่อน
-      allWorkLogs.sort((a, b) => {
-        // Compare assignDate string (YYYY-MM-DD)
-        const dateA = a.assignDate || '';
-        const dateB = b.assignDate || '';
-        if (dateA > dateB) return -1;
-        if (dateA < dateB) return 1;
+      // Update our local cache for next iteration if same doc
+      readCache[dailyReportRef.path] = allWorkLogs;
 
-        // If dates are equal, fallback to loggedAt/timestamp
-        const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-        const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-        return timeB - timeA;
-      });
+      const trueProgress = calculateTrueProgress(allWorkLogs);
 
-      // 4. ตัวแรกสุดคือสถานะงาน "ล่าสุด" ตาม timeline ของงานจริง
-      const latestLog = allWorkLogs[0];
-      const latestRealProgress = latestLog.progress || 0; // อาจเป็นตัวเลข หรือ string แต่ตัวแปรรับ number
-
-      // Atomically add the new work log to the 'workhours' array.
+      // Update Daily Report
       batch.update(dailyReportRef, {
         workhours: arrayUnion(workLogData)
       });
 
-      // 3. IMPORTANT: Update the progress on the subtask document itself.
-      // This ensures the new progress is the source of truth for the next day.
+      // Update Subtask Progress (Source of Truth)
       batch.update(subtaskDocRef, {
-        subTaskProgress: latestRealProgress  // ใช้ค่าที่คำนวณใหม่แทน newProgressNumber
+        subTaskProgress: trueProgress // [T-005-E9] Correctly synced
       });
 
-      console.log(`[DEBUG] Queued update for dailyReport ${entry.employeeId}. Appending to workhours.`);
-      console.log(`[DEBUG] Queued update for subtask ${entry.subtaskId}. Setting subTaskProgress to ${latestRealProgress} (was ${newProgressNumber}).`);
+      console.log(`[DEBUG] Updated subtask ${entry.subtaskId} progress to ${trueProgress}%`);
     }
 
     await batch.commit();
-    console.log('[DEBUG] Batch commit successful! Daily reports and subtask progresses updated.');
   } catch (error) {
     console.error('[DEBUG] Error in saveDailyReportEntries:', error);
     throw error;
   }
+};
+
+// [T-005-E9] Function to delete entry (Soft Delete) and sync progress
+export const deleteDailyReportEntry = async (
+  employeeId: string,
+  entryToDelete: DailyReportEntry
+): Promise<void> => {
+  // Reuse save logic by sending a deleted status payload
+  // This ensures consistency with the main save function
+  const deletionPayload: DailyReportEntry = {
+    ...entryToDelete,
+    status: 'deleted',
+    progress: '0%', // Irrelevant but good for clarity
+    note: 'Deleted via API',
+    normalWorkingHours: '0:0',
+    otWorkingHours: '0:0'
+  };
+
+  await saveDailyReportEntries(employeeId, [deletionPayload]);
 };
 
 
