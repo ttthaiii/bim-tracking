@@ -668,6 +668,22 @@ const ProjectsPage = () => {
         const changes = computeRowChangesBetween(originalRows.get(idx), updatedRows[idx]);
         setEditChangesMap(prev => ({ ...prev, [idx]: changes }));
       }
+
+      // [T-004-E10] Auto-Add Row Logic (Top Row Implementation)
+      // The "New" row is always at the top (Index 0).
+      // When the user fills the top row complete (up to Due Date), we verify completion and Insert a NEW empty row at the TOP.
+      // This pushes the filled row to Index 1.
+      const isTopRow = idx === 0;
+      if (isTopRow) {
+        const row = updatedRows[idx];
+        // Condition: Has Name, Activity, Start Date, AND Due Date
+        if (row.relateDrawing && row.activity && row.startDate && row.dueDate) {
+          console.log('[T-004-E10] Auto-adding new row at TOP...');
+          // Prepend new row. The current row (now filled) moves down.
+          return [{ ...initialRows[0] }, ...updatedRows];
+        }
+      }
+
       return updatedRows;
     });
     markRowEdited(idx);

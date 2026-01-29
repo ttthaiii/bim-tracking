@@ -492,34 +492,13 @@ export default function TaskAssignment() {
 
       newRows[rowIndex] = updatedRow;
 
-      console.log('✅ Updated row:', {
-        id: updatedRow.id,
-        activity: updatedRow.activity,
-        relateDrawing: updatedRow.relateDrawingName,
-        relateWork: updatedRow.relateWork,
-        assignee: updatedRow.assignee
-      });
-
-      // เช็คว่าควรเพิ่มแถวใหม่หรือไม่
-      const isLastRow = rowIndex === prevRows.length - 1;
-      const hasBasicFields =
-        updatedRow.activity &&
-        updatedRow.relateDrawing &&
-        updatedRow.relateWork &&
-        updatedRow.workScale;
-      const hasAssignee = updatedRow.assignee || isSpecialLeaveCase(updatedRow);
-      const isRowComplete = hasBasicFields && hasAssignee;
-
-      if (isLastRow && isRowComplete) {
-        const hasEmptyRow = newRows.some(row =>
-          !row.activity && !row.relateDrawing && !row.relateWork
-        );
-
-        if (!hasEmptyRow) {
-          console.log('➕ Adding new empty row');
-
-          newRows.push({
-            id: String(Date.now()),
+      // [T-005-E12] Auto-Add Row Logic (Top Row Implementation)
+      // When the top row (Index 0) is filled with key fields, prepend a new empty row.
+      if (rowIndex === 0) {
+        if (updatedRow.activity && updatedRow.relateDrawing && updatedRow.relateWork && updatedRow.assignee) {
+          console.log('[T-005-E12] Auto-adding new row at TOP...');
+          const newEmptyRow: SubtaskRow = {
+            id: Date.now().toString(),
             subtaskId: '',
             relateDrawing: '',
             relateDrawingName: '',
@@ -531,9 +510,20 @@ export default function TaskAssignment() {
             assignee: '',
             deadline: '',
             progress: 0
-          });
+          };
+          return [newEmptyRow, ...newRows];
         }
       }
+
+      console.log('✅ Updated row:', {
+        id: updatedRow.id,
+        activity: updatedRow.activity,
+        relateDrawing: updatedRow.relateDrawingName,
+        relateWork: updatedRow.relateWork,
+        assignee: updatedRow.assignee
+      });
+
+
 
       return newRows;
     });

@@ -69,6 +69,14 @@
         - Empty row appears at top.
         - Shows "NEW" in blue text.
 
+- [x] [T-004-E10] Auto-Add Row (Project Planning)
+    - **Goal**: Auto-prepend new row at the TOP when user fills the first row (Name + Activity + Dates).
+    - **Implementation**: `handleRowChange` checks if `row[0]` is complete. If so, `setRows(prev => [newRow, ...prev])`. Pushes data down.
+
+- [x] [T-005-E12] Auto-Add Row (Task Assignment)
+    - **Goal**: Auto-prepend new row at the TOP when user fills the first row.
+    - **Implementation**: `updateRow` checks if `row[0]` is complete. If so, `setRows(prev => [newRow, ...prev])`.
+
 - [ ] [T-051] Chronological Progress Validation
     - **Goal**: Allow inserting/editing progress between dates correctly.
     - **Logic**: `PrevDate.Progress < Current.Progress <= NextDate.Progress`.
