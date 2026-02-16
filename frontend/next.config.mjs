@@ -6,6 +6,10 @@ const __dirname = dirname(__filename);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    // Required by Firebase App Hosting adapter.
+    output: 'standalone',
+    // Explicitly pin tracing root to frontend to avoid lockfile-root ambiguity.
+    outputFileTracingRoot: __dirname,
     env: (() => {
         // Parse FIREBASE_WEBAPP_CONFIG from build time
         const firebaseConfig = process.env.FIREBASE_WEBAPP_CONFIG
