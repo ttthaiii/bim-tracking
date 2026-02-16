@@ -287,6 +287,13 @@ export function getTaskStatusCategory(task: TaskWithStatus): TaskStatusCategory 
   return 'ยังไม่วางแผน-BIM';
 }
 
+export function isTaskDeleted(task: Partial<Task> | Partial<TaskWithStatus>): boolean {
+  const taskStatus = (task as any).taskStatus;
+  const legacyStatus = (task as any).status;
+  return (taskStatus || '').toString().toLowerCase() === 'deleted' ||
+    (legacyStatus || '').toString().toLowerCase() === 'deleted';
+}
+
 function getActivityDescription(task: Task): string {
   return task.taskName || 'ไม่ระบุชื่องาน';
 }

@@ -3,7 +3,7 @@ import { Pie } from 'react-chartjs-2';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Task } from '@/types/database';
-import { getTaskStatusCategory, TaskStatusCategory } from '@/services/dashboardService';
+import { getTaskStatusCategory, TaskStatusCategory, isTaskDeleted } from '@/services/dashboardService';
 import { useDashboard } from '@/context/DashboardContext';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, Title } from 'chart.js';
 
@@ -49,6 +49,8 @@ export default function ProjectStatusChart() {
 
         tasksSnapshot.forEach((doc) => {
           const task = doc.data() as Task;
+          if (isTaskDeleted(task)) return;
+
           const projectName = projectsMap.get(task.projectId) || task.projectId;
 
           if (selectedProject && selectedProject !== 'all' && projectName !== selectedProject) {

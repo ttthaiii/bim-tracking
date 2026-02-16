@@ -603,20 +603,13 @@ export default function DailyReport() {
     if (hasData) {
       // [T-003-E30-6] Refined Markers
       const stats = dailyStatsMap[dateStr];
-      const totalHours = stats ? (stats.normal + stats.ot) : 0;
-      const isLeaveDay = stats ? (stats.leave > 0) : false;
-
-      // Logic:
-      // 1. Leave Day = Yellow (Incomplete work hours, technically) or Green? 
-      //    User request: "Normal Hours >= 8 -> Green", "< 8 -> Yellow".
-      //    Let's stick to strict hours. Leave usually counts as work, but if user wants stricter visual:
-      //    If totalHours >= 8 (including OT) -> Green.
-      //    Else -> Yellow.
+      // Align calendar marker with "remaining hours" logic: use NORMAL hours only.
+      const normalHours = stats ? stats.normal : 0;
 
       const totalLeave = dailyStatsMap[dateStr]?.leave || 0;
       if (totalLeave >= 8) {
         classes.push('has-leave-marker');
-      } else if (totalHours >= 8) {
+      } else if (normalHours >= 8) {
         classes.push('has-complete-marker');
       } else {
         classes.push('has-incomplete-marker');

@@ -1,7 +1,7 @@
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Task } from '@/types/database';
-import { getTaskStatusCategory, TaskStatusCategory } from './dashboardService'; // Import for consistency
+import { getTaskStatusCategory, TaskStatusCategory, isTaskDeleted } from './dashboardService'; // Import for consistency
 
 // 1. Redefine TaskStatusCount to match the real statuses from Donut Chart & Table
 export type TaskStatusCount = Record<TaskStatusCategory, number> & {
@@ -45,6 +45,8 @@ export async function getTasksByStatus(): Promise<ProjectTaskSummary[]> {
 
     snapshot.forEach((doc) => {
       const task = doc.data() as Task;
+      if (isTaskDeleted(task)) return;
+
       const projectId = task.projectId;
 
       // Initialize the counter for a new project

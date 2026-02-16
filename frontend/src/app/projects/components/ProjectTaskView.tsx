@@ -816,25 +816,12 @@ const ProjectsPage = () => {
       setShowErrorModal(true);
     };
 
-    if (rowToDelete.activity === 'Work Request') {
-      showError('ไม่สามารถลบงานที่เป็น Work Request ได้');
-      return;
-    }
+    const hasNoSubtask = !rowToDelete.subtaskCount || rowToDelete.subtaskCount <= 0;
+    const isNotPlanned = !rowToDelete.statusDwg;
 
-    const isEmptyRow = !rowToDelete.id && !rowToDelete.relateDrawing && !rowToDelete.activity && !rowToDelete.startDate && !rowToDelete.dueDate;
-
-    if (isEmptyRow && idx === rows.length - 1) {
-      showError('ไม่สามารถลบแถวว่างแถวสุดท้ายได้');
-      return;
-    }
-
-    if (rowToDelete.statusDwg) {
-      showError('ไม่สามารถลบแถวที่มีสถานะเอกสารแล้วได้');
-      return;
-    }
-
-    if (rowToDelete.progress && rowToDelete.progress > 0) {
-      showError('ไม่สามารถลบงานที่มีความคืบหน้าแล้วได้');
+    // Delete is allowed when task is not planned OR has no subtasks.
+    if (!(isNotPlanned || hasNoSubtask)) {
+      showError('Delete is allowed only for tasks that are not planned or have no subtasks.');
       return;
     }
 
