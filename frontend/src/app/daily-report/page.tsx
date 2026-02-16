@@ -249,7 +249,7 @@ const getMinuteOptions = (entries: DailyReportEntry[], currentEntryId: string, c
   }));
 };
 
-const SUPERVISOR_ROLES = ['BimManager', 'BimLeader'];
+const SUPERVISOR_ROLES = ['BimManager'];
 
 const generateRelateDrawingText = (entry: DailyReportEntry, projects: Project[]): string => {
   if (!entry.subtaskId) return '';
