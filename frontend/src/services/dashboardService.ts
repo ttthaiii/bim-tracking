@@ -331,6 +331,18 @@ export async function getTaskDetails(projectId?: string): Promise<TaskDetails[]>
 
 import { collectionGroup } from 'firebase/firestore';
 
+export interface DailyReportDetail {
+  id: string;
+  taskName: string;
+  subTaskName: string;
+  relateDrawing: string;
+  item?: string; // [T-055] Added item for proper dashboard display
+  workingHours: number;
+  otHours: number;
+  progress: string;
+  note: string;
+}
+
 export interface DailyReportSummary {
   id: string; // employeeId-date
   employeeId: string;
@@ -340,6 +352,7 @@ export interface DailyReportSummary {
   totalOT: number; // in hours
   totalLeaveHours: number; // [T-025] New: Track hours specifically for Leave tasks
   status: 'Normal' | 'Abnormal' | 'Holiday' | 'Missing' | 'Future' | 'Leave';
+  details?: DailyReportDetail[]; // New field for task details
 }
 
 function parseTime(timeStr?: string): number {
@@ -382,7 +395,8 @@ export async function getAllDailyReportEntries(
           totalLeaveHours: 0,
           status: 'Normal',
           hasLeaveTask: false,
-          hasNonLeaveTask: false
+          hasNonLeaveTask: false,
+          details: []
         });
       }
       return summaryMap.get(key)!;
@@ -518,6 +532,24 @@ export async function getAllDailyReportEntries(
           // though T-025 mainly cares about totalLeaveHours == 8
           summary.hasNonLeaveTask = true;
         }
+
+        // Add task details
+        summary.details?.push({
+          id: log.id || data.id || Math.random().toString(),
+          taskName: log.taskName || data.taskName || '',
+          subTaskName: log.subTaskName || data.subTaskName || '',
+          relateDrawing: log.relateDrawing || data.relateDrawing || [
+            data.project || '',
+            log.taskName || data.taskName || '',
+            log.subTaskName || data.subTaskName || '',
+            log.item || data.item || ''
+          ].filter(p => p && p !== 'N/A').join('_'),
+          item: log.item || data.item || '', // [T-055] Expose item
+          workingHours,
+          otHours,
+          progress: log.progress || data.progress || '0%',
+          note: log.note || data.note || ''
+        });
       });
     });
 
@@ -561,7 +593,8 @@ export async function getAllDailyReportEntries(
         totalWorkingHours: summary.totalWorkingHours,
         totalOT: summary.totalOT,
         totalLeaveHours: summary.totalLeaveHours,
-        status: status as any
+        status: status as any,
+        details: summary.details
       };
     }).sort((a, b) => b.date.getTime() - a.date.getTime()); // Newest first
 

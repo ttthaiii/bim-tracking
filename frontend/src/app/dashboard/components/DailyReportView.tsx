@@ -55,9 +55,23 @@ export default function DailyReportView() {
         }
     }, [appUser, hasSetDefault]);
 
-    // Sorting
     const [sortKey, setSortKey] = useState<keyof DailyReportSummary | 'fullName'>('date');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+    // Expanded rows state
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+    const toggleRow = (id: string) => {
+        setExpandedRows(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+    };
 
     // Pagination / Infinite Scroll
     const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE);
@@ -302,6 +316,7 @@ export default function DailyReportView() {
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead>
                             <tr>
+                                <th className="px-6 py-3 text-center w-[50px]"></th>
                                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-[80px]">No.</th>
                                 <th
                                     className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
@@ -348,11 +363,11 @@ export default function DailyReportView() {
                         <tbody className="bg-white divide-y divide-gray-200">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">Loading...</td>
+                                    <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">Loading...</td>
                                 </tr>
                             ) : displayedEntries.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">No data found</td>
+                                    <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">No data found</td>
                                 </tr>
                             ) : (
                                 displayedEntries.map((entry, index) => {
@@ -366,34 +381,107 @@ export default function DailyReportView() {
                                     const displayName = userObj?.fullName || entry.fullName || entry.employeeId;
 
                                     return (
-                                        <tr key={entry.id} className={isFuture ? 'bg-gray-50 opacity-60' : ''}>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-[80px]">{index + 1}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{displayName}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                                                {entry.date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
-                                                {isFuture ? '-' : `${entry.totalWorkingHours.toFixed(2)} hrs`}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
-                                                {isFuture ? '-' : `${entry.totalOT.toFixed(2)} hrs`}
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-center">
-                                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                        <React.Fragment key={entry.id}>
+                                            <tr className={isFuture ? 'bg-gray-50 opacity-60' : ''}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-center text-gray-500 w-[50px]">
+                                                    {entry.details && entry.details.length > 0 && (
+                                                        <button
+                                                            onClick={() => toggleRow(entry.id)}
+                                                            className="text-gray-500 hover:text-gray-700 focus:outline-none"
+                                                        >
+                                                            {expandedRows.has(entry.id) ? '▼' : '▶'}
+                                                        </button>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-[80px]">{index + 1}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{displayName}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                                    {entry.date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                    {isFuture ? '-' : `${entry.totalWorkingHours.toFixed(2)} hrs`}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+                                                    {isFuture ? '-' : `${entry.totalOT.toFixed(2)} hrs`}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-center">
+                                                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                         ${entry.status === 'Normal' ? 'bg-green-100 text-green-800' :
-                                                        entry.status === 'Abnormal' ? 'bg-orange-100 text-orange-800' :
-                                                            entry.status === 'Missing' ? 'bg-red-200 text-red-900 border border-red-300' :
-                                                                (entry.status as any) === 'Future' ? 'bg-gray-200 text-gray-500' :
-                                                                    (entry.status as any) === 'Leave' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
-                                                                        'bg-gray-100 text-gray-800'}`}>
-                                                    {entry.status === 'Normal' ? 'ปกติ' :
-                                                        entry.status === 'Abnormal' ? 'ผิดปกติ' :
-                                                            entry.status === 'Missing' ? 'ขาดส่ง' :
-                                                                (entry.status as any) === 'Future' ? 'ยังไม่ถึงกำหนด' :
-                                                                    (entry.status as any) === 'Leave' ? 'ลางาน' : 'วันหยุด'}
-                                                </span>
-                                            </td>
-                                        </tr>
+                                                            entry.status === 'Abnormal' ? 'bg-orange-100 text-orange-800' :
+                                                                entry.status === 'Missing' ? 'bg-red-200 text-red-900 border border-red-300' :
+                                                                    (entry.status as any) === 'Future' ? 'bg-gray-200 text-gray-500' :
+                                                                        (entry.status as any) === 'Leave' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                                                                            'bg-gray-100 text-gray-800'}`}>
+                                                        {entry.status === 'Normal' ? 'ปกติ' :
+                                                            entry.status === 'Abnormal' ? 'ผิดปกติ' :
+                                                                entry.status === 'Missing' ? 'ขาดส่ง' :
+                                                                    (entry.status as any) === 'Future' ? 'ยังไม่ถึงกำหนด' :
+                                                                        (entry.status as any) === 'Leave' ? 'ลางาน' : 'วันหยุด'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                            {expandedRows.has(entry.id) && entry.details && entry.details.length > 0 && (
+                                                <tr className="bg-gray-50">
+                                                    <td colSpan={7} className="px-8 py-4">
+                                                        <div className="rounded border border-gray-200 overflow-hidden shadow-inner">
+                                                            <div className="bg-gray-50 border-l-4 border-l-indigo-400 p-5">
+                                                                <h4 className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-4">Tasks Breakdown</h4>
+                                                                <div className="space-y-4">
+                                                                    {entry.details.map((detail, dIndex) => {
+                                                                        const progRaw = detail.progress || '0%';
+                                                                        const prog = String(progRaw); // Ensure it's a string
+                                                                        const isComplete = prog === '100' || prog === '100%';
+
+                                                                        return (
+                                                                            <div key={detail.id || dIndex} className="bg-white rounded-md pl-5 pr-5 py-4 shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                                                                {/* Left Group: Info */}
+                                                                                <div className="flex-1 space-y-1.5">
+                                                                                    <div className="flex items-center gap-2">
+                                                                                        <span className="text-[15px] font-semibold text-gray-800 leading-tight">
+                                                                                            {detail.taskName || '-'}
+                                                                                        </span>
+                                                                                        {detail.subTaskName && (
+                                                                                            <>
+                                                                                                <span className="text-gray-300">•</span>
+                                                                                                <span className="text-[13px] text-gray-500 font-medium">{detail.subTaskName}</span>
+                                                                                            </>
+                                                                                        )}
+                                                                                    </div>
+                                                                                    {detail.item && detail.item !== '-' && (
+                                                                                        <div className="text-[13px] text-gray-400 flex items-center gap-1.5 mt-1">
+                                                                                            <span className="inline-block w-1 h-1 rounded-full bg-gray-300"></span>
+                                                                                            {detail.item}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+
+                                                                                {/* Right Group: Stats */}
+                                                                                <div className="flex items-center gap-8 text-[13px] whitespace-nowrap">
+                                                                                    <div className="flex flex-col items-end">
+                                                                                        <span className="text-[11px] text-gray-400 tracking-wider uppercase mb-0.5">Working</span>
+                                                                                        <span className="font-semibold text-gray-700">{detail.workingHours ? `${detail.workingHours} hrs` : '-'}</span>
+                                                                                    </div>
+                                                                                    <div className="flex flex-col items-end">
+                                                                                        <span className="text-[11px] text-gray-400 tracking-wider uppercase mb-0.5">OT</span>
+                                                                                        <span className="font-semibold text-purple-600">{detail.otHours ? `${detail.otHours} hrs` : '-'}</span>
+                                                                                    </div>
+                                                                                    <div className="flex flex-col items-end justify-center h-full w-[65px]">
+                                                                                        <span className="text-[11px] text-gray-400 tracking-wider uppercase mb-0.5">Progress</span>
+                                                                                        <span className={`px-2.5 py-1 text-xs font-bold rounded-md w-full text-center ${isComplete ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                                                            {prog}{!prog.includes('%') ? '%' : ''}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
                                     )
                                 })
                             )}

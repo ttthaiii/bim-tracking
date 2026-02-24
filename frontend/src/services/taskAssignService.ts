@@ -398,6 +398,7 @@ export const saveDailyReportEntries = async (
         internalRev: entry.internalRev || '',
         subTaskScale: entry.subTaskScale || '',
         project: entry.project || '',
+        relateDrawing: entry.relateDrawing || '', // [T-054] Save relateDrawing so Dashboard can display it
       };
       batch.set(dailyReportRef, dailyReportMainData, { merge: true });
 
@@ -417,7 +418,8 @@ export const saveDailyReportEntries = async (
         timestamp: now,
         loggedAt: selectedDate,
         assignDate: entry.assignDate,
-        status: entry.status || 'pending'
+        status: entry.status || 'pending',
+        relateDrawing: entry.relateDrawing || '' // [T-054] Ensure it's in the log itself too
       };
 
       if (entry.fileName) workLogData.fileName = entry.fileName;

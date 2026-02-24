@@ -855,6 +855,16 @@ export default function DailyReport() {
         allEntriesLength: allDailyEntries.length,
         cache: tempDataCache
       });
+      // Ensure we don't leave the table completely empty
+      const initialEntry = createInitialEmptyDailyReportEntry(employeeId, workDate, baseId, 0);
+      const newEntry = {
+        ...initialEntry,
+        isExistingData: false,
+        timestamp: Timestamp.now()
+      };
+      setDailyReportEntries([newEntry]);
+      setTempDataCache(prev => ({ ...prev, [workDate]: [newEntry] }));
+      setEditableRows(new Set());
       return;
     }
 
@@ -1087,11 +1097,6 @@ export default function DailyReport() {
   };
 
   const handleDeleteEntry = (entryId: string) => {
-    // Don't allow deletion if there's only one row
-    if (dailyReportEntries.length <= 1) {
-      return;
-    }
-
     setDailyReportEntries(currentEntries => {
       const entryToDelete = currentEntries.find(e => e.id === entryId);
       // Track existing data for soft delete
@@ -1333,7 +1338,7 @@ export default function DailyReport() {
       }
     }
 
-    if (validEntries.length === 0) {
+    if (validEntries.length === 0 && deletedEntries.length === 0) {
       setErrorMessage('กรุณาเลือก Task อย่างน้อย 1 รายการก่อนบันทึก');
       setShowErrorModal(true);
       return;
@@ -1554,7 +1559,7 @@ export default function DailyReport() {
       const timestampNow = Timestamp.now();
 
       setDailyReportEntries(currentEntries => {
-        return currentEntries.map(entry => {
+        const newEntries = currentEntries.map(entry => {
           const savedMatch = entriesToSave.find(s => s.id === entry.id);
           if (savedMatch) {
             return {
@@ -1567,7 +1572,12 @@ export default function DailyReport() {
             };
           }
           return entry;
-        });
+        }).filter(entry => entry.status !== 'deleted');
+
+        if (newEntries.length === 0) {
+          return [createInitialEmptyDailyReportEntry(employeeId, selectedDate, baseId, 0)];
+        }
+        return newEntries;
       });
 
       // Update cache immediately to reflect these changes
@@ -1594,6 +1604,33 @@ export default function DailyReport() {
         };
       });
 
+      // [T-052-Fix] Also proactively update allDailyEntries so that even if fetchAllData is slow or stale, 
+      // the upcoming render cycle doesn't regress before the cache kicks in.
+      setAllDailyEntries(currentAll => {
+        const newAll = [...currentAll];
+        entriesToSave.forEach(saved => {
+          const index = newAll.findIndex(e => e.id === saved.id);
+          if (index !== -1) {
+            newAll[index] = {
+              ...saved,
+              status: 'pending' as const,
+              isExistingData: true,
+              timestamp: timestampNow,
+              oldProgress: saved.progress.includes('%') ? saved.progress : `${saved.progress}%`
+            };
+          } else {
+            newAll.push({
+              ...saved,
+              status: 'pending' as const,
+              isExistingData: true,
+              timestamp: timestampNow,
+              oldProgress: saved.progress.includes('%') ? saved.progress : `${saved.progress}%`
+            });
+          }
+        });
+        return newAll;
+      });
+
       // ------------------------------------------------
 
       setSuccessMessage('บันทึกข้อมูล Daily Report สำเร็จ!');
@@ -1603,8 +1640,9 @@ export default function DailyReport() {
       setDeletedEntries([]); // Clear deleted entries after success
 
       // [T-052] Fix Auto-Refresh: Reload all data to ensure Calendar/Sign updates
-      // Optimistic updates are good, but full refresh guarantees consistency for "dots" in Calendar.
-      setTempDataCache({});
+      // We DO NOT clear tempDataCache here anymore, because it holds our optimistic update.
+      // fetchAllData will run in the background. If it fetches stale data, the cache will protect the UI.
+      // Once the user changes date or re-enters, they'll get fresh data anyway.
       await fetchAllData(employeeId);
 
       // [T-053] Invalidate Project Tasks Cache

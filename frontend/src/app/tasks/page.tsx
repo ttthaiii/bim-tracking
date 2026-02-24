@@ -303,11 +303,71 @@ export default function TaskAssignment() {
 
             if (subtasks.length === 0) {
               console.log("ℹ️ No assigned tasks found for user.");
-            }
+              setExistingSubtasks(subtasks as ExistingSubtask[]);
+            } else {
+              // Fetch parent tasks to get Activity (taskCategory) and DueDate
+              const uniqueTaskIds = Array.from(new Set(subtasks.map(s => s.taskId).filter(id => id && id.trim() !== '')));
+              const fetchedTasks: TaskItem[] = [];
 
-            // We still need to map to ExistingSubtask format fully if needed
-            // But the service returns "flat" objects.
-            setExistingSubtasks(subtasks as ExistingSubtask[]);
+              if (uniqueTaskIds.length > 0) {
+                const tasksCol = collection(db, 'tasks');
+                const chunks = [];
+                for (let i = 0; i < uniqueTaskIds.length; i += 10) {
+                  chunks.push(uniqueTaskIds.slice(i, i + 10));
+                }
+
+                for (const chunk of chunks) {
+                  // Use documentId() which is '__name__'
+                  // Fix: Firestore 'in' query must not exceed 10. `chunks` does this safely.
+                  const { documentId } = await import('firebase/firestore');
+                  const chunkQuery = query(tasksCol, where(documentId(), 'in', chunk));
+                  const snap = await getDocs(chunkQuery);
+
+                  snap.docs.forEach(doc => {
+                    const data = doc.data();
+                    const rawTaskStatus = data.taskStatus;
+                    const rawStatus = data.status;
+                    const taskStatus = (rawTaskStatus || '').toString().trim().toUpperCase();
+                    const status = (rawStatus || '').toString().trim().toUpperCase();
+
+                    if (taskStatus !== 'DELETED' && status !== 'DELETED') {
+                      fetchedTasks.push({
+                        id: doc.id,
+                        taskName: data.taskName || '',
+                        taskCategory: data.taskCategory || '',
+                        taskStatus: data.taskStatus,
+                        status: data.status,
+                        dueDate: data.dueDate || null
+                      });
+                    }
+                  });
+                }
+              }
+
+              setTasks(fetchedTasks);
+
+              // Calculate deadline status exactly like project branch
+              const subtasksWithDeadline = subtasks.map(subtask => {
+                const task = fetchedTasks.find(t => t.id === subtask.taskId);
+                if (!task || !task.dueDate) {
+                  return {
+                    ...subtask,
+                    deadlineStatus: { text: '-', bgColor: '', isOverdue: false }
+                  };
+                }
+
+                return {
+                  ...subtask,
+                  deadlineStatus: calculateDeadlineStatus(
+                    subtask.subTaskProgress,
+                    task.dueDate,
+                    subtask.endDate
+                  )
+                };
+              });
+
+              setExistingSubtasks(subtasksWithDeadline as ExistingSubtask[]);
+            }
 
             // T-005-EX-1: Set Empty Row (Hide New Input) for All Assign mode
             setRows([]);
