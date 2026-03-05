@@ -24,6 +24,7 @@ import SaveConfirmationModal from "@/components/modals/SaveConfirmationModal";
 import SuccessModal from "@/components/modals/SuccessModal";
 import ErrorModal from '@/components/modals/ErrorModal';
 import AddRevisionModal from "@/components/modals/AddRevisionModal";
+import RejectTaskModal from "@/components/modals/RejectTaskModal";
 import DeleteConfirmModal from "@/components/modals/DeleteConfirmModal";
 import ExportModal from "@/components/modals/ExportModal";
 import { exportGanttChart } from "@/utils/exportGanttChart";
@@ -166,6 +167,7 @@ const translateStatus = (status: string, isWorkRequest: boolean = false): string
       'IN_PROGRESS': 'กำลังดำเนินการ',
       'PENDING_ACCEPTANCE': 'รอตรวจรับ',
       'REVISION_REQUESTED': '⚠️ ขอแก้ไข (ต้องสร้าง Rev.)',
+      'REJECTED_BY_BIM': '❌ ปฏิเสธงาน',
       'COMPLETED': 'เสร็จสิ้น'
     };
     return workRequestStatusMap[status] || status;
@@ -204,6 +206,8 @@ const ProjectsPage = () => {
   } = useCache();
 
   // Local state for UI
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<{ idx: number; row: TaskRow } | null>(null);
   const [loading, setLoading] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(false); // Add tasks loading state
   const [selectedProject, setSelectedProject] = useState<string>("all");
@@ -1220,6 +1224,57 @@ const ProjectsPage = () => {
     setTimeout(() => setHighlightedRow(null), 2000);
   };
 
+  const handleOpenRejectModal = (idx: number) => {
+    if (!requireProjectSelection()) return;
+    setRejectTarget({ idx, row: rows[idx] });
+    setShowRejectModal(true);
+  };
+
+  const handleConfirmReject = async (reason: string) => {
+    if (!rejectTarget || !rejectTarget.row.firestoreId) return;
+
+    try {
+      setLoading(true);
+      const row = rejectTarget.row;
+
+      const editorName = appUser?.fullName || appUser?.username || appUser?.employeeId || 'unknown';
+      const historyEntry = {
+        timestamp: Timestamp.now(),
+        fields: [{ field: 'currentStep', label: 'Status', before: translateStatus(row.statusDwg, true), after: translateStatus('REJECTED_BY_BIM', true) }],
+        note: `ปฏิเสธรับงาน: ${reason}`,
+        taskId: row.firestoreId,
+        taskNumber: row.id,
+        user: editorName,
+      };
+
+      await updateTask(
+        row.firestoreId as string,
+        {
+          currentStep: 'REJECTED_BY_BIM',
+          rejectReason: reason,
+        } as any,
+        historyEntry as any
+      );
+
+      if (selectedProject !== 'all') {
+        await refreshTasks(selectedProject, true);
+      } else {
+        await Promise.all(projects.map(p => refreshTasks(p.id, true)));
+      }
+
+      setSuccessMessage('ปฏิเสธการรับงานเรียบร้อยแล้ว');
+      setShowSuccessModal(true);
+    } catch (error) {
+      console.error('Error rejecting task:', error);
+      setErrorMessage('เกิดข้อผิดพลาดในการปฏิเสธรับงาน');
+      setShowErrorModal(true);
+    } finally {
+      setLoading(false);
+      setShowRejectModal(false);
+      setRejectTarget(null);
+    }
+  };
+
   const handleRestoreComplete = async () => {
     try {
       if (selectedProject !== "all") {
@@ -1265,6 +1320,7 @@ const ProjectsPage = () => {
           </button>
           <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onSubmit={handleCreateProject} onViewProjects={() => { setIsCreateModalOpen(false); setIsProjectListOpen(true); }} />
           <ProjectListModal isOpen={isProjectListOpen} onClose={() => setIsProjectListOpen(false)} projects={projects} onUpdateLeader={handleUpdateLeader} />
+          <RejectTaskModal isOpen={showRejectModal} onClose={() => { setShowRejectModal(false); setRejectTarget(null); }} onConfirm={handleConfirmReject} taskName={rejectTarget?.row.relateDrawing || ''} />
           <select value={selectedProject} onChange={e => setSelectedProject(e.target.value)} disabled={loading} style={{ padding: "8px 12px", width: "200px", border: "1px solid #e5e7eb", borderRadius: "6px", fontSize: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.05)", backgroundColor: loading ? "#f3f4f6" : "#fff", color: "#374151", cursor: loading ? "not-allowed" : "pointer" }}>
             <option value="all">ทุกโครงการ</option>
             {projects.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
@@ -1598,6 +1654,15 @@ const ProjectsPage = () => {
                                   >
                                     ✎
                                   </button>
+                                  {row.statusDwg === 'PENDING_BIM' && row.activity === 'Work Request' && (
+                                    <button
+                                      onClick={() => handleOpenRejectModal(idx)}
+                                      style={{ width: "28px", height: "28px", borderRadius: "6px", background: "#fee2e2", border: "1px solid #fecaca", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "14px" }}
+                                      title="ปฏิเสธรับงาน"
+                                    >
+                                      ❌
+                                    </button>
+                                  )}
                                   {isEditing && (
                                     <button
                                       onClick={() => handleSaveEditRow(idx)}

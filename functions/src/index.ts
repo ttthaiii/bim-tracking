@@ -1,9 +1,10 @@
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
+import { getAdminDb, getBimTrackingDb } from "./lib/firebase/admin";
 
 // ✅ 1. เพิ่ม import 'onCall' และ 'CallableRequest'
-import { onCall, CallableRequest, onRequest } from "firebase-functions/v2/https";
+import { onCall, CallableRequest } from "firebase-functions/v2/https";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -342,3 +343,75 @@ export const recalcSubtaskProgress = onRequest(
   }
 );
 */
+
+export const onBimTrackingTaskUpdate = onDocumentWritten(
+  {
+    document: "tasks/{taskId}",
+    region: "asia-southeast1",
+    secrets: ["TTSDOC_PRIVATE_KEY", "BIM_TRACKING_PRIVATE_KEY", "TTSDOC_PROJECT_ID", "TTSDOC_CLIENT_EMAIL"]
+  },
+  async (event) => {
+    const taskId = event.params.taskId;
+    const dataAfter = event.data?.after.data();
+    const dataBefore = event.data?.before.data();
+
+    if (!dataAfter || !dataBefore) {
+      logger.log(`[Sync Back/${taskId}] No data to process.`);
+      return null;
+    }
+
+    const isWorkRequest = dataAfter.taskCategory === 'Work Request';
+
+    // Condition 1: Accepted (planStartDate added)
+    const isWorkAccepted = !dataBefore.planStartDate && dataAfter.planStartDate;
+    // Condition 2: Rejected (currentStep changed to REJECTED_BY_BIM)
+    const isWorkRejected = dataBefore.currentStep !== 'REJECTED_BY_BIM' && dataAfter.currentStep === 'REJECTED_BY_BIM';
+
+    if (!isWorkRequest || (!isWorkAccepted && !isWorkRejected)) {
+      logger.log(`[Sync Back/${taskId}] No action needed.`);
+      return null;
+    }
+
+    logger.log(`[Sync Back/${taskId}] Work Request update detected. Syncing status back to ttsdoc...`);
+
+    try {
+      const link = dataAfter.link as string;
+      if (!link || !link.includes('/dashboard/work-request?docId=')) {
+        throw new Error("Task link is invalid or does not belong to a Work Request.");
+      }
+
+      const wrDocId = link.split('docId=')[1];
+      if (!wrDocId) {
+        throw new Error(`Could not extract Work Request ID from link: ${link}`);
+      }
+
+      const ttsdocDb = getAdminDb();
+      const wrRef = ttsdocDb.collection("workRequests").doc(wrDocId);
+
+      if (isWorkRejected) {
+        await wrRef.update({
+          status: 'REJECTED_BY_BIM',
+          rejectReason: dataAfter.rejectReason || 'No reason provided',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        logger.log(`✅ [Sync Back/${taskId}] Successfully updated Work Request ${wrDocId} to REJECTED_BY_BIM.`);
+      } else if (isWorkAccepted) {
+        await wrRef.update({
+          status: 'IN_PROGRESS',
+          planStartDate: dataAfter.planStartDate,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        logger.log(`✅ [Sync Back/${taskId}] Successfully updated Work Request ${wrDocId} to IN_PROGRESS.`);
+      }
+
+    } catch (error) {
+      logger.error(`[Sync Back/${taskId}] Failed to sync status back to ttsdoc:`, error);
+      const bimTrackingDb = getBimTrackingDb();
+      await bimTrackingDb.collection("tasks").doc(taskId).update({
+        syncBackError: (error as Error).message
+      });
+    }
+
+    return null;
+  }
+);
