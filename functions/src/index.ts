@@ -392,6 +392,16 @@ export const onBimTrackingTaskUpdate = onDocumentWritten(
         await wrRef.update({
           status: 'REJECTED_BY_BIM',
           rejectReason: dataAfter.rejectReason || 'No reason provided',
+          workflow: admin.firestore.FieldValue.arrayUnion({
+            action: 'REJECT_DRAFT',
+            status: 'REJECTED_BY_BIM',
+            userId: '', // BIM Tracking might not store user ID at task level directly
+            userName: 'BIM User', // Fallback name
+            role: 'BIM',
+            timestamp: new Date().toISOString(),
+            comments: dataAfter.rejectReason || 'No reason provided',
+            files: []
+          }),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         logger.log(`✅ [Sync Back/${taskId}] Successfully updated Work Request ${wrDocId} to REJECTED_BY_BIM.`);
@@ -399,6 +409,16 @@ export const onBimTrackingTaskUpdate = onDocumentWritten(
         await wrRef.update({
           status: 'IN_PROGRESS',
           planStartDate: dataAfter.planStartDate,
+          workflow: admin.firestore.FieldValue.arrayUnion({
+            action: 'IN_PROGRESS',
+            status: 'IN_PROGRESS',
+            userId: '',
+            userName: 'BIM User',
+            role: 'BIM',
+            timestamp: new Date().toISOString(),
+            comments: 'BIM รับงานและกำหนดวันที่เริ่มดำเนินการ',
+            files: []
+          }),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         logger.log(`✅ [Sync Back/${taskId}] Successfully updated Work Request ${wrDocId} to IN_PROGRESS.`);

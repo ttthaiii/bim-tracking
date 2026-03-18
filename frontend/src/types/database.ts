@@ -31,6 +31,8 @@ export interface Task {
   dueDate?: Timestamp;
   assignedTo?: string[];
   currentStep?: string;
+  supersededStatus?: string;
+  supersededComment?: string;
   lastRev?: string;
   documentNumber?: string;
   rev?: string;

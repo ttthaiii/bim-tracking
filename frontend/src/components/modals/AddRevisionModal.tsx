@@ -6,6 +6,8 @@ interface Task {
   taskCategory: string;
   currentStep: string;
   rev: string;
+  supersededStatus?: string;
+  supersededComment?: string;
 }
 
 interface AddRevisionModalProps {
@@ -32,7 +34,9 @@ const needsRevision = tasks.filter(t => {
     }
   } else {
     // เอกสาร RFA: ต้องเป็นสถานะ APPROVED_REVISION_REQUIRED หรือ REJECTED
-    if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED') {
+    // หรือมีการส่งสัญญาณ Fast track ขอสร้าง Rev. ใหม่ด้วย supersededStatus
+    const isFastTrack = t.supersededStatus === 'ACTIVE' || t.supersededStatus === 'SUSPENDED';
+    if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED' && !isFastTrack) {
       return false;
     }
   }
@@ -161,29 +165,43 @@ const needsRevision = tasks.filter(t => {
                       </div>
                     </div>
                     <div>
-                      <span style={{
-                        display: 'inline-block',
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        background: task.currentStep === 'REJECTED' 
-                          ? '#fee2e2' 
-                          : task.currentStep === 'REVISION_REQUESTED' 
-                          ? '#fef9c3' 
-                          : '#fef3c7',
-                        color: task.currentStep === 'REJECTED' 
-                          ? '#991b1b' 
-                          : task.currentStep === 'REVISION_REQUESTED' 
-                          ? '#92400e' 
-                          : '#92400e',
-                        fontSize: '10px',
-                        fontWeight: 500
-                      }}>
-                        {task.currentStep === 'REJECTED' 
-                          ? 'ไม่อนุมัติ' 
-                          : task.currentStep === 'REVISION_REQUESTED' 
-                          ? 'ขอแก้ไข' 
-                          : 'ต้องแก้ไข'}
-                      </span>
+                      {task.supersededStatus ? (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: task.supersededStatus === 'SUSPENDED' ? '#fee2e2' : '#fef9c3',
+                          color: task.supersededStatus === 'SUSPENDED' ? '#991b1b' : '#92400e',
+                          fontSize: '10px',
+                          fontWeight: 500
+                        }}>
+                          {task.supersededStatus === 'SUSPENDED' ? '⛔ ระงับการใช้งาน' : '⚠️ ขอแก้ไข'}
+                        </span>
+                      ) : (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          background: task.currentStep === 'REJECTED' 
+                            ? '#fee2e2' 
+                            : task.currentStep === 'REVISION_REQUESTED' 
+                            ? '#fef9c3' 
+                            : '#fef3c7',
+                          color: task.currentStep === 'REJECTED' 
+                            ? '#991b1b' 
+                            : task.currentStep === 'REVISION_REQUESTED' 
+                            ? '#92400e' 
+                            : '#92400e',
+                          fontSize: '10px',
+                          fontWeight: 500
+                        }}>
+                          {task.currentStep === 'REJECTED' 
+                            ? 'ไม่อนุมัติ' 
+                            : task.currentStep === 'REVISION_REQUESTED' 
+                            ? 'ขอแก้ไข' 
+                            : 'ต้องแก้ไข'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </button>

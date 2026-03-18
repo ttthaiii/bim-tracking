@@ -50,6 +50,8 @@ interface TaskRow {
   progress?: number;
   subtaskCount?: number; // [T-004-E2]
   correct: boolean;
+  supersededStatus?: string;
+  supersededComment?: string;
 }
 
 type EditChange = {
@@ -83,6 +85,8 @@ const initialRows: TaskRow[] = [
     progress: 0,
     subtaskCount: 0,
     correct: false,
+    supersededStatus: "",
+    supersededComment: "",
   },
 ];
 
@@ -144,6 +148,8 @@ const convertTaskToRow = (task: Task & { id: string }): TaskRow => {
     progress: taskData.progress || 0,
     subtaskCount: taskData.subtaskCount || 0, // [T-004-E2]
     correct: false,
+    supersededStatus: taskData.supersededStatus || "",
+    supersededComment: taskData.supersededComment || "",
   };
 };
 
@@ -588,7 +594,9 @@ const ProjectsPage = () => {
         }
       } else {
         // เอกสาร RFA: ต้องเป็นสถานะ APPROVED_REVISION_REQUIRED หรือ REJECTED
-        if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED') {
+        // หรือมีการส่งสัญญาณ Fast track ขอสร้าง Rev. ใหม่ด้วย supersededStatus
+        const isFastTrack = t.supersededStatus === 'ACTIVE' || t.supersededStatus === 'SUSPENDED';
+        if (t.currentStep !== 'APPROVED_REVISION_REQUIRED' && t.currentStep !== 'REJECTED' && !isFastTrack) {
           return false;
         }
       }
@@ -1219,8 +1227,22 @@ const ProjectsPage = () => {
     const docNo = originalRow?.docNo || "";
     const newRow = { id: "", relateDrawing: `${task.taskName} REV.${nextRev}`, activity: task.taskCategory, startDate: "", dueDate: "", statusDwg: "", lastRev: nextRev, docNo: docNo, link: "", progress: 0, correct: false };
     const nonEmptyRows = rows.filter(r => r.relateDrawing || r.activity);
-    setRows([...nonEmptyRows, newRow, initialRows[0]]);
-    setHighlightedRow(nonEmptyRows.length);
+    
+    // แทรกแถวใหม่ต่อจากแถวมีข้อมูล
+    const newRows = [...nonEmptyRows, newRow, initialRows[0]];
+    setRows(newRows);
+    
+    const newRowIdx = nonEmptyRows.length; // index ของแถวใหม่ (ก่อน initialRows[0])
+    
+    // ตั้งค่า note อัตโนมัติถ้ามี supersededComment
+    if (task.supersededComment) {
+      setEditNotes(prev => ({ ...prev, [newRowIdx]: task.supersededComment }));
+    }
+    
+    // เพิ่มเข้า editingMode ทันที
+    setEditingRows(prev => new Set(prev).add(newRowIdx));
+    
+    setHighlightedRow(newRowIdx);
     setTimeout(() => setHighlightedRow(null), 2000);
   };
 
@@ -1597,6 +1619,16 @@ const ProjectsPage = () => {
                           </td>
                           <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
                             {row.statusDwg ? translateStatus(row.statusDwg, isWorkRequest) : ""}
+                            {row.supersededStatus === 'ACTIVE' && (
+                              <div style={{ marginTop: '4px', fontSize: '9px', color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                <span>⚠️</span> กำลังขอแก้ไข
+                              </div>
+                            )}
+                            {row.supersededStatus === 'SUSPENDED' && (
+                              <div style={{ marginTop: '4px', fontSize: '9px', color: '#991b1b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                <span>⛔</span> ระงับการใช้งาน<br/>(รอ Rev. ใหม่)
+                              </div>
+                            )}
                           </td>
                           <td style={{ padding: "4px 6px", fontSize: 10, textAlign: "center" }}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1809,7 +1841,7 @@ const ProjectsPage = () => {
       <style>{` @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.1); } } `}</style>
       <SaveConfirmationModal isOpen={showSaveModal} data={saveModalData} onConfirm={confirmSave} onCancel={() => !isSaving && setShowSaveModal(false)} isLoading={isSaving} />
       <SuccessModal isOpen={showSuccessModal} message={successMessage} onClose={() => setShowSuccessModal(false)} />
-      <AddRevisionModal isOpen={showAddRevModal} tasks={rows.filter(r => r.firestoreId).map(r => ({ id: r.id, taskName: r.relateDrawing, taskCategory: r.activity, currentStep: r.statusDwg, rev: r.lastRev }))} onSelect={handleSelectTaskForRevision} onClose={() => setShowAddRevModal(false)} />
+      <AddRevisionModal isOpen={showAddRevModal} tasks={rows.filter(r => r.firestoreId).map(r => ({ id: r.id, taskName: r.relateDrawing, taskCategory: r.activity, currentStep: r.statusDwg, rev: r.lastRev, supersededStatus: r.supersededStatus, supersededComment: r.supersededComment }))} onSelect={handleSelectTaskForRevision} onClose={() => setShowAddRevModal(false)} />
       <DeleteConfirmModal isOpen={showDeleteModal} taskName={deleteTarget?.row.relateDrawing || ''} onConfirm={confirmDelete} onCancel={() => { setShowDeleteModal(false); setDeleteTarget(null); }} />
       <ExportModal isOpen={showExportModal} onClose={() => setShowExportModal(false)} onExport={handleExport} projects={projects} currentProjectId={selectedProject} />
       <ImportExcelModal isOpen={showImportModal} onClose={() => setShowImportModal(false)} projectName={projects.find(p => p.id === selectedProject)?.name || 'Project'} activities={activities.map(a => a.activityName)} onImport={(tasks) => { console.log('Imported tasks:', tasks); setShowImportModal(false); }} />
