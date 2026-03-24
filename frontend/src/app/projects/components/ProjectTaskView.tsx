@@ -1217,7 +1217,8 @@ const ProjectsPage = () => {
   };
 
   const handleSelectTaskForRevision = (task: any) => {
-    const relatedTasks = rows.filter(r => r.relateDrawing.startsWith(task.taskName.replace(/\sREV\.\d+$/, '')));
+    const baseName = task.taskName.replace(/\s+REV\.\d+$/i, '');
+    const relatedTasks = rows.filter(r => r.relateDrawing.startsWith(baseName));
     const maxRev = relatedTasks.reduce((max, r) => {
       const revMatch = r.lastRev?.match(/\d+/);
       return revMatch ? Math.max(max, parseInt(revMatch[0])) : max;
@@ -1225,7 +1226,7 @@ const ProjectsPage = () => {
     const nextRev = String(maxRev + 1).padStart(2, '0');
     const originalRow = rows.find(r => r.id === task.id);
     const docNo = originalRow?.docNo || "";
-    const newRow = { id: "", relateDrawing: `${task.taskName} REV.${nextRev}`, activity: task.taskCategory, startDate: "", dueDate: "", statusDwg: "", lastRev: nextRev, docNo: docNo, link: "", progress: 0, correct: false };
+    const newRow = { id: "", relateDrawing: `${baseName} REV.${nextRev}`, activity: task.taskCategory, startDate: "", dueDate: "", statusDwg: "", lastRev: nextRev, docNo: docNo, link: "", progress: 0, correct: false };
     const nonEmptyRows = rows.filter(r => r.relateDrawing || r.activity);
     
     // แทรกแถวใหม่ต่อจากแถวมีข้อมูล
@@ -1619,12 +1620,12 @@ const ProjectsPage = () => {
                           </td>
                           <td style={{ padding: "4px 6px", fontSize: 10, color: "#2563eb" }}>
                             {row.statusDwg ? translateStatus(row.statusDwg, isWorkRequest) : ""}
-                            {row.supersededStatus === 'ACTIVE' && (
+                            {row.supersededStatus === 'ACTIVE' && ['APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED'].includes(row.statusDwg) && (
                               <div style={{ marginTop: '4px', fontSize: '9px', color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
                                 <span>⚠️</span> กำลังขอแก้ไข
                               </div>
                             )}
-                            {row.supersededStatus === 'SUSPENDED' && (
+                            {row.supersededStatus === 'SUSPENDED' && ['APPROVED', 'APPROVED_WITH_COMMENTS', 'APPROVED_REVISION_REQUIRED'].includes(row.statusDwg) && (
                               <div style={{ marginTop: '4px', fontSize: '9px', color: '#991b1b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '2px' }}>
                                 <span>⛔</span> ระงับการใช้งาน<br/>(รอ Rev. ใหม่)
                               </div>
