@@ -16,6 +16,7 @@ import SuccessModal from '@/components/ui/SuccessModal';
 import ErrorModal from '@/components/modals/ErrorModal';
 import RelateWorkSelect from './components/RelateWorkSelect';
 import AssigneeSelect from './components/AssigneeSelect';
+import SearchableSelect from '@/components/ui/SearchableSelect';
 import { useCache } from '@/context/CacheContext';
 import { calculateDeadlineStatus } from '@/utils/deadlineCalculator';
 import { uploadTaskEditAttachment } from '@/services/uploadService';
@@ -30,6 +31,7 @@ interface TaskItem {
   taskStatus?: string; // ✅ ต้องมี field นี้
   status?: string; // ✅ Add status field for compatibility
   dueDate?: any;
+  currentStep?: string;
 }
 
 interface SubtaskRow {
@@ -337,7 +339,8 @@ export default function TaskAssignment() {
                         taskCategory: data.taskCategory || '',
                         taskStatus: data.taskStatus,
                         status: data.status,
-                        dueDate: data.dueDate || null
+                        dueDate: data.dueDate || null,
+                        currentStep: data.currentStep || null
                       });
                     }
                   });
@@ -417,7 +420,8 @@ export default function TaskAssignment() {
               taskCategory: data.taskCategory || '',
               taskStatus: data.taskStatus, // ✅ Populate field
               status: data.status,         // ✅ Populate field
-              dueDate: data.dueDate || null
+              dueDate: data.dueDate || null,
+              currentStep: data.currentStep || null
             };
           });
 
@@ -1604,13 +1608,24 @@ export default function TaskAssignment() {
                         />
                       </td>
                       <td className="px-2 py-2">
-                        <Select
+                        <SearchableSelect
                           options={tasks
                             .filter(t => {
                               const rawTaskStatus = t.taskStatus || '';
                               const rawStatus = t.status || '';
                               const isDeleted = rawTaskStatus.toString().trim().toUpperCase() === 'DELETED' || rawStatus.toString().trim().toUpperCase() === 'DELETED';
-                              return !isDeleted && (!row.activity || t.taskCategory === row.activity);
+                              
+                              const currentStep = (t.currentStep || '').toString().toUpperCase();
+                              const hideSteps = [
+                                'REJECTED',
+                                'PENDING_CM_APPROVAL',
+                                'APPROVED',
+                                'APPROVED_WITH_COMMENTS',
+                                'APPROVED_REVISION_REQUIRED'
+                              ];
+                              const isHiddenStep = hideSteps.includes(currentStep);
+
+                              return !isDeleted && !isHiddenStep && (!row.activity || t.taskCategory === row.activity);
                             })
                             .map(t => ({
                               value: t.id,
