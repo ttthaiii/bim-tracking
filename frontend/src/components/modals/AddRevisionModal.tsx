@@ -18,6 +18,14 @@ interface AddRevisionModalProps {
 }
 
 export default function AddRevisionModal({ isOpen, tasks, onSelect, onClose }: AddRevisionModalProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchTerm('');
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   // กรองเฉพาะเอกสารที่ต้องแก้ไข
@@ -57,6 +65,10 @@ const needsRevision = tasks.filter(t => {
   return !hasNextRev;
 });
 
+const filteredNeedsRevision = needsRevision.filter(task => 
+  task.taskName.toLowerCase().includes(searchTerm.toLowerCase())
+);
+
   return (
     <div style={{
       position: 'fixed',
@@ -94,10 +106,27 @@ const needsRevision = tasks.filter(t => {
           <p style={{
             fontSize: '13px',
             color: '#6b7280',
-            margin: '6px 0 0 0'
+            margin: '6px 0 12px 0'
           }}>
             {needsRevision.length} เอกสารที่ต้องแก้ไข
           </p>
+          <input
+            type="text"
+            placeholder="ค้นหาชื่อเอกสาร..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: '1px solid #d1d5db',
+              borderRadius: '6px',
+              fontSize: '13px',
+              outline: 'none',
+              boxSizing: 'border-box'
+            }}
+            onFocus={e => e.target.style.borderColor = '#3b82f6'}
+            onBlur={e => e.target.style.borderColor = '#d1d5db'}
+          />
         </div>
 
         <div style={{
@@ -105,19 +134,19 @@ const needsRevision = tasks.filter(t => {
           overflowY: 'auto',
           flex: 1
         }}>
-          {needsRevision.length === 0 ? (
+          {filteredNeedsRevision.length === 0 ? (
             <div style={{
               textAlign: 'center',
               padding: '40px 20px',
               color: '#9ca3af'
             }}>
               <p style={{ fontSize: '14px', margin: 0 }}>
-                ไม่มีเอกสารที่ต้องแก้ไข
+                {searchTerm ? 'ไม่พบเอกสารที่ค้นหา' : 'ไม่มีเอกสารที่ต้องแก้ไข'}
               </p>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {needsRevision.map((task) => (
+              {filteredNeedsRevision.map((task) => (
                 <button
                   key={task.id}
                   onClick={() => {
