@@ -67,4 +67,24 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Service-account keys / credentials — NEVER commit.
+# Put any downloaded key JSON inside keys/ ; the whole folder is ignored.
 keys/
+*-key.json
+serviceAccountKey.json
+*serviceaccount*.json
+*-firebase-adminsdk-*.json
+*.credentials.json
+
+# AI harness files (local-only, not part of the project)
+.agents/
+.sessions/
+docs/
+domain/
+knowledge/
+AGENTS.md
+CLAUDE.md
+CODING_FAILURE_PATTERNS.md
+INVARIANTS.md
+error_index.md
